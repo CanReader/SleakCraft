@@ -8,6 +8,7 @@
 #include <Lighting/DirectionalLight.hpp>
 #include <Lighting/LightManager.hpp>
 #include <Runtime/Material.hpp>
+#include <Runtime/Skybox.hpp>
 
 Game::Game() {
   bIsGameRunning = true;
@@ -43,6 +44,10 @@ bool Game::Initialize() {
     cube->SetTag("Cube");
     cube->AddComponent<Sleak::MaterialComponent>(cubeMaterial);
     mainScene->AddObject(cube);
+
+    // --- Create skybox (uses built-in default sky panorama) ---
+    auto* skybox = new Sleak::Skybox();
+    mainScene->SetSkybox(skybox);
 
     // --- Activate the scene ---
     SetActiveScene(mainScene);
