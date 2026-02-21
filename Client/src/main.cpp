@@ -4,10 +4,10 @@
 #include <string>
 #include <Logger.hpp>
 
-#define PROJECT_NAME "SleakEngine"
+#define PROJECT_NAME "SleakCraft"
 
 std::string HelpMessage =
-  "Usage: SleakEngine [OPTION...] \n\
+  "Usage: SleakCraft [OPTION...] \n\
   help : Shows this help message \n\
   -w :    Sets width of the window. \n\
   -h :    Sets height of the window \n\

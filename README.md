@@ -38,7 +38,8 @@ cmake --build --preset debug
 ### Run
 
 ```bash
-./bin/SleakEngine -w 1280 -h 720 -t SleakCraft
+cd bin
+./SleakCraft -w 1280 -h 720 -t SleakCraft
 ```
 
 | Flag | Description |
