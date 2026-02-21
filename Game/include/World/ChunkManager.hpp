@@ -2,6 +2,7 @@
 #define _CHUNK_MANAGER_HPP_
 
 #include "Chunk.hpp"
+#include <Math/Vector.hpp>
 #include <Memory/RefPtr.h>
 #include <unordered_map>
 #include <functional>
@@ -15,6 +16,20 @@ namespace Sleak {
 struct ChunkCoord {
     int x, y, z;
     bool operator==(const ChunkCoord& o) const { return x == o.x && y == o.y && z == o.z; }
+};
+
+struct VoxelCollisionResult {
+    Sleak::Math::Vector3D correction{0.0f, 0.0f, 0.0f};
+    bool onGround = false;
+    bool hitCeiling = false;
+    bool hitWall = false;
+};
+
+struct VoxelRaycastResult {
+    bool hit = false;
+    int blockX = 0, blockY = 0, blockZ = 0;
+    int placeX = 0, placeY = 0, placeZ = 0;
+    BlockType blockType = BlockType::Air;
 };
 
 struct ChunkCoordHash {
@@ -38,10 +53,20 @@ public:
     void SetRenderDistance(int chunks) { m_renderDistance = chunks; }
     int GetRenderDistance() const { return m_renderDistance; }
 
+    BlockType GetBlockAt(int worldX, int worldY, int worldZ) const;
+    bool SetBlockAt(int worldX, int worldY, int worldZ, BlockType type);
+    VoxelRaycastResult VoxelRaycast(const Sleak::Math::Vector3D& origin,
+                                     const Sleak::Math::Vector3D& direction,
+                                     float maxDist) const;
+    VoxelCollisionResult ResolveVoxelCollision(const Sleak::Math::Vector3D& eyePos,
+                                                float halfWidth, float height,
+                                                float eyeOffset) const;
+
 private:
     void GenerateFlatTerrain(Chunk* chunk);
     void LinkNeighbors(const ChunkCoord& coord, Chunk* chunk);
     Chunk* GetChunk(int cx, int cy, int cz);
+    const Chunk* GetChunk(int cx, int cy, int cz) const;
 
     std::unordered_map<ChunkCoord, Chunk*, ChunkCoordHash> m_chunks;
     Sleak::SceneBase* m_scene = nullptr;
