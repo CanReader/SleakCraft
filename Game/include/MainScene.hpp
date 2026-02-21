@@ -3,6 +3,7 @@
 
 #include <Core/Scene.hpp>
 #include <Memory/RefPtr.h>
+#include "World/ChunkManager.hpp"
 
 namespace Sleak { class Material; }
 
@@ -12,16 +13,17 @@ public:
     ~MainScene() override = default;
 
     bool Initialize() override;
+    void Update(float deltaTime) override;
 
 private:
-    void SetupMaterials();
-    void SetupLevel();
+    void SetupMaterial();
     void SetupSkybox();
     void SetupLighting();
 
-    Sleak::RefPtr<Sleak::Material> floorMaterial;
-    Sleak::RefPtr<Sleak::Material> wallMaterial;
-    Sleak::RefPtr<Sleak::Material> boxMaterial;
+    static constexpr float PLAYER_EYE_HEIGHT = 6.62f;
+
+    Sleak::RefPtr<Sleak::Material> m_blockMaterial;
+    ChunkManager m_chunkManager;
 };
 
 #endif

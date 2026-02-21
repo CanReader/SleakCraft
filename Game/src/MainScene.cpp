@@ -1,88 +1,79 @@
 #include "MainScene.hpp"
-#include "Core/GameObject.hpp"
-#include "ECS/Components/MeshComponent.hpp"
-#include "ECS/Components/TransformComponent.hpp"
-#include "ECS/Components/MaterialComponent.hpp"
-#include "Math/Vector.hpp"
+#include <Core/GameObject.hpp>
+#include <Math/Vector.hpp>
 #include <Lighting/DirectionalLight.hpp>
 #include <Lighting/LightManager.hpp>
 #include <Runtime/Material.hpp>
+#include <Runtime/Texture.hpp>
 #include <Runtime/Skybox.hpp>
+#include <Camera/Camera.hpp>
+#include <Physics/RigidbodyComponent.hpp>
+#include <ECS/Components/FirstPersonController.hpp>
 
 using namespace Sleak;
 using namespace Sleak::Math;
-
-static RefPtr<Material> CreateLevelMaterial(uint8_t r, uint8_t g, uint8_t b) {
-    auto* mat = new Material();
-    mat->SetShader("assets/shaders/default_shader.hlsl");
-    mat->SetDiffuseColor(r, g, b);
-    mat->SetSpecularColor((uint8_t)200, (uint8_t)200, (uint8_t)200);
-    mat->SetShininess(16.0f);
-    mat->SetMetallic(0.0f);
-    mat->SetRoughness(0.7f);
-    mat->SetAO(1.0f);
-    mat->SetOpacity(1.0f);
-    return RefPtr<Material>(mat);
-}
-
-static GameObject* CreateLevelCube(const Vector3D& position, const Vector3D& scale,
-                                    const RefPtr<Material>& material,
-                                    const std::string& name) {
-    auto* cube = GameObject::CreateCube(Vector3D(0, 0, 0));
-    cube->SetTag(name);
-
-    auto* transform = cube->GetComponent<TransformComponent>();
-    if (transform) {
-        transform->SetPosition(position);
-        transform->SetScale(scale);
-    }
-
-    auto* matComp = cube->GetComponent<MaterialComponent>();
-    if (matComp) {
-        matComp->SetMaterial(material);
-    }
-
-    return cube;
-}
 
 MainScene::MainScene(const std::string& name)
     : Scene(name) {}
 
 bool MainScene::Initialize() {
-    SetupMaterials();
-    SetupLevel();
+    SetupMaterial();
     SetupSkybox();
 
-    // Base class creates LightManager, PhysicsWorld, debug camera, inits all objects
     Scene::Initialize();
 
-    // Lighting needs LightManager from base init
+    auto* cam = GetDebugCamera();
+    if (cam) {
+        cam->SetPosition({8.0f, PLAYER_EYE_HEIGHT, 8.0f});
+        cam->SetFarPlane(1500.0f);
+        auto* fpc = cam->GetComponent<FirstPersonController>();
+        if (fpc) {
+            fpc->SetMaxWalkSpeed(4.3f);
+            fpc->SetMaxAcceleration(1000.0f);
+            fpc->SetBrakingDeceleration(1000.0f);
+            fpc->SetGroundFriction(1.0f);
+            fpc->SetJumpZVelocity(0.0f);
+        }
+        auto* rb = cam->GetComponent<RigidbodyComponent>();
+        if (rb) rb->SetUseGravity(false);
+    }
+
     SetupLighting();
+
+    m_chunkManager.Initialize(this, m_blockMaterial);
+    m_chunkManager.SetRenderDistance(8);
+    m_chunkManager.Update(8.0f, 8.0f);
 
     return true;
 }
 
-void MainScene::SetupMaterials() {
-    floorMaterial = CreateLevelMaterial(180, 180, 180);  // Light gray
-    wallMaterial  = CreateLevelMaterial(140, 150, 160);  // Blue-gray
-    boxMaterial   = CreateLevelMaterial(200, 160, 100);  // Warm tan
+void MainScene::Update(float deltaTime) {
+    Scene::Update(deltaTime);
+
+    auto* cam = GetDebugCamera();
+    if (cam) {
+        auto pos = cam->GetPosition();
+        if (pos.GetY() != PLAYER_EYE_HEIGHT) {
+            cam->SetPosition({pos.GetX(), PLAYER_EYE_HEIGHT, pos.GetZ()});
+        }
+        m_chunkManager.Update(pos.GetX(), pos.GetZ());
+    }
 }
 
-void MainScene::SetupLevel() {
-    // Floor: 20x20 platform
-    AddObject(CreateLevelCube({0, -0.5f, 0}, {20, 1, 20}, floorMaterial, "Floor"));
-
-    // Walls
-    AddObject(CreateLevelCube({0, 1, 10.5f}, {20, 3, 1}, wallMaterial, "WallNorth"));
-    AddObject(CreateLevelCube({0, 1, -10.5f}, {20, 3, 1}, wallMaterial, "WallSouth"));
-    AddObject(CreateLevelCube({10.5f, 1, 0}, {1, 3, 20}, wallMaterial, "WallEast"));
-    AddObject(CreateLevelCube({-10.5f, 1, 0}, {1, 3, 20}, wallMaterial, "WallWest"));
-
-    // Obstacle boxes
-    AddObject(CreateLevelCube({3, 0.5f, 3}, {1, 1, 1}, boxMaterial, "Box1"));
-    AddObject(CreateLevelCube({-4, 0.5f, -2}, {1.5f, 1, 1.5f}, boxMaterial, "Box2"));
-    AddObject(CreateLevelCube({6, 0.5f, -5}, {2, 1, 1}, boxMaterial, "Box3"));
-    AddObject(CreateLevelCube({-2, 1.0f, 5}, {1, 2, 1}, boxMaterial, "Box4"));
+void MainScene::SetupMaterial() {
+    auto* mat = new Material();
+    mat->SetShader("assets/shaders/flat_shader.hlsl");
+    mat->SetDiffuseTexture("assets/textures/block_atlas.png");
+    mat->GetDiffuseTexture()->SetFilter(TextureFilter::Nearest);
+    mat->GetDiffuseTexture()->SetWrapMode(TextureWrapMode::ClampToEdge);
+    mat->SetDiffuseColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
+    mat->SetSpecularColor((uint8_t)0, (uint8_t)0, (uint8_t)0);
+    mat->SetShininess(0.0f);
+    mat->SetMetallic(0.0f);
+    mat->SetRoughness(0.0f);
+    mat->SetAO(1.0f);
+    mat->SetOpacity(1.0f);
+    m_blockMaterial = RefPtr<Material>(mat);
 }
 
 void MainScene::SetupSkybox() {
@@ -92,22 +83,22 @@ void MainScene::SetupSkybox() {
 
 void MainScene::SetupLighting() {
     auto* sun = new DirectionalLight("Sun");
-    sun->SetDirection(Vector3D(-0.4f, -0.8f, -0.4f));
+    sun->SetDirection(Vector3D(-0.3f, -0.8f, -0.5f));
     sun->SetColor(1.0f, 0.98f, 0.92f);
-    sun->SetIntensity(1.8f);
+    sun->SetIntensity(0.8f);
     sun->SetCastShadows(true);
     sun->SetShadowBias(0.003f);
     sun->SetShadowNormalBias(0.04f);
     sun->SetLightSize(1.5f);
-    sun->SetShadowFrustumSize(20.0f);
-    sun->SetShadowDistance(30.0f);
+    sun->SetShadowFrustumSize(60.0f);
+    sun->SetShadowDistance(100.0f);
     sun->SetShadowNearPlane(0.1f);
-    sun->SetShadowFarPlane(70.0f);
+    sun->SetShadowFarPlane(150.0f);
     AddObject(sun);
 
     auto* lm = GetLightManager();
     if (lm) {
         lm->SetAmbientColor(0.6f, 0.65f, 0.75f);
-        lm->SetAmbientIntensity(0.25f);
+        lm->SetAmbientIntensity(0.3f);
     }
 }

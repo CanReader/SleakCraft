@@ -1,158 +1,69 @@
-<p align="center">
-  <img src="https://github.com/CanReader/SleakEngine/blob/main/logo.png" alt="SleakEngine" width="200">
-</p>
+# SleakCraft
 
-<h1 align="center">SleakEngine Empty Template</h1>
+A voxel-based sandbox game built with [SleakEngine](https://github.com/CanReader/SleakEngine), featuring chunk-based terrain generation and block rendering with a texture atlas system.
 
-<p align="center">
-  <strong>Starter template for building games with SleakEngine</strong>
-  <br />
-  Clone, build, and start writing game logic immediately.
-</p>
+![In-Game Screenshot](screenshots/SleakCraft1.jpg)
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="License"></a>
-  <a href="https://github.com/CanReader/SleakEngine"><img src="https://img.shields.io/badge/C%2B%2B-23-00599C?style=for-the-badge&logo=cplusplus&logoColor=white" alt="C++23"></a>
-</p>
+## Features
 
----
+- **Chunk-based world** — 16x16x16 chunks loaded/unloaded dynamically around the player
+- **Block system** — Multiple block types (Grass, Dirt, Stone) with per-face texturing
+- **Texture atlas** — Efficient single-texture rendering with tile-based UV mapping
+- **Face culling** — Only visible faces between air and solid blocks are meshed
+- **Dynamic render distance** — Configurable chunk loading radius
+- **First-person camera** — Fly-mode exploration with configurable movement
+- **Skybox** — Atmospheric sky rendering
 
-## What is this?
+## Tech Stack
 
-This is a **game project template** for [SleakEngine](https://github.com/CanReader/SleakEngine). It includes:
+- **Engine:** [SleakEngine](https://github.com/CanReader/SleakEngine) (Vulkan-based)
+- **Language:** C++23
+- **Build System:** CMake 3.31+
+- **Shading:** Custom flat shader (GLSL / SPIR-V)
 
-- `Game/` &mdash; Example game logic (scenes, objects, components)
-- `Client/` &mdash; Thin executable entry point
-- `Engine/` &mdash; SleakEngine core, pulled in as a **git submodule**
-- `scripts/` &mdash; Build helper scripts
-- `docs/` &mdash; Scene system guide and documentation
-
-The Engine is included as a git submodule. Use `git submodule update --remote` to fetch the latest version.
-
-## Prerequisites
-
-| Requirement | Minimum |
-|---|---|
-| **CMake** | 3.31+ |
-| **C++ Compiler** | C++23 (MSVC, GCC, or Clang) |
-
-All engine dependencies are vendored &mdash; no package manager needed.
-
-## Quick Start
-
-### Clone
+## Building
 
 ```bash
-git clone --recurse-submodules https://github.com/CanReader/SleakEngine-Empty.git
-cd SleakEngine-Empty
-git submodule update --remote
-```
-
-> **Already cloned without `--recurse-submodules`?** Fetch the Engine submodule:
-> ```bash
-> git submodule update --init --recursive --remote
-> ```
-
-### Build
-
-```bash
+git clone --recursive https://github.com/CanReader/SleakCraft.git
+cd SleakCraft
 cmake --preset debug
 cmake --build --preset debug
 ```
 
-For an optimized build:
-
-```bash
-cmake --preset release
-cmake --build --preset release
-```
-
-Output goes to `bin/` with all assets and runtime libraries in place.
+> **Already cloned without `--recursive`?**
+> ```bash
+> git submodule update --init --recursive --remote
+> ```
 
 ### Run
 
 ```bash
-./bin/SleakEngine -w 1280 -h 720 -t My_Game
+./bin/SleakEngine -w 1280 -h 720 -t SleakCraft
 ```
 
 | Flag | Description |
-|---|---|
+|------|-------------|
 | `-w` | Window width |
 | `-h` | Window height |
-| `-t` | Window title (use `_` for spaces) |
+| `-t` | Window title |
 
 ## Project Structure
 
 ```
-SleakEngine-Empty/
-├── CMakePresets.json      Build presets (debug / release)
-├── Engine/                SleakEngine core (git submodule)
-│   ├── include/           Public & private headers
-│   ├── src/               Implementation
-│   ├── assets/shaders/    Default shaders
-│   └── vendors/           All third-party dependencies
+SleakCraft/
+├── Engine/                  # SleakEngine submodule (Vulkan renderer, ECS, physics)
 ├── Game/
-│   ├── include/           Game headers
-│   ├── src/               Game implementation
-│   └── assets/            Textures, models, etc.
-├── Client/
-│   └── src/               main.cpp
-├── scripts/               Build helper scripts
-└── docs/                  Documentation
-```
-
-## Building Your Game
-
-Edit `Game/src/Game.cpp` to implement your game logic:
-
-```cpp
-#include "Game.hpp"
-
-void Game::Initialize() {
-    auto* scene = CreateScene("MainScene");
-
-    auto* player = scene->CreateObject("Player");
-    player->AddComponent<Transform>();
-    player->AddComponent<Mesh>();
-    player->AddComponent<Material>();
-
-    auto* camera = scene->CreateObject("Camera");
-    camera->AddComponent<Transform>();
-    camera->AddComponent<Camera>();
-
-    SetActiveScene(scene);
-}
-
-void Game::Begin() {
-    // Runs once after initialization
-}
-
-void Game::Loop(float DeltaTime) {
-    // Runs every frame
-}
-```
-
-See the **[Scene System Guide](docs/SCENE_SYSTEM_GUIDE.md)** for the complete API reference.
-
-## Updating the Engine
-
-To pull the latest Engine version:
-
-```bash
-cd Engine
-git fetch origin
-git checkout <desired-tag-or-commit>
-cd ..
-git add Engine
-git commit -m "Update Engine to <version>"
-```
-
-Or to track the latest on the Engine's main branch:
-
-```bash
-git submodule update --remote Engine
-git add Engine
-git commit -m "Update Engine to latest"
+│   ├── assets/
+│   │   ├── shaders/         # Flat shader (vert/frag + SPIR-V)
+│   │   └── textures/        # Block texture atlas
+│   ├── include/
+│   │   ├── World/           # Block, Chunk, ChunkManager, TextureAtlas
+│   │   └── MainScene.hpp
+│   └── src/
+│       ├── World/           # Chunk meshing and world management
+│       └── MainScene.cpp
+├── Client/                  # Application entry point
+└── CMakeLists.txt
 ```
 
 ## License

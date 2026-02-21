@@ -1,0 +1,169 @@
+#include "World/Chunk.hpp"
+#include "World/TextureAtlas.hpp"
+#include <Core/GameObject.hpp>
+#include <Core/SceneBase.hpp>
+#include <ECS/Components/TransformComponent.hpp>
+#include <ECS/Components/MeshComponent.hpp>
+#include <ECS/Components/MaterialComponent.hpp>
+#include <Math/Vector.hpp>
+#include <Runtime/Material.hpp>
+
+using namespace Sleak;
+using namespace Sleak::Math;
+
+Chunk::Chunk(int cx, int cy, int cz) : m_cx(cx), m_cy(cy), m_cz(cz) {
+    memset(m_blocks, static_cast<uint8_t>(BlockType::Air), VOLUME);
+}
+
+Chunk::~Chunk() {
+    if (m_gameObject && !m_addedToScene)
+        delete m_gameObject;
+}
+
+void Chunk::SetBlock(int x, int y, int z, BlockType type) {
+    if (x < 0 || x >= SIZE || y < 0 || y >= SIZE || z < 0 || z >= SIZE) return;
+    m_blocks[BlockIndex(x, y, z)] = static_cast<uint8_t>(type);
+}
+
+BlockType Chunk::GetBlock(int x, int y, int z) const {
+    if (x < 0 || x >= SIZE || y < 0 || y >= SIZE || z < 0 || z >= SIZE)
+        return BlockType::Air;
+    return static_cast<BlockType>(m_blocks[BlockIndex(x, y, z)]);
+}
+
+void Chunk::SetNeighbor(BlockFace face, Chunk* chunk) {
+    m_neighbors[static_cast<uint8_t>(face)] = chunk;
+}
+
+bool Chunk::IsBlockSolidAt(int x, int y, int z) const {
+    if (x >= 0 && x < SIZE && y >= 0 && y < SIZE && z >= 0 && z < SIZE)
+        return IsBlockSolid(static_cast<BlockType>(m_blocks[BlockIndex(x, y, z)]));
+
+    if (y >= SIZE && m_neighbors[static_cast<uint8_t>(BlockFace::Top)])
+        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::Top)]->GetBlock(x, y - SIZE, z));
+    if (y < 0 && m_neighbors[static_cast<uint8_t>(BlockFace::Bottom)])
+        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::Bottom)]->GetBlock(x, y + SIZE, z));
+    if (z >= SIZE && m_neighbors[static_cast<uint8_t>(BlockFace::North)])
+        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::North)]->GetBlock(x, y, z - SIZE));
+    if (z < 0 && m_neighbors[static_cast<uint8_t>(BlockFace::South)])
+        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::South)]->GetBlock(x, y, z + SIZE));
+    if (x >= SIZE && m_neighbors[static_cast<uint8_t>(BlockFace::East)])
+        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::East)]->GetBlock(x - SIZE, y, z));
+    if (x < 0 && m_neighbors[static_cast<uint8_t>(BlockFace::West)])
+        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::West)]->GetBlock(x + SIZE, y, z));
+
+    return false;
+}
+
+void Chunk::AddFace(BlockFace face, int x, int y, int z, BlockType type,
+                    VertexGroup& vertices, IndexGroup& indices) {
+    AtlasUV uv = TextureAtlas::GetTileUV(GetBlockTextureTile(type, face));
+    uint32_t base = static_cast<uint32_t>(vertices.GetSize());
+    float bx = static_cast<float>(x);
+    float by = static_cast<float>(y);
+    float bz = static_cast<float>(z);
+
+    switch (face) {
+        case BlockFace::Top:
+            vertices.AddVertex(Vertex(bx,     by + 1, bz,     0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v1));
+            vertices.AddVertex(Vertex(bx,     by + 1, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v0));
+            vertices.AddVertex(Vertex(bx + 1, by + 1, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v0));
+            vertices.AddVertex(Vertex(bx + 1, by + 1, bz,     0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v1));
+            break;
+        case BlockFace::Bottom:
+            vertices.AddVertex(Vertex(bx,     by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v1));
+            vertices.AddVertex(Vertex(bx,     by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v0));
+            vertices.AddVertex(Vertex(bx + 1, by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v0));
+            vertices.AddVertex(Vertex(bx + 1, by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v1));
+            break;
+        case BlockFace::North:
+            vertices.AddVertex(Vertex(bx + 1, by,     bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v1));
+            vertices.AddVertex(Vertex(bx + 1, by + 1, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v0));
+            vertices.AddVertex(Vertex(bx,     by + 1, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v0));
+            vertices.AddVertex(Vertex(bx,     by,     bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v1));
+            break;
+        case BlockFace::South:
+            vertices.AddVertex(Vertex(bx,     by,     bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v1));
+            vertices.AddVertex(Vertex(bx,     by + 1, bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v0));
+            vertices.AddVertex(Vertex(bx + 1, by + 1, bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v0));
+            vertices.AddVertex(Vertex(bx + 1, by,     bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v1));
+            break;
+        case BlockFace::East:
+            vertices.AddVertex(Vertex(bx + 1, by,     bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v1));
+            vertices.AddVertex(Vertex(bx + 1, by + 1, bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v0));
+            vertices.AddVertex(Vertex(bx + 1, by + 1, bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v0));
+            vertices.AddVertex(Vertex(bx + 1, by,     bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v1));
+            break;
+        case BlockFace::West:
+            vertices.AddVertex(Vertex(bx, by,     bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v1));
+            vertices.AddVertex(Vertex(bx, by + 1, bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v0));
+            vertices.AddVertex(Vertex(bx, by + 1, bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v0));
+            vertices.AddVertex(Vertex(bx, by,     bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v1));
+            break;
+    }
+
+    indices.add(base);
+    indices.add(base + 2);
+    indices.add(base + 1);
+    indices.add(base);
+    indices.add(base + 3);
+    indices.add(base + 2);
+}
+
+void Chunk::BuildMesh(const RefPtr<Material>& material) {
+    VertexGroup vertices;
+    IndexGroup indices;
+
+    for (int y = 0; y < SIZE; ++y) {
+        for (int z = 0; z < SIZE; ++z) {
+            for (int x = 0; x < SIZE; ++x) {
+                BlockType type = GetBlock(x, y, z);
+                if (!IsBlockSolid(type)) continue;
+
+                if (!IsBlockSolidAt(x, y + 1, z)) AddFace(BlockFace::Top,    x, y, z, type, vertices, indices);
+                if (!IsBlockSolidAt(x, y - 1, z)) AddFace(BlockFace::Bottom, x, y, z, type, vertices, indices);
+                if (!IsBlockSolidAt(x, y, z + 1)) AddFace(BlockFace::North,  x, y, z, type, vertices, indices);
+                if (!IsBlockSolidAt(x, y, z - 1)) AddFace(BlockFace::South,  x, y, z, type, vertices, indices);
+                if (!IsBlockSolidAt(x + 1, y, z)) AddFace(BlockFace::East,   x, y, z, type, vertices, indices);
+                if (!IsBlockSolidAt(x - 1, y, z)) AddFace(BlockFace::West,   x, y, z, type, vertices, indices);
+            }
+        }
+    }
+
+    if (vertices.GetSize() == 0) {
+        m_meshBuilt = true;
+        return;
+    }
+
+    delete m_gameObject;
+
+    MeshData meshData;
+    meshData.vertices = std::move(vertices);
+    meshData.indices = std::move(indices);
+
+    m_gameObject = new GameObject("Chunk");
+    m_gameObject->AddComponent<TransformComponent>(
+        Vector3D(static_cast<float>(m_cx * SIZE),
+                 static_cast<float>(m_cy * SIZE),
+                 static_cast<float>(m_cz * SIZE)));
+    m_gameObject->AddComponent<MaterialComponent>(material);
+    m_gameObject->AddComponent<MeshComponent>(std::move(meshData));
+    m_gameObject->Initialize();
+
+    m_meshBuilt = true;
+}
+
+void Chunk::AddToScene(SceneBase* scene) {
+    if (m_gameObject) {
+        scene->AddObject(m_gameObject);
+        m_addedToScene = true;
+    }
+}
+
+void Chunk::RemoveFromScene(SceneBase* scene) {
+    if (m_gameObject && m_addedToScene) {
+        scene->RemoveObject(m_gameObject);
+        m_gameObject = nullptr;
+        m_addedToScene = false;
+    }
+}
