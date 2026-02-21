@@ -9,6 +9,9 @@
 #include <Camera/Camera.hpp>
 #include <Physics/RigidbodyComponent.hpp>
 #include <ECS/Components/FirstPersonController.hpp>
+#include <Events/Event.h>
+#include <Input/KeyCodes.h>
+#include <UI/UI.hpp>
 
 using namespace Sleak;
 using namespace Sleak::Math;
@@ -24,7 +27,7 @@ bool MainScene::Initialize() {
 
     auto* cam = GetDebugCamera();
     if (cam) {
-        cam->SetPosition({8.0f, PLAYER_EYE_HEIGHT, 8.0f});
+        cam->SetPosition({8.0f, 50.0f , 8.0f});
         cam->SetFarPlane(1500.0f);
         auto* fpc = cam->GetComponent<FirstPersonController>();
         if (fpc) {
@@ -32,10 +35,9 @@ bool MainScene::Initialize() {
             fpc->SetMaxAcceleration(1000.0f);
             fpc->SetBrakingDeceleration(1000.0f);
             fpc->SetGroundFriction(1.0f);
-            fpc->SetJumpZVelocity(0.0f);
+            fpc->SetJumpZVelocity(fpc->GetJumpZVelocity()*1.8);
         }
         auto* rb = cam->GetComponent<RigidbodyComponent>();
-        if (rb) rb->SetUseGravity(false);
     }
 
     SetupLighting();
@@ -44,7 +46,33 @@ bool MainScene::Initialize() {
     m_chunkManager.SetRenderDistance(8);
     m_chunkManager.Update(8.0f, 8.0f);
 
+    EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
+    EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
+
     return true;
+}
+
+void MainScene::OnMousePressed(const Events::Input::MouseButtonPressedEvent& e) {
+    auto* cam = GetDebugCamera();
+    if (!cam) return;
+
+    auto pos = cam->GetPosition();
+    auto dir = cam->GetDirection();
+    auto hit = m_chunkManager.VoxelRaycast(pos, dir, 6.0f);
+    if (!hit.hit) return;
+
+    MouseCode button = e.GetMouseButton();
+    if (button == MouseCode::ButtonLeft) {
+        m_chunkManager.SetBlockAt(hit.blockX, hit.blockY, hit.blockZ, BlockType::Air);
+    } else if (button == MouseCode::ButtonRight) {
+        m_chunkManager.SetBlockAt(hit.placeX, hit.placeY, hit.placeZ, m_selectedBlock);
+    }
+}
+
+void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
+    if_key_press(KEY__1) { m_selectedBlock = BlockType::Grass; }
+    if_key_press(KEY__2) { m_selectedBlock = BlockType::Dirt; }
+    if_key_press(KEY__3) { m_selectedBlock = BlockType::Stone; }
 }
 
 void MainScene::Update(float deltaTime) {
@@ -53,10 +81,48 @@ void MainScene::Update(float deltaTime) {
     auto* cam = GetDebugCamera();
     if (cam) {
         auto pos = cam->GetPosition();
-        if (pos.GetY() != PLAYER_EYE_HEIGHT) {
-            cam->SetPosition({pos.GetX(), PLAYER_EYE_HEIGHT, pos.GetZ()});
+
+        auto collision = m_chunkManager.ResolveVoxelCollision(pos, 0.3f, 1.8f, 1.62f);
+        if (collision.onGround || collision.hitCeiling || collision.hitWall) {
+            cam->SetPosition({pos.GetX() + collision.correction.GetX(),
+                              pos.GetY() + collision.correction.GetY(),
+                              pos.GetZ() + collision.correction.GetZ()});
+            auto* rb = cam->GetComponent<RigidbodyComponent>();
+            if (rb) {
+                auto vel = rb->GetVelocity();
+                if (collision.onGround && vel.GetY() < 0.0f) {
+                    rb->SetVelocity({vel.GetX(), 0.0f, vel.GetZ()});
+                    rb->SetGrounded(true);
+                }
+                if (collision.hitCeiling && vel.GetY() > 0.0f)
+                    rb->SetVelocity({vel.GetX(), 0.0f, vel.GetZ()});
+                if (collision.hitWall) {
+                    float vx = (collision.correction.GetX() != 0.0f) ? 0.0f : vel.GetX();
+                    float vz = (collision.correction.GetZ() != 0.0f) ? 0.0f : vel.GetZ();
+                    rb->SetVelocity({vx, vel.GetY(), vz});
+                }
+            }
         }
+
         m_chunkManager.Update(pos.GetX(), pos.GetZ());
+
+        // HUD
+        UI::BeginPanel("HUD", 10, 10);
+
+        UI::Text("Selected: %s [%d]", GetBlockName(m_selectedBlock),
+                 static_cast<int>(m_selectedBlock));
+
+        auto dir = cam->GetDirection();
+        auto rayHit = m_chunkManager.VoxelRaycast(cam->GetPosition(), dir, 6.0f);
+        if (rayHit.hit) {
+            UI::Text("Looking at: %s (%d, %d, %d)",
+                     GetBlockName(rayHit.blockType),
+                     rayHit.blockX, rayHit.blockY, rayHit.blockZ);
+        } else {
+            UI::Text("Looking at: ---");
+        }
+
+        UI::EndPanel();
     }
 }
 
@@ -86,7 +152,7 @@ void MainScene::SetupLighting() {
     sun->SetDirection(Vector3D(-0.3f, -0.8f, -0.5f));
     sun->SetColor(1.0f, 0.98f, 0.92f);
     sun->SetIntensity(0.8f);
-    sun->SetCastShadows(true);
+    sun->SetCastShadows(false);
     sun->SetShadowBias(0.003f);
     sun->SetShadowNormalBias(0.04f);
     sun->SetLightSize(1.5f);

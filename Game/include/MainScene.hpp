@@ -3,7 +3,10 @@
 
 #include <Core/Scene.hpp>
 #include <Memory/RefPtr.h>
+#include <Events/MouseEvent.h>
+#include <Events/KeyboardEvent.h>
 #include "World/ChunkManager.hpp"
+#include "World/Block.hpp"
 
 namespace Sleak { class Material; }
 
@@ -20,10 +23,12 @@ private:
     void SetupSkybox();
     void SetupLighting();
 
-    static constexpr float PLAYER_EYE_HEIGHT = 6.62f;
+    void OnMousePressed(const Sleak::Events::Input::MouseButtonPressedEvent& e);
+    void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
 
     Sleak::RefPtr<Sleak::Material> m_blockMaterial;
     ChunkManager m_chunkManager;
+    BlockType m_selectedBlock = BlockType::Grass;
 };
 
 #endif
