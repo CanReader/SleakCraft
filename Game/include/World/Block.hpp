@@ -40,4 +40,14 @@ inline bool IsBlockSolid(BlockType type) {
     return type != BlockType::Air;
 }
 
+inline const char* GetBlockName(BlockType type) {
+    switch (type) {
+        case BlockType::Grass: return "Grass";
+        case BlockType::Dirt:  return "Dirt";
+        case BlockType::Stone: return "Stone";
+        case BlockType::Air:   return "Air";
+        default:               return "Unknown";
+    }
+}
+
 #endif
