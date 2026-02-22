@@ -1,4 +1,6 @@
 #include "World/ChunkManager.hpp"
+#include <Camera/Camera.hpp>
+#include <Core/GameObject.hpp>
 #include <Core/SceneBase.hpp>
 #include <cmath>
 #include <vector>
@@ -326,8 +328,10 @@ void ChunkManager::Update(float playerX, float playerZ) {
     int centerX = static_cast<int>(std::floor(playerX / Chunk::SIZE));
     int centerZ = static_cast<int>(std::floor(playerZ / Chunk::SIZE));
 
-    if (centerX == m_lastCenterX && centerZ == m_lastCenterZ)
+    if (centerX == m_lastCenterX && centerZ == m_lastCenterZ) {
+        FrustumCull();
         return;
+    }
 
     m_lastCenterX = centerX;
     m_lastCenterZ = centerZ;
@@ -361,5 +365,44 @@ void ChunkManager::Update(float playerX, float playerZ) {
             chunk->BuildMesh(m_material);
             chunk->AddToScene(m_scene);
         }
+    }
+
+    FrustumCull();
+}
+
+void ChunkManager::FrustumCull() const {
+    const auto& frustum = Sleak::Camera::GetMainViewFrustum();
+    const auto& camPos = Sleak::Camera::GetMainCameraPosition();
+    float cx = camPos.GetX();
+    float cy = camPos.GetY();
+    float cz = camPos.GetZ();
+
+    for (auto& [coord, chunk] : m_chunks) {
+        auto* go = chunk->GetGameObject();
+        if (!go) continue;
+
+        float minX = static_cast<float>(coord.x * Chunk::SIZE);
+        float minY = static_cast<float>(coord.y * Chunk::SIZE);
+        float minZ = static_cast<float>(coord.z * Chunk::SIZE);
+        float maxX = minX + Chunk::SIZE;
+        float maxY = minY + Chunk::SIZE;
+        float maxZ = minZ + Chunk::SIZE;
+
+        // Distance cull: find closest point on AABB to camera, skip if too far
+        float dx = (cx < minX) ? (minX - cx) : (cx > maxX) ? (cx - maxX) : 0.0f;
+        float dy = (cy < minY) ? (minY - cy) : (cy > maxY) ? (cy - maxY) : 0.0f;
+        float dz = (cz < minZ) ? (minZ - cz) : (cz > maxZ) ? (cz - maxZ) : 0.0f;
+        float distSq = dx * dx + dy * dy + dz * dz;
+
+        if (distSq > m_drawDistSq) {
+            go->SetActive(false);
+            continue;
+        }
+
+        bool visible = frustum.IsAABBVisible(
+            Sleak::Math::Vector3D(minX, minY, minZ),
+            Sleak::Math::Vector3D(maxX, maxY, maxZ));
+
+        go->SetActive(visible);
     }
 }

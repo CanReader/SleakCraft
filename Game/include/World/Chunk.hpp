@@ -35,6 +35,7 @@ public:
     int GetChunkZ() const { return m_cz; }
 
     bool IsMeshBuilt() const { return m_meshBuilt; }
+    Sleak::GameObject* GetGameObject() const { return m_gameObject; }
 
 private:
     static int BlockIndex(int x, int y, int z) {

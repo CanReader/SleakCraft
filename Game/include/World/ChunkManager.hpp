@@ -53,6 +53,11 @@ public:
     void SetRenderDistance(int chunks) { m_renderDistance = chunks; }
     int GetRenderDistance() const { return m_renderDistance; }
 
+    void SetDrawDistance(float dist) { m_drawDistance = dist; m_drawDistSq = dist * dist; }
+    float GetDrawDistance() const { return m_drawDistance; }
+
+    void FrustumCull() const;
+
     BlockType GetBlockAt(int worldX, int worldY, int worldZ) const;
     bool SetBlockAt(int worldX, int worldY, int worldZ, BlockType type);
     VoxelRaycastResult VoxelRaycast(const Sleak::Math::Vector3D& origin,
@@ -72,6 +77,8 @@ private:
     Sleak::SceneBase* m_scene = nullptr;
     Sleak::RefPtr<Sleak::Material> m_material;
     int m_renderDistance = 8;
+    float m_drawDistance = 96.0f;
+    float m_drawDistSq = 96.0f * 96.0f;
     int m_lastCenterX = INT_MAX;
     int m_lastCenterZ = INT_MAX;
 
