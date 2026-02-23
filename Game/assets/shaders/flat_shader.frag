@@ -1,10 +1,5 @@
 #version 450
 
-// ============================================================
-// Flat Material Shader - No specular, Minecraft-style
-// Hemisphere ambient + Lambert diffuse + PCF shadows
-// ============================================================
-
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragWorldNorm;
 layout(location = 2) in vec3 fragWorldTan;
@@ -31,7 +26,6 @@ layout(set = 2, binding = 0) uniform ShadowLightUBO {
 
 layout(set = 3, binding = 0) uniform sampler2DShadow shadowMap;
 
-// Interleaved gradient noise for per-pixel disk rotation
 float InterleavedGradientNoise(vec2 screenPos) {
     vec3 magic = vec3(0.06711056, 0.00583715, 52.9829189);
     return fract(magic.z * fract(dot(screenPos, magic.xy)));
@@ -85,24 +79,18 @@ void main() {
     vec3 lightColor = uLightColor.rgb;
     float lightIntensity = uLightColor.a;
 
-    // ---- Ambient ----
     vec3 ambientColor = uAmbient.rgb * uAmbient.a;
     vec3 groundColor = ambientColor * vec3(0.7, 0.65, 0.6);
     float hemisphere = N.y * 0.5 + 0.5;
     vec3 ambient = mix(groundColor, ambientColor, hemisphere);
 
-    // ---- Diffuse (Lambert) ----
     float NdotL = dot(N, -lightDir);
     float diffuseTerm = max(NdotL, 0.0);
     vec3 diffuse = lightColor * lightIntensity * diffuseTerm;
 
-    // ---- Shadow ----
     float shadow = CalcShadow(fragShadowCoord);
 
-    // ---- Compose (no specular) ----
     vec3 lit = baseColor.rgb * (ambient + shadow * diffuse);
-
-    // ---- Tone mapping (Reinhard) ----
     lit = lit / (lit + vec3(1.0));
 
     outColor = vec4(lit, baseColor.a);

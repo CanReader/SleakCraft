@@ -14,13 +14,8 @@ public:
   Game &operator=(Game &&) = delete;
   Game &operator=(const Game &) = delete;
 
-  // Called once at startup. Create scenes, add objects, set active scene.
   bool Initialize() override;
-
-  // Called once after Initialize. Use for post-init setup.
   void Begin() override;
-
-  // Called every frame. Use for per-frame game logic.
   void Loop(float DeltaTime) override;
 
   inline bool GetIsGameRunning() { return bIsGameRunning; }

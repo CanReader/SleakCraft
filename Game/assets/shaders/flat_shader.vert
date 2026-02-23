@@ -1,23 +1,16 @@
 #version 450
 
-// ============================================================
-// Default Material Shader - Vulkan Vertex Shader
-// Dynamic lighting via UBO + shadow coordinate output
-// ============================================================
-
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec4 inTangent;
 layout(location = 3) in vec4 inColor;
 layout(location = 4) in vec2 inUV;
 
-// Transform push constant
 layout(push_constant) uniform TransformPC {
     mat4 WVP;
     mat4 World;
 };
 
-// Light/Shadow UBO (set 2, binding 0)
 layout(set = 2, binding = 0) uniform ShadowLightUBO {
     vec4  uLightDir;       // xyz = direction, w = pad
     vec4  uLightColor;     // rgb = color, a = intensity
@@ -42,7 +35,6 @@ void main() {
     gl_Position = WVP * vec4(inPosition, 1.0);
     gl_Position.y = -gl_Position.y;  // Vulkan Y-axis flip
 
-    // World-space position and basis vectors for lighting
     vec4 worldPos = World * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
 

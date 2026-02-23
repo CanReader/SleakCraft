@@ -108,7 +108,6 @@ void MainScene::Update(float deltaTime) {
 
         m_chunkManager.Update(pos.GetX(), pos.GetZ());
 
-        // HUD
         UI::BeginPanel("HUD", 10, 10);
 
         UI::Text("Selected: %s [%d]", GetBlockName(m_selectedBlock),
@@ -121,7 +120,6 @@ void MainScene::Update(float deltaTime) {
                      GetBlockName(rayHit.blockType),
                      rayHit.blockX, rayHit.blockY, rayHit.blockZ);
 
-            // Draw block outline
             constexpr float E = 0.002f;
             Physics::AABB blockAABB(
                 Vector3D(rayHit.blockX - E, rayHit.blockY - E, rayHit.blockZ - E),

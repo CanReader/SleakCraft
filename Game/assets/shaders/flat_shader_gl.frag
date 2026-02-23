@@ -1,10 +1,5 @@
 #version 450 core
 
-// ============================================================
-// Flat Material Shader - OpenGL Fragment Shader
-// Hemisphere ambient + Lambert diffuse, no specular, no shadows
-// ============================================================
-
 in vec3 fragWorldPos;
 in vec3 fragWorldNorm;
 in vec4 fragColor;
@@ -37,13 +32,11 @@ void main() {
 
     vec3 N = normalize(fragWorldNorm);
 
-    // ---- Hemisphere ambient (sky/ground blend) ----
     vec3 ambientColor = AmbientColor * AmbientIntensity;
     vec3 groundColor = ambientColor * vec3(0.7, 0.65, 0.6);
     float hemisphere = N.y * 0.5 + 0.5;
     vec3 ambient = mix(groundColor, ambientColor, hemisphere);
 
-    // ---- Accumulate diffuse from all lights (Lambert only) ----
     vec3 diffuse = vec3(0.0);
 
     for (uint i = 0u; i < NumActiveLights; i++) {
@@ -53,11 +46,9 @@ void main() {
         float attenuation = 1.0;
 
         if (light.Type == 0u) {
-            // Directional
             L = normalize(-light.Direction);
         }
         else if (light.Type == 1u) {
-            // Point
             vec3 toLight = light.Position - fragWorldPos;
             float dist = length(toLight);
             L = toLight / max(dist, 0.0001);
@@ -68,7 +59,6 @@ void main() {
             attenuation = (falloff * falloff) / (dist * dist + 1.0);
         }
         else if (light.Type == 2u) {
-            // Spot
             vec3 toLight = light.Position - fragWorldPos;
             float dist = length(toLight);
             L = toLight / max(dist, 0.0001);
@@ -86,7 +76,6 @@ void main() {
             attenuation *= spotFactor;
         }
         else {
-            // Area (fallback)
             vec3 toLight = light.Position - fragWorldPos;
             float dist = length(toLight);
             L = toLight / max(dist, 0.0001);
@@ -101,10 +90,7 @@ void main() {
         diffuse += light.Color * light.Intensity * attenuation * NdotL;
     }
 
-    // ---- Compose (no specular, no shadows) ----
     vec3 lit = baseColor.rgb * (ambient + diffuse);
-
-    // ---- Tone mapping (Reinhard) ----
     lit = lit / (lit + vec3(1.0));
 
     outColor = vec4(lit, baseColor.a);

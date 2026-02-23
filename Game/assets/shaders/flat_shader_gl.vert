@@ -1,17 +1,11 @@
 #version 450 core
 
-// ============================================================
-// Flat Material Shader - OpenGL Vertex Shader
-// Hemisphere ambient + Lambert diffuse (no specular)
-// ============================================================
-
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec4 inTangent;
 layout(location = 3) in vec4 inColor;
 layout(location = 4) in vec2 inUV;
 
-// Transform UBO (binding 0) - matches TransformBuffer layout
 layout(std140, binding = 0) uniform TransformUBO {
     mat4 WVP;
     mat4 World;

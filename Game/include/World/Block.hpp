@@ -20,7 +20,6 @@ enum class BlockFace : uint8_t {
     West
 };
 
-// Returns the texture atlas tile index for a given block type and face
 inline uint8_t GetBlockTextureTile(BlockType type, BlockFace face) {
     switch (type) {
         case BlockType::Grass:

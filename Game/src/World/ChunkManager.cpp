@@ -69,12 +69,10 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
 
     chunk->SetBlock(lx, ly, lz, type);
 
-    // Rebuild the modified chunk
     chunk->RemoveFromScene(m_scene);
     chunk->BuildMesh(m_material);
     chunk->AddToScene(m_scene);
 
-    // Rebuild neighbor chunks if block is on a chunk boundary
     auto rebuildNeighbor = [&](int ncx, int ncy, int ncz) {
         Chunk* neighbor = GetChunk(ncx, ncy, ncz);
         if (neighbor) {
@@ -104,22 +102,18 @@ VoxelRaycastResult ChunkManager::VoxelRaycast(
     float ox = origin.GetX(), oy = origin.GetY(), oz = origin.GetZ();
     float dx = direction.GetX(), dy = direction.GetY(), dz = direction.GetZ();
 
-    // Current voxel coordinates
     int x = static_cast<int>(std::floor(ox));
     int y = static_cast<int>(std::floor(oy));
     int z = static_cast<int>(std::floor(oz));
 
-    // Step direction
     int stepX = (dx >= 0) ? 1 : -1;
     int stepY = (dy >= 0) ? 1 : -1;
     int stepZ = (dz >= 0) ? 1 : -1;
 
-    // tDelta: how far along the ray to cross one full voxel in each axis
     float tDeltaX = (dx != 0.0f) ? std::abs(1.0f / dx) : 1e30f;
     float tDeltaY = (dy != 0.0f) ? std::abs(1.0f / dy) : 1e30f;
     float tDeltaZ = (dz != 0.0f) ? std::abs(1.0f / dz) : 1e30f;
 
-    // tMax: distance to next voxel boundary in each axis
     float tMaxX = (dx != 0.0f) ? ((stepX > 0 ? (x + 1.0f - ox) : (ox - x)) * tDeltaX) : 1e30f;
     float tMaxY = (dy != 0.0f) ? ((stepY > 0 ? (y + 1.0f - oy) : (oy - y)) * tDeltaY) : 1e30f;
     float tMaxZ = (dz != 0.0f) ? ((stepZ > 0 ? (z + 1.0f - oz) : (oz - z)) * tDeltaZ) : 1e30f;
@@ -143,7 +137,6 @@ VoxelRaycastResult ChunkManager::VoxelRaycast(
 
         prevX = x; prevY = y; prevZ = z;
 
-        // Step along axis with smallest tMax
         if (tMaxX < tMaxY) {
             if (tMaxX < tMaxZ) {
                 t = tMaxX;
@@ -183,7 +176,6 @@ VoxelCollisionResult ChunkManager::ResolveVoxelCollision(
     float posX = eyePos.GetX();
     float posZ = eyePos.GetZ();
 
-    // Player AABB: [posX - hw, feetY, posZ - hw] to [posX + hw, feetY + height, posZ + hw]
     auto computeAABB = [&](float fx, float fy, float fz,
                            float& minX, float& minY, float& minZ,
                            float& maxX, float& maxY, float& maxZ) {
@@ -224,16 +216,13 @@ VoxelCollisionResult ChunkManager::ResolveVoxelCollision(
                     float blockMinZ = static_cast<float>(bz);
                     float blockMaxZ = static_cast<float>(bz + 1);
 
-                    // Recompute AABB (position may have shifted from earlier block)
                     computeAABB(posX, feetY, posZ, minX, minY, minZ, maxX, maxY, maxZ);
 
-                    // Skip if no overlap
                     if (minX >= blockMaxX || maxX <= blockMinX ||
                         minY >= blockMaxY || maxY <= blockMinY ||
                         minZ >= blockMaxZ || maxZ <= blockMinZ)
                         continue;
 
-                    // Penetration depth per axis (smallest push to escape)
                     float pushXPos = blockMaxX - minX;
                     float pushXNeg = maxX - blockMinX;
                     float penX = std::min(pushXPos, pushXNeg);
@@ -246,7 +235,6 @@ VoxelCollisionResult ChunkManager::ResolveVoxelCollision(
                     float pushZNeg = maxZ - blockMinZ;
                     float penZ = std::min(pushZPos, pushZNeg);
 
-                    // Resolve on the axis with the smallest penetration
                     if (penY <= penX && penY <= penZ) {
                         if (pushYPos < pushYNeg) {
                             feetY += pushYPos;
@@ -275,7 +263,6 @@ VoxelCollisionResult ChunkManager::ResolveVoxelCollision(
         if (!corrected) break;
     }
 
-    // Compute correction as new eye position - old eye position
     float newEyeY = feetY + eyeOffset;
     result.correction = Vector3D(posX - eyePos.GetX(),
                                   newEyeY - eyePos.GetY(),
@@ -336,7 +323,6 @@ void ChunkManager::Update(float playerX, float playerZ) {
     m_lastCenterX = centerX;
     m_lastCenterZ = centerZ;
 
-    // Remove chunks outside render distance
     std::vector<ChunkCoord> toRemove;
     for (auto& [coord, chunk] : m_chunks) {
         if (std::abs(coord.x - centerX) > m_renderDistance ||
@@ -388,7 +374,6 @@ void ChunkManager::FrustumCull() const {
         float maxY = minY + Chunk::SIZE;
         float maxZ = minZ + Chunk::SIZE;
 
-        // Distance cull: find closest point on AABB to camera, skip if too far
         float dx = (cx < minX) ? (minX - cx) : (cx > maxX) ? (cx - maxX) : 0.0f;
         float dy = (cy < minY) ? (minY - cy) : (cy > maxY) ? (cy - maxY) : 0.0f;
         float dz = (cz < minZ) ? (minZ - cz) : (cz > maxZ) ? (cz - maxZ) : 0.0f;
