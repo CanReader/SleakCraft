@@ -2,6 +2,7 @@
 
 // ============================================================
 // Flat Material Shader - OpenGL Vertex Shader
+// Hemisphere ambient + Lambert diffuse (no specular)
 // ============================================================
 
 layout(location = 0) in vec3 inPosition;
@@ -18,23 +19,17 @@ layout(std140, binding = 0) uniform TransformUBO {
 
 out vec3 fragWorldPos;
 out vec3 fragWorldNorm;
-out vec3 fragWorldTan;
-out vec3 fragWorldBit;
 out vec4 fragColor;
 out vec2 fragUV;
 
 void main() {
     gl_Position = WVP * vec4(inPosition, 1.0);
 
-    // World-space position and basis vectors for lighting
     vec4 worldPos = World * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
 
     mat3 worldMat3 = mat3(World);
     fragWorldNorm = normalize(worldMat3 * inNormal);
-    fragWorldTan  = normalize(worldMat3 * inTangent.xyz);
-    fragWorldBit  = cross(fragWorldNorm, fragWorldTan)
-                    * inTangent.w;
 
     fragColor = inColor;
     fragUV    = inUV;

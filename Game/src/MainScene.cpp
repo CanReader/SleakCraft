@@ -12,6 +12,8 @@
 #include <Events/Event.h>
 #include <Input/KeyCodes.h>
 #include <UI/UI.hpp>
+#include <Debug/DebugLineRenderer.hpp>
+#include <Physics/Colliders.hpp>
 
 using namespace Sleak;
 using namespace Sleak::Math;
@@ -118,6 +120,13 @@ void MainScene::Update(float deltaTime) {
             UI::Text("Looking at: %s (%d, %d, %d)",
                      GetBlockName(rayHit.blockType),
                      rayHit.blockX, rayHit.blockY, rayHit.blockZ);
+
+            // Draw block outline
+            constexpr float E = 0.002f;
+            Physics::AABB blockAABB(
+                Vector3D(rayHit.blockX - E, rayHit.blockY - E, rayHit.blockZ - E),
+                Vector3D(rayHit.blockX + 1.0f + E, rayHit.blockY + 1.0f + E, rayHit.blockZ + 1.0f + E));
+            DebugLineRenderer::DrawAABB(blockAABB, 0.0f, 0.0f, 0.0f);
         } else {
             UI::Text("Looking at: ---");
         }
