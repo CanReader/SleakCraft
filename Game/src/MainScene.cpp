@@ -39,6 +39,8 @@ bool MainScene::Initialize() {
             fpc->SetBrakingDeceleration(1000.0f);
             fpc->SetGroundFriction(1.0f);
             fpc->SetJumpZVelocity(fpc->GetJumpZVelocity()*1.8);
+            fpc->SetPitch(0.0f);
+            fpc->SetYaw(0.0f);
         }
         auto* rb = cam->GetComponent<RigidbodyComponent>();
     }
