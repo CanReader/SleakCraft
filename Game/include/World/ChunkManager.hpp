@@ -9,6 +9,10 @@
 #include <vector>
 #include <functional>
 #include <climits>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 namespace Sleak {
     class Material;
@@ -56,6 +60,9 @@ public:
     void SetRenderDistance(int chunks) { m_renderDistance = chunks; }
     int GetRenderDistance() const { return m_renderDistance; }
 
+    void SetMultithreaded(bool enabled);
+    bool IsMultithreaded() const { return m_multithreaded; }
+
     void SetDrawDistance(float dist) { m_drawDistance = dist; m_drawDistSq = dist * dist; }
     float GetDrawDistance() const { return m_drawDistance; }
 
@@ -76,6 +83,10 @@ private:
     Chunk* GetChunk(int cx, int cy, int cz);
     const Chunk* GetChunk(int cx, int cy, int cz) const;
 
+    void StartWorkers();
+    void StopWorkers();
+    void WorkerThread();
+
     std::unordered_map<ChunkCoord, Chunk*, ChunkCoordHash> m_chunks;
     std::vector<ChunkCoord> m_pendingLoad;
     std::unordered_set<ChunkCoord, ChunkCoordHash> m_pendingSet;
@@ -83,10 +94,21 @@ private:
     Sleak::RefPtr<Sleak::Material> m_material;
     int m_renderDistance = 8;
     int m_chunksPerFrame = 4;
+    int m_uploadsPerFrame = 4;
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
     int m_lastCenterX = INT_MAX;
     int m_lastCenterZ = INT_MAX;
+
+    // Multithreading
+    bool m_multithreaded = false;
+    std::vector<std::thread> m_workers;
+    std::mutex m_taskMutex;
+    std::condition_variable m_taskCV;
+    std::vector<Chunk*> m_taskQueue;
+    std::mutex m_readyMutex;
+    std::vector<Chunk*> m_readyQueue;
+    std::atomic<bool> m_shutdown{false};
 
     static constexpr int SURFACE_HEIGHT = 4;
 };

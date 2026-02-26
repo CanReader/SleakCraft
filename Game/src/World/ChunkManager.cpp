@@ -9,11 +9,72 @@
 ChunkManager::ChunkManager() {}
 
 ChunkManager::~ChunkManager() {
+    StopWorkers();
     for (auto& [coord, chunk] : m_chunks) {
         if (m_scene) chunk->RemoveFromScene(m_scene);
         delete chunk;
     }
     m_chunks.clear();
+}
+
+void ChunkManager::SetMultithreaded(bool enabled) {
+    if (enabled == m_multithreaded) return;
+    m_multithreaded = enabled;
+    if (enabled) {
+        StartWorkers();
+    } else {
+        StopWorkers();
+    }
+}
+
+void ChunkManager::StartWorkers() {
+    if (!m_workers.empty()) return;
+    m_shutdown.store(false);
+    int count = static_cast<int>(std::thread::hardware_concurrency()) - 1;
+    if (count < 2) count = 2;
+    if (count > 4) count = 4;
+    for (int i = 0; i < count; ++i)
+        m_workers.emplace_back(&ChunkManager::WorkerThread, this);
+}
+
+void ChunkManager::StopWorkers() {
+    if (m_workers.empty()) return;
+    {
+        std::lock_guard<std::mutex> lock(m_taskMutex);
+        m_shutdown.store(true);
+    }
+    m_taskCV.notify_all();
+    for (auto& w : m_workers)
+        w.join();
+    m_workers.clear();
+
+    // Drain task queue — move remaining tasks to ready if they have pending mesh
+    {
+        std::lock_guard<std::mutex> lock(m_taskMutex);
+        m_taskQueue.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_readyMutex);
+        m_readyQueue.clear();
+    }
+}
+
+void ChunkManager::WorkerThread() {
+    while (true) {
+        Chunk* chunk = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(m_taskMutex);
+            m_taskCV.wait(lock, [this] { return m_shutdown.load() || !m_taskQueue.empty(); });
+            if (m_shutdown.load() && m_taskQueue.empty()) return;
+            chunk = m_taskQueue.back();
+            m_taskQueue.pop_back();
+        }
+        chunk->GenerateMeshData();
+        {
+            std::lock_guard<std::mutex> lock(m_readyMutex);
+            m_readyQueue.push_back(chunk);
+        }
+    }
 }
 
 void ChunkManager::Initialize(Sleak::SceneBase* scene, const Sleak::RefPtr<Sleak::Material>& material) {
@@ -286,7 +347,9 @@ void ChunkManager::LinkNeighbors(const ChunkCoord& coord, Chunk* chunk) {
         Chunk* neighbor = GetChunk(coord.x + d.dx, coord.y + d.dy, coord.z + d.dz);
         if (neighbor) {
             chunk->SetNeighbor(d.face, neighbor);
-            neighbor->SetNeighbor(d.opposite, chunk);
+            // Don't write to neighbors that are being processed by worker threads
+            if (!neighbor->IsInFlight())
+                neighbor->SetNeighbor(d.opposite, chunk);
         }
     }
 }
@@ -364,22 +427,76 @@ void ChunkManager::Update(float playerX, float playerZ) {
             });
     }
 
-    // Process a limited number of pending chunks per frame
-    int built = 0;
-    while (built < m_chunksPerFrame && !m_pendingLoad.empty()) {
-        ChunkCoord coord = m_pendingLoad.front();
-        m_pendingLoad.erase(m_pendingLoad.begin());
-        m_pendingSet.erase(coord);
+    if (m_multithreaded) {
+        // Phase 1: Upload meshes completed by workers (GPU work, main thread only)
+        // Do this FIRST so meshes appear as soon as possible
+        {
+            std::vector<Chunk*> ready;
+            {
+                std::lock_guard<std::mutex> lock(m_readyMutex);
+                ready.swap(m_readyQueue);
+            }
+            int uploaded = 0;
+            for (auto* chunk : ready) {
+                chunk->SetInFlight(false);
+                if (uploaded < m_uploadsPerFrame) {
+                    chunk->UploadMesh(m_material);
+                    chunk->AddToScene(m_scene);
+                    ++uploaded;
+                } else {
+                    // Put back for next frame
+                    std::lock_guard<std::mutex> lock(m_readyMutex);
+                    m_readyQueue.push_back(chunk);
+                }
+            }
+        }
 
-        if (m_chunks.count(coord)) continue;
+        // Phase 2: Prepare a batch of new chunks (allocate, terrain, link on main thread)
+        std::vector<Chunk*> batch;
+        int dispatched = 0;
+        while (dispatched < m_chunksPerFrame && !m_pendingLoad.empty()) {
+            ChunkCoord coord = m_pendingLoad.front();
+            m_pendingLoad.erase(m_pendingLoad.begin());
+            m_pendingSet.erase(coord);
 
-        auto* chunk = new Chunk(coord.x, coord.y, coord.z);
-        m_chunks[coord] = chunk;
-        GenerateFlatTerrain(chunk);
-        LinkNeighbors(coord, chunk);
-        chunk->BuildMesh(m_material);
-        chunk->AddToScene(m_scene);
-        ++built;
+            if (m_chunks.count(coord)) continue;
+
+            auto* chunk = new Chunk(coord.x, coord.y, coord.z);
+            m_chunks[coord] = chunk;
+            GenerateFlatTerrain(chunk);
+            LinkNeighbors(coord, chunk);
+            batch.push_back(chunk);
+            ++dispatched;
+        }
+
+        // Phase 3: Mark batch as in-flight and submit all to workers at once
+        // This prevents intra-frame races (all linking done before any worker reads)
+        if (!batch.empty()) {
+            std::lock_guard<std::mutex> lock(m_taskMutex);
+            for (auto* chunk : batch) {
+                chunk->SetInFlight(true);
+                m_taskQueue.push_back(chunk);
+            }
+        }
+        m_taskCV.notify_all();
+    } else {
+        // Synchronous path
+        int built = 0;
+        while (built < m_chunksPerFrame && !m_pendingLoad.empty()) {
+            ChunkCoord coord = m_pendingLoad.front();
+            m_pendingLoad.erase(m_pendingLoad.begin());
+            m_pendingSet.erase(coord);
+
+            if (m_chunks.count(coord)) continue;
+
+            auto* chunk = new Chunk(coord.x, coord.y, coord.z);
+            m_chunks[coord] = chunk;
+            GenerateFlatTerrain(chunk);
+            LinkNeighbors(coord, chunk);
+            chunk->BuildMesh(m_material);
+            chunk->AddToScene(m_scene);
+            ++built;
+        }
     }
 
     FrustumCull();
