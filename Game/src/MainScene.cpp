@@ -29,7 +29,8 @@ bool MainScene::Initialize() {
 
     auto* cam = GetDebugCamera();
     if (cam) {
-        cam->SetPosition({8.0f, 50.0f , 8.0f});
+        cam->SetPosition({8.0f, 6.62f, 8.0f});
+        cam->SetDirection({0.0f, 0.0f, 1.0f});
         cam->SetFarPlane(1500.0f);
         auto* fpc = cam->GetComponent<FirstPersonController>();
         if (fpc) {
@@ -78,6 +79,7 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
 }
 
 void MainScene::Update(float deltaTime) {
+    if (deltaTime > 0.05f) deltaTime = 0.05f;
     Scene::Update(deltaTime);
 
     auto* cam = GetDebugCamera();
