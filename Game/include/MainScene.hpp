@@ -29,6 +29,7 @@ private:
     Sleak::RefPtr<Sleak::Material> m_blockMaterial;
     ChunkManager m_chunkManager;
     BlockType m_selectedBlock = BlockType::Grass;
+    bool m_multithreadedLoading = true;
 };
 
 #endif

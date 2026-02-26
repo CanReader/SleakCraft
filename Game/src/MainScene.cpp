@@ -51,6 +51,7 @@ bool MainScene::Initialize() {
     m_chunkManager.SetRenderDistance(8);
     m_chunkManager.Update(8.0f, 8.0f);
     m_chunkManager.FlushPendingChunks();
+    m_chunkManager.SetMultithreaded(m_multithreadedLoading);
 
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
@@ -134,6 +135,15 @@ void MainScene::Update(float deltaTime) {
             UI::Text("Looking at: ---");
         }
 
+        UI::EndPanel();
+
+        UI::BeginPanel("Settings", 10, 100, 0.4f,
+                        UI::PanelFlags_NoTitleBar |
+                        UI::PanelFlags_AutoResize |
+                        UI::PanelFlags_NoMove |
+                        UI::PanelFlags_NoFocusOnAppear);
+        if (UI::Checkbox("Multithreaded Loading", &m_multithreadedLoading))
+            m_chunkManager.SetMultithreaded(m_multithreadedLoading);
         UI::EndPanel();
     }
 }
