@@ -50,6 +50,7 @@ bool MainScene::Initialize() {
     m_chunkManager.Initialize(this, m_blockMaterial);
     m_chunkManager.SetRenderDistance(8);
     m_chunkManager.Update(8.0f, 8.0f);
+    m_chunkManager.FlushPendingChunks();
 
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);

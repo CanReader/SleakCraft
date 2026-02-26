@@ -5,6 +5,8 @@
 #include <Math/Vector.hpp>
 #include <Memory/RefPtr.h>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 #include <functional>
 #include <climits>
 
@@ -50,6 +52,7 @@ public:
     void Initialize(Sleak::SceneBase* scene, const Sleak::RefPtr<Sleak::Material>& material);
     void Update(float playerX, float playerZ);
 
+    void FlushPendingChunks();
     void SetRenderDistance(int chunks) { m_renderDistance = chunks; }
     int GetRenderDistance() const { return m_renderDistance; }
 
@@ -74,9 +77,12 @@ private:
     const Chunk* GetChunk(int cx, int cy, int cz) const;
 
     std::unordered_map<ChunkCoord, Chunk*, ChunkCoordHash> m_chunks;
+    std::vector<ChunkCoord> m_pendingLoad;
+    std::unordered_set<ChunkCoord, ChunkCoordHash> m_pendingSet;
     Sleak::SceneBase* m_scene = nullptr;
     Sleak::RefPtr<Sleak::Material> m_material;
     int m_renderDistance = 8;
+    int m_chunksPerFrame = 4;
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
     int m_lastCenterX = INT_MAX;

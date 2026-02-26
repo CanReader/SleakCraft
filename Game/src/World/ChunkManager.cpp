@@ -2,6 +2,7 @@
 #include <Camera/Camera.hpp>
 #include <Core/GameObject.hpp>
 #include <Core/SceneBase.hpp>
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -315,45 +316,90 @@ void ChunkManager::Update(float playerX, float playerZ) {
     int centerX = static_cast<int>(std::floor(playerX / Chunk::SIZE));
     int centerZ = static_cast<int>(std::floor(playerZ / Chunk::SIZE));
 
-    if (centerX == m_lastCenterX && centerZ == m_lastCenterZ) {
-        FrustumCull();
-        return;
-    }
+    if (centerX != m_lastCenterX || centerZ != m_lastCenterZ) {
+        m_lastCenterX = centerX;
+        m_lastCenterZ = centerZ;
 
-    m_lastCenterX = centerX;
-    m_lastCenterZ = centerZ;
-
-    std::vector<ChunkCoord> toRemove;
-    for (auto& [coord, chunk] : m_chunks) {
-        if (std::abs(coord.x - centerX) > m_renderDistance ||
-            std::abs(coord.z - centerZ) > m_renderDistance) {
-            chunk->RemoveFromScene(m_scene);
-            toRemove.push_back(coord);
+        // Unload chunks out of range
+        std::vector<ChunkCoord> toRemove;
+        for (auto& [coord, chunk] : m_chunks) {
+            if (std::abs(coord.x - centerX) > m_renderDistance ||
+                std::abs(coord.z - centerZ) > m_renderDistance) {
+                chunk->RemoveFromScene(m_scene);
+                toRemove.push_back(coord);
+            }
         }
-    }
-    for (auto& coord : toRemove) {
-        delete m_chunks[coord];
-        m_chunks.erase(coord);
-    }
-
-    // Only y=0 layer for flat world (surface fits in one chunk vertically)
-    int cy = 0;
-
-    for (int cx = centerX - m_renderDistance; cx <= centerX + m_renderDistance; ++cx) {
-        for (int cz = centerZ - m_renderDistance; cz <= centerZ + m_renderDistance; ++cz) {
-            ChunkCoord coord{cx, cy, cz};
-            if (m_chunks.count(coord)) continue;
-
-            auto* chunk = new Chunk(cx, cy, cz);
-            m_chunks[coord] = chunk;
-            GenerateFlatTerrain(chunk);
-            LinkNeighbors(coord, chunk);
-            chunk->BuildMesh(m_material);
-            chunk->AddToScene(m_scene);
+        for (auto& coord : toRemove) {
+            delete m_chunks[coord];
+            m_chunks.erase(coord);
         }
+
+        // Remove pending chunks that are now out of range
+        m_pendingLoad.erase(
+            std::remove_if(m_pendingLoad.begin(), m_pendingLoad.end(),
+                [&](const ChunkCoord& c) {
+                    bool out = std::abs(c.x - centerX) > m_renderDistance ||
+                               std::abs(c.z - centerZ) > m_renderDistance;
+                    if (out) m_pendingSet.erase(c);
+                    return out;
+                }),
+            m_pendingLoad.end());
+
+        // Queue new chunks sorted by distance to player (closest first)
+        int cy = 0;
+        for (int cx = centerX - m_renderDistance; cx <= centerX + m_renderDistance; ++cx) {
+            for (int cz = centerZ - m_renderDistance; cz <= centerZ + m_renderDistance; ++cz) {
+                ChunkCoord coord{cx, cy, cz};
+                if (m_chunks.count(coord) || m_pendingSet.count(coord)) continue;
+                m_pendingLoad.push_back(coord);
+                m_pendingSet.insert(coord);
+            }
+        }
+
+        std::sort(m_pendingLoad.begin(), m_pendingLoad.end(),
+            [&](const ChunkCoord& a, const ChunkCoord& b) {
+                int da = (a.x - centerX) * (a.x - centerX) + (a.z - centerZ) * (a.z - centerZ);
+                int db = (b.x - centerX) * (b.x - centerX) + (b.z - centerZ) * (b.z - centerZ);
+                return da < db;
+            });
+    }
+
+    // Process a limited number of pending chunks per frame
+    int built = 0;
+    while (built < m_chunksPerFrame && !m_pendingLoad.empty()) {
+        ChunkCoord coord = m_pendingLoad.front();
+        m_pendingLoad.erase(m_pendingLoad.begin());
+        m_pendingSet.erase(coord);
+
+        if (m_chunks.count(coord)) continue;
+
+        auto* chunk = new Chunk(coord.x, coord.y, coord.z);
+        m_chunks[coord] = chunk;
+        GenerateFlatTerrain(chunk);
+        LinkNeighbors(coord, chunk);
+        chunk->BuildMesh(m_material);
+        chunk->AddToScene(m_scene);
+        ++built;
     }
 
     FrustumCull();
+}
+
+void ChunkManager::FlushPendingChunks() {
+    while (!m_pendingLoad.empty()) {
+        ChunkCoord coord = m_pendingLoad.front();
+        m_pendingLoad.erase(m_pendingLoad.begin());
+        m_pendingSet.erase(coord);
+
+        if (m_chunks.count(coord)) continue;
+
+        auto* chunk = new Chunk(coord.x, coord.y, coord.z);
+        m_chunks[coord] = chunk;
+        GenerateFlatTerrain(chunk);
+        LinkNeighbors(coord, chunk);
+        chunk->BuildMesh(m_material);
+        chunk->AddToScene(m_scene);
+    }
 }
 
 void ChunkManager::FrustumCull() const {
