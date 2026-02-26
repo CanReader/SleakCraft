@@ -13,6 +13,11 @@ namespace Sleak {
     class SceneBase;
 }
 
+struct ChunkMeshData {
+    Sleak::VertexGroup vertices;
+    Sleak::IndexGroup indices;
+};
+
 class Chunk {
 public:
     static constexpr int SIZE = 16;
@@ -27,6 +32,8 @@ public:
     void SetNeighbor(BlockFace face, Chunk* chunk);
 
     void BuildMesh(const Sleak::RefPtr<Sleak::Material>& material);
+    void GenerateMeshData();
+    void UploadMesh(const Sleak::RefPtr<Sleak::Material>& material);
     void AddToScene(Sleak::SceneBase* scene);
     void RemoveFromScene(Sleak::SceneBase* scene);
 
@@ -35,6 +42,9 @@ public:
     int GetChunkZ() const { return m_cz; }
 
     bool IsMeshBuilt() const { return m_meshBuilt; }
+    bool HasPendingMesh() const { return m_hasPendingMesh; }
+    bool IsInFlight() const { return m_inFlight; }
+    void SetInFlight(bool v) { m_inFlight = v; }
     Sleak::GameObject* GetGameObject() const { return m_gameObject; }
 
 private:
@@ -52,6 +62,9 @@ private:
     Sleak::GameObject* m_gameObject = nullptr;
     bool m_meshBuilt = false;
     bool m_addedToScene = false;
+    ChunkMeshData m_pendingMesh;
+    bool m_hasPendingMesh = false;
+    bool m_inFlight = false;
 };
 
 #endif

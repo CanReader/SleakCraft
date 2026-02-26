@@ -110,7 +110,7 @@ void Chunk::AddFace(BlockFace face, int x, int y, int z, BlockType type,
     indices.add(base + 2);
 }
 
-void Chunk::BuildMesh(const RefPtr<Material>& material) {
+void Chunk::GenerateMeshData() {
     VertexGroup vertices;
     IndexGroup indices;
 
@@ -130,7 +130,16 @@ void Chunk::BuildMesh(const RefPtr<Material>& material) {
         }
     }
 
-    if (vertices.GetSize() == 0) {
+    m_pendingMesh.vertices = std::move(vertices);
+    m_pendingMesh.indices = std::move(indices);
+    m_hasPendingMesh = true;
+}
+
+void Chunk::UploadMesh(const RefPtr<Material>& material) {
+    if (!m_hasPendingMesh) return;
+    m_hasPendingMesh = false;
+
+    if (m_pendingMesh.vertices.GetSize() == 0) {
         m_meshBuilt = true;
         return;
     }
@@ -138,8 +147,8 @@ void Chunk::BuildMesh(const RefPtr<Material>& material) {
     delete m_gameObject;
 
     MeshData meshData;
-    meshData.vertices = std::move(vertices);
-    meshData.indices = std::move(indices);
+    meshData.vertices = std::move(m_pendingMesh.vertices);
+    meshData.indices = std::move(m_pendingMesh.indices);
 
     m_gameObject = new GameObject("Chunk");
     m_gameObject->AddComponent<TransformComponent>(
@@ -151,6 +160,11 @@ void Chunk::BuildMesh(const RefPtr<Material>& material) {
     m_gameObject->Initialize();
 
     m_meshBuilt = true;
+}
+
+void Chunk::BuildMesh(const RefPtr<Material>& material) {
+    GenerateMeshData();
+    UploadMesh(material);
 }
 
 void Chunk::AddToScene(SceneBase* scene) {
