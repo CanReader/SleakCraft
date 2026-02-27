@@ -114,23 +114,26 @@ void MainScene::Update(float deltaTime) {
 
         m_chunkManager.Update(pos.GetX(), pos.GetZ());
 
-        UI::BeginPanel("HUD", 10, 10);
-
-        UI::Text("Selected: %s [%d]", GetBlockName(m_selectedBlock),
-                 static_cast<int>(m_selectedBlock));
-
+        // Block outline - always visible regardless of UI toggle
         auto dir = cam->GetDirection();
         auto rayHit = m_chunkManager.VoxelRaycast(cam->GetPosition(), dir, 6.0f);
         if (rayHit.hit) {
-            UI::Text("Looking at: %s (%d, %d, %d)",
-                     GetBlockName(rayHit.blockType),
-                     rayHit.blockX, rayHit.blockY, rayHit.blockZ);
-
             constexpr float E = 0.002f;
             Physics::AABB blockAABB(
                 Vector3D(rayHit.blockX - E, rayHit.blockY - E, rayHit.blockZ - E),
                 Vector3D(rayHit.blockX + 1.0f + E, rayHit.blockY + 1.0f + E, rayHit.blockZ + 1.0f + E));
             DebugLineRenderer::DrawAABB(blockAABB, 0.0f, 0.0f, 0.0f);
+        }
+
+        UI::BeginPanel("HUD", 10, 10);
+
+        UI::Text("Selected: %s [%d]", GetBlockName(m_selectedBlock),
+                 static_cast<int>(m_selectedBlock));
+
+        if (rayHit.hit) {
+            UI::Text("Looking at: %s (%d, %d, %d)",
+                     GetBlockName(rayHit.blockType),
+                     rayHit.blockX, rayHit.blockY, rayHit.blockZ);
         } else {
             UI::Text("Looking at: ---");
         }
