@@ -254,7 +254,7 @@ void MainScene::SetupLighting() {
     auto* sun = new DirectionalLight("Sun");
     sun->SetDirection(Vector3D(-0.3f, -0.8f, -0.5f));
     sun->SetColor(1.0f, 0.98f, 0.92f);
-    sun->SetIntensity(0.8f);
+    sun->SetIntensity(0.6f);
     sun->SetCastShadows(false);
     sun->SetShadowBias(0.003f);
     sun->SetShadowNormalBias(0.04f);
@@ -267,7 +267,7 @@ void MainScene::SetupLighting() {
 
     auto* lm = GetLightManager();
     if (lm) {
-        lm->SetAmbientColor(0.6f, 0.65f, 0.75f);
-        lm->SetAmbientIntensity(0.3f);
+        lm->SetAmbientColor(0.55f, 0.6f, 0.7f);
+        lm->SetAmbientIntensity(0.25f);
     }
 }

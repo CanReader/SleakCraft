@@ -32,65 +32,28 @@ void main() {
 
     vec3 N = normalize(fragWorldNorm);
 
+    // Ambient - hemisphere
     vec3 ambientColor = AmbientColor * AmbientIntensity;
     vec3 groundColor = ambientColor * vec3(0.7, 0.65, 0.6);
     float hemisphere = N.y * 0.5 + 0.5;
     vec3 ambient = mix(groundColor, ambientColor, hemisphere);
 
+    // Diffuse - first directional light only (matches Vulkan path)
     vec3 diffuse = vec3(0.0);
-
     for (uint i = 0u; i < NumActiveLights; i++) {
         LightData light = Lights[i];
+        if (light.Type != 0u) continue;
 
-        vec3 L;
-        float attenuation = 1.0;
-
-        if (light.Type == 0u) {
-            L = normalize(-light.Direction);
-        }
-        else if (light.Type == 1u) {
-            vec3 toLight = light.Position - fragWorldPos;
-            float dist = length(toLight);
-            L = toLight / max(dist, 0.0001);
-            float d = dist / max(light.Range, 0.0001);
-            float d2 = d * d;
-            float d4 = d2 * d2;
-            float falloff = clamp(1.0 - d4, 0.0, 1.0);
-            attenuation = (falloff * falloff) / (dist * dist + 1.0);
-        }
-        else if (light.Type == 2u) {
-            vec3 toLight = light.Position - fragWorldPos;
-            float dist = length(toLight);
-            L = toLight / max(dist, 0.0001);
-            float d = dist / max(light.Range, 0.0001);
-            float d2 = d * d;
-            float d4 = d2 * d2;
-            float falloff = clamp(1.0 - d4, 0.0, 1.0);
-            attenuation = (falloff * falloff) / (dist * dist + 1.0);
-
-            float theta = dot(L, normalize(-light.Direction));
-            float epsilon = light.SpotInnerCos - light.SpotOuterCos;
-            float spotFactor = clamp(
-                (theta - light.SpotOuterCos) / max(epsilon, 0.0001),
-                0.0, 1.0);
-            attenuation *= spotFactor;
-        }
-        else {
-            vec3 toLight = light.Position - fragWorldPos;
-            float dist = length(toLight);
-            L = toLight / max(dist, 0.0001);
-            float d = dist / max(light.Range, 0.0001);
-            float d2 = d * d;
-            float d4 = d2 * d2;
-            float falloff = clamp(1.0 - d4, 0.0, 1.0);
-            attenuation = (falloff * falloff) / (dist * dist + 1.0);
-        }
-
+        vec3 L = normalize(-light.Direction);
         float NdotL = max(dot(N, L), 0.0);
-        diffuse += light.Color * light.Intensity * attenuation * NdotL;
+        diffuse = light.Color * light.Intensity * NdotL;
+        break;
     }
 
+    // Compose (no specular, no shadows)
     vec3 lit = baseColor.rgb * (ambient + diffuse);
+
+    // Reinhard tone mapping
     lit = lit / (lit + vec3(1.0));
 
     outColor = vec4(lit, baseColor.a);
