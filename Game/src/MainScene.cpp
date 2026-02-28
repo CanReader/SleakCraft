@@ -1,5 +1,6 @@
 #include "MainScene.hpp"
 #include <Core/GameObject.hpp>
+#include <Core/Application.hpp>
 #include <Math/Vector.hpp>
 #include <Lighting/DirectionalLight.hpp>
 #include <Lighting/LightManager.hpp>
@@ -80,11 +81,19 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
     if_key_press(KEY__1) { m_selectedBlock = BlockType::Grass; }
     if_key_press(KEY__2) { m_selectedBlock = BlockType::Dirt; }
     if_key_press(KEY__3) { m_selectedBlock = BlockType::Stone; }
+    if_key_press(KEY__F3) { m_showUI = !m_showUI; }
 }
 
 void MainScene::Update(float deltaTime) {
     if (deltaTime > 0.05f) deltaTime = 0.05f;
     Scene::Update(deltaTime);
+
+    // Refresh cached metrics
+    m_metricTimer += deltaTime;
+    if (m_metricTimer >= 0.5f) {
+        m_cachedMetrics = SystemMetrics::Query();
+        m_metricTimer = 0.0f;
+    }
 
     auto* cam = GetDebugCamera();
     if (cam) {
@@ -114,7 +123,7 @@ void MainScene::Update(float deltaTime) {
 
         m_chunkManager.Update(pos.GetX(), pos.GetZ());
 
-        // Block outline - always visible regardless of UI toggle
+        // Block outline always visible
         auto dir = cam->GetDirection();
         auto rayHit = m_chunkManager.VoxelRaycast(cam->GetPosition(), dir, 6.0f);
         if (rayHit.hit) {
@@ -125,30 +134,99 @@ void MainScene::Update(float deltaTime) {
             DebugLineRenderer::DrawAABB(blockAABB, 0.0f, 0.0f, 0.0f);
         }
 
-        UI::BeginPanel("HUD", 10, 10);
-
-        UI::Text("Selected: %s [%d]", GetBlockName(m_selectedBlock),
-                 static_cast<int>(m_selectedBlock));
-
-        if (rayHit.hit) {
-            UI::Text("Looking at: %s (%d, %d, %d)",
-                     GetBlockName(rayHit.blockType),
-                     rayHit.blockX, rayHit.blockY, rayHit.blockZ);
-        } else {
-            UI::Text("Looking at: ---");
-        }
-
-        UI::EndPanel();
-
-        UI::BeginPanel("Settings", 10, 100, 0.4f,
-                        UI::PanelFlags_NoTitleBar |
-                        UI::PanelFlags_AutoResize |
-                        UI::PanelFlags_NoMove |
-                        UI::PanelFlags_NoFocusOnAppear);
-        if (UI::Checkbox("Multithreaded Loading", &m_multithreadedLoading))
-            m_chunkManager.SetMultithreaded(m_multithreadedLoading);
-        UI::EndPanel();
+        if (m_showUI)
+            RenderUI();
     }
+}
+
+void MainScene::RenderUI() {
+    auto* cam = GetDebugCamera();
+    auto* app = Application::GetInstance();
+    if (!cam || !app) return;
+
+    // --- HUD panel (top-left) ---
+    UI::BeginPanel("HUD", 0, 0);
+
+    UI::Text("Selected: %s [%d]", GetBlockName(m_selectedBlock),
+             static_cast<int>(m_selectedBlock));
+
+    auto dir = cam->GetDirection();
+    auto rayHit = m_chunkManager.VoxelRaycast(cam->GetPosition(), dir, 6.0f);
+    if (rayHit.hit) {
+        UI::Text("Looking at: %s (%d, %d, %d)",
+                 GetBlockName(rayHit.blockType),
+                 rayHit.blockX, rayHit.blockY, rayHit.blockZ);
+    } else {
+        UI::Text("Looking at: ---");
+    }
+
+    UI::Separator();
+    UI::Text("Position:  %s", cam->GetPosition().ToString().c_str());
+    UI::Text("Direction: %s", cam->GetDirection().ToString().c_str());
+
+    float fov = cam->GetFieldOfView();
+    if (UI::DragFloat("FOV", &fov, 1.0f, 30.0f, 125.0f))
+        cam->SetFieldOfView(fov);
+
+    UI::EndPanel();
+
+    // --- Performance panel (top-right) ---
+    UI::BeginPanel("Performance", UI::GetViewportWidth() - 200, 0,
+                   0.3f);
+
+    float r, g, b;
+    app->GetRendererTypeColor(r, g, b);
+    UI::TextColored(r, g, b, 1.0f, "%s", app->GetRendererTypeStr());
+
+    UI::Separator();
+    UI::Text("FPS: %d", app->GetFPS());
+    UI::Text("Frame Time: %.2f ms", app->GetFrameTime());
+
+    UI::Separator();
+    UI::Text("Vertices:  %d", app->GetVertices());
+    UI::Text("Triangles: %d", app->GetTriangles());
+
+    UI::Separator();
+    UI::Text("CPU: %.1f%%", m_cachedMetrics.CpuUsagePercent);
+    UI::Text("RAM: %.1f MB", m_cachedMetrics.RamUsageMB);
+
+    if (m_cachedMetrics.GpuUsagePercent > 0.0f)
+        UI::Text("GPU: %.1f%%", m_cachedMetrics.GpuUsagePercent);
+    else
+        UI::TextDisabled("GPU: N/A");
+
+    UI::EndPanel();
+
+    // --- Settings panel (below HUD) ---
+    UI::BeginPanel("Settings", 0, 120, 0.4f,
+                    UI::PanelFlags_NoTitleBar |
+                    UI::PanelFlags_AutoResize |
+                    UI::PanelFlags_NoMove |
+                    UI::PanelFlags_NoFocusOnAppear);
+
+    if (UI::Checkbox("Multithreaded Loading", &m_multithreadedLoading))
+        m_chunkManager.SetMultithreaded(m_multithreadedLoading);
+
+    if (UI::Checkbox("Show Colliders", &m_showColliders))
+        DebugLineRenderer::SetEnabled(m_showColliders);
+
+    UI::Separator();
+    UI::Text("Anti-Aliasing");
+    {
+        const char* labels[] = {"Off", "2x", "4x", "8x"};
+        int values[] = {1, 2, 4, 8};
+        int count = 1;
+        uint32_t maxMSAA = app->GetMaxMSAASampleCount();
+        for (int i = 1; i < 4; i++)
+            if (static_cast<uint32_t>(values[i]) <= maxMSAA) count = i + 1;
+        int current = 0;
+        for (int i = 0; i < count; i++)
+            if (static_cast<uint32_t>(values[i]) == app->GetMSAASampleCount()) current = i;
+        if (UI::Combo("MSAA", &current, labels, count))
+            app->SetMSAASampleCount(values[current]);
+    }
+
+    UI::EndPanel();
 }
 
 void MainScene::SetupMaterial() {
