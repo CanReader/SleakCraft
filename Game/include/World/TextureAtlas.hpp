@@ -10,7 +10,7 @@ struct AtlasUV {
 
 class TextureAtlas {
 public:
-    static constexpr int TILE_SIZE = 16;
+    static constexpr int TILE_SIZE = 512;
     static constexpr int TILES_PER_ROW = 4;
     static constexpr int ATLAS_WIDTH = TILE_SIZE * TILES_PER_ROW;
     static constexpr int ATLAS_HEIGHT = TILE_SIZE;
