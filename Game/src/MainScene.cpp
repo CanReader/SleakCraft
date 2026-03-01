@@ -252,22 +252,22 @@ void MainScene::SetupSkybox() {
 
 void MainScene::SetupLighting() {
     auto* sun = new DirectionalLight("Sun");
-    sun->SetDirection(Vector3D(-0.3f, -0.8f, -0.5f));
-    sun->SetColor(1.0f, 0.98f, 0.92f);
-    sun->SetIntensity(0.6f);
+    sun->SetDirection(Vector3D(-0.35f, -0.75f, -0.45f));
+    sun->SetColor(1.0f, 0.95f, 0.85f);
+    sun->SetIntensity(0.85f);
     sun->SetCastShadows(true);
-    sun->SetShadowBias(0.003f);
-    sun->SetShadowNormalBias(0.04f);
-    sun->SetLightSize(1.5f);
-    sun->SetShadowFrustumSize(60.0f);
-    sun->SetShadowDistance(100.0f);
+    sun->SetShadowBias(0.002f);
+    sun->SetShadowNormalBias(0.03f);
+    sun->SetLightSize(3.0f);
+    sun->SetShadowFrustumSize(80.0f);
+    sun->SetShadowDistance(120.0f);
     sun->SetShadowNearPlane(0.1f);
-    sun->SetShadowFarPlane(150.0f);
+    sun->SetShadowFarPlane(200.0f);
     AddObject(sun);
 
     auto* lm = GetLightManager();
     if (lm) {
-        lm->SetAmbientColor(0.55f, 0.6f, 0.7f);
-        lm->SetAmbientIntensity(0.25f);
+        lm->SetAmbientColor(0.45f, 0.52f, 0.65f);
+        lm->SetAmbientIntensity(0.2f);
     }
 }
