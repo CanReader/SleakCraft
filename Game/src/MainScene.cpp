@@ -258,7 +258,7 @@ void MainScene::SetupLighting() {
     sun->SetCastShadows(true);
     sun->SetShadowBias(0.002f);
     sun->SetShadowNormalBias(0.03f);
-    sun->SetLightSize(3.0f);
+    sun->SetLightSize(6.0f);
     sun->SetShadowFrustumSize(80.0f);
     sun->SetShadowDistance(120.0f);
     sun->SetShadowNearPlane(0.1f);
