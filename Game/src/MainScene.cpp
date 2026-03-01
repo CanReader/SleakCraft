@@ -255,7 +255,7 @@ void MainScene::SetupLighting() {
     sun->SetDirection(Vector3D(-0.3f, -0.8f, -0.5f));
     sun->SetColor(1.0f, 0.98f, 0.92f);
     sun->SetIntensity(0.6f);
-    sun->SetCastShadows(false);
+    sun->SetCastShadows(true);
     sun->SetShadowBias(0.003f);
     sun->SetShadowNormalBias(0.04f);
     sun->SetLightSize(1.5f);

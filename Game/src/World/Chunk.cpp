@@ -55,6 +55,66 @@ bool Chunk::IsBlockSolidAt(int x, int y, int z) const {
     return false;
 }
 
+static int CalcAO(bool side1, bool side2, bool corner) {
+    if (side1 && side2) return 0;
+    return 3 - (static_cast<int>(side1) + static_cast<int>(side2) + static_cast<int>(corner));
+}
+
+void Chunk::ComputeFaceAO(BlockFace face, int x, int y, int z, float ao[4]) const {
+    static constexpr float AO_TABLE[] = {0.25f, 0.55f, 0.8f, 1.0f};
+
+    switch (face) {
+        case BlockFace::Top: {
+            int ay = y + 1;
+            ao[0] = AO_TABLE[CalcAO(IsBlockSolidAt(x-1,ay,z),   IsBlockSolidAt(x,ay,z-1),   IsBlockSolidAt(x-1,ay,z-1))];
+            ao[1] = AO_TABLE[CalcAO(IsBlockSolidAt(x-1,ay,z),   IsBlockSolidAt(x,ay,z+1),   IsBlockSolidAt(x-1,ay,z+1))];
+            ao[2] = AO_TABLE[CalcAO(IsBlockSolidAt(x+1,ay,z),   IsBlockSolidAt(x,ay,z+1),   IsBlockSolidAt(x+1,ay,z+1))];
+            ao[3] = AO_TABLE[CalcAO(IsBlockSolidAt(x+1,ay,z),   IsBlockSolidAt(x,ay,z-1),   IsBlockSolidAt(x+1,ay,z-1))];
+            break;
+        }
+        case BlockFace::Bottom: {
+            int ay = y - 1;
+            ao[0] = AO_TABLE[CalcAO(IsBlockSolidAt(x-1,ay,z),   IsBlockSolidAt(x,ay,z+1),   IsBlockSolidAt(x-1,ay,z+1))];
+            ao[1] = AO_TABLE[CalcAO(IsBlockSolidAt(x-1,ay,z),   IsBlockSolidAt(x,ay,z-1),   IsBlockSolidAt(x-1,ay,z-1))];
+            ao[2] = AO_TABLE[CalcAO(IsBlockSolidAt(x+1,ay,z),   IsBlockSolidAt(x,ay,z-1),   IsBlockSolidAt(x+1,ay,z-1))];
+            ao[3] = AO_TABLE[CalcAO(IsBlockSolidAt(x+1,ay,z),   IsBlockSolidAt(x,ay,z+1),   IsBlockSolidAt(x+1,ay,z+1))];
+            break;
+        }
+        case BlockFace::North: {
+            int az = z + 1;
+            ao[0] = AO_TABLE[CalcAO(IsBlockSolidAt(x+1,y,az),   IsBlockSolidAt(x,y-1,az),   IsBlockSolidAt(x+1,y-1,az))];
+            ao[1] = AO_TABLE[CalcAO(IsBlockSolidAt(x+1,y,az),   IsBlockSolidAt(x,y+1,az),   IsBlockSolidAt(x+1,y+1,az))];
+            ao[2] = AO_TABLE[CalcAO(IsBlockSolidAt(x-1,y,az),   IsBlockSolidAt(x,y+1,az),   IsBlockSolidAt(x-1,y+1,az))];
+            ao[3] = AO_TABLE[CalcAO(IsBlockSolidAt(x-1,y,az),   IsBlockSolidAt(x,y-1,az),   IsBlockSolidAt(x-1,y-1,az))];
+            break;
+        }
+        case BlockFace::South: {
+            int az = z - 1;
+            ao[0] = AO_TABLE[CalcAO(IsBlockSolidAt(x-1,y,az),   IsBlockSolidAt(x,y-1,az),   IsBlockSolidAt(x-1,y-1,az))];
+            ao[1] = AO_TABLE[CalcAO(IsBlockSolidAt(x-1,y,az),   IsBlockSolidAt(x,y+1,az),   IsBlockSolidAt(x-1,y+1,az))];
+            ao[2] = AO_TABLE[CalcAO(IsBlockSolidAt(x+1,y,az),   IsBlockSolidAt(x,y+1,az),   IsBlockSolidAt(x+1,y+1,az))];
+            ao[3] = AO_TABLE[CalcAO(IsBlockSolidAt(x+1,y,az),   IsBlockSolidAt(x,y-1,az),   IsBlockSolidAt(x+1,y-1,az))];
+            break;
+        }
+        case BlockFace::East: {
+            int ax = x + 1;
+            ao[0] = AO_TABLE[CalcAO(IsBlockSolidAt(ax,y,z-1),   IsBlockSolidAt(ax,y-1,z),   IsBlockSolidAt(ax,y-1,z-1))];
+            ao[1] = AO_TABLE[CalcAO(IsBlockSolidAt(ax,y,z-1),   IsBlockSolidAt(ax,y+1,z),   IsBlockSolidAt(ax,y+1,z-1))];
+            ao[2] = AO_TABLE[CalcAO(IsBlockSolidAt(ax,y,z+1),   IsBlockSolidAt(ax,y+1,z),   IsBlockSolidAt(ax,y+1,z+1))];
+            ao[3] = AO_TABLE[CalcAO(IsBlockSolidAt(ax,y,z+1),   IsBlockSolidAt(ax,y-1,z),   IsBlockSolidAt(ax,y-1,z+1))];
+            break;
+        }
+        case BlockFace::West: {
+            int ax = x - 1;
+            ao[0] = AO_TABLE[CalcAO(IsBlockSolidAt(ax,y,z+1),   IsBlockSolidAt(ax,y-1,z),   IsBlockSolidAt(ax,y-1,z+1))];
+            ao[1] = AO_TABLE[CalcAO(IsBlockSolidAt(ax,y,z+1),   IsBlockSolidAt(ax,y+1,z),   IsBlockSolidAt(ax,y+1,z+1))];
+            ao[2] = AO_TABLE[CalcAO(IsBlockSolidAt(ax,y,z-1),   IsBlockSolidAt(ax,y+1,z),   IsBlockSolidAt(ax,y+1,z-1))];
+            ao[3] = AO_TABLE[CalcAO(IsBlockSolidAt(ax,y,z-1),   IsBlockSolidAt(ax,y-1,z),   IsBlockSolidAt(ax,y-1,z-1))];
+            break;
+        }
+    }
+}
+
 void Chunk::AddFace(BlockFace face, int x, int y, int z, BlockType type,
                     VertexGroup& vertices, IndexGroup& indices) {
     AtlasUV uv = TextureAtlas::GetTileUV(GetBlockTextureTile(type, face));
@@ -63,51 +123,70 @@ void Chunk::AddFace(BlockFace face, int x, int y, int z, BlockType type,
     float by = static_cast<float>(y);
     float bz = static_cast<float>(z);
 
+    float ao[4];
+    ComputeFaceAO(face, x, y, z, ao);
+
+    Vertex v[4];
     switch (face) {
         case BlockFace::Top:
-            vertices.AddVertex(Vertex(bx,     by + 1, bz,     0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v1));
-            vertices.AddVertex(Vertex(bx,     by + 1, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v0));
-            vertices.AddVertex(Vertex(bx + 1, by + 1, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v0));
-            vertices.AddVertex(Vertex(bx + 1, by + 1, bz,     0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v1));
+            v[0] = Vertex(bx,     by + 1, bz,     0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v1);
+            v[1] = Vertex(bx,     by + 1, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v0);
+            v[2] = Vertex(bx + 1, by + 1, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v0);
+            v[3] = Vertex(bx + 1, by + 1, bz,     0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v1);
             break;
         case BlockFace::Bottom:
-            vertices.AddVertex(Vertex(bx,     by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v1));
-            vertices.AddVertex(Vertex(bx,     by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v0));
-            vertices.AddVertex(Vertex(bx + 1, by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v0));
-            vertices.AddVertex(Vertex(bx + 1, by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v1));
+            v[0] = Vertex(bx,     by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v1);
+            v[1] = Vertex(bx,     by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v0);
+            v[2] = Vertex(bx + 1, by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v0);
+            v[3] = Vertex(bx + 1, by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v1);
             break;
         case BlockFace::North:
-            vertices.AddVertex(Vertex(bx + 1, by,     bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v1));
-            vertices.AddVertex(Vertex(bx + 1, by + 1, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v0));
-            vertices.AddVertex(Vertex(bx,     by + 1, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v0));
-            vertices.AddVertex(Vertex(bx,     by,     bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v1));
+            v[0] = Vertex(bx + 1, by,     bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v1);
+            v[1] = Vertex(bx + 1, by + 1, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v0);
+            v[2] = Vertex(bx,     by + 1, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v0);
+            v[3] = Vertex(bx,     by,     bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v1);
             break;
         case BlockFace::South:
-            vertices.AddVertex(Vertex(bx,     by,     bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v1));
-            vertices.AddVertex(Vertex(bx,     by + 1, bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v0));
-            vertices.AddVertex(Vertex(bx + 1, by + 1, bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v0));
-            vertices.AddVertex(Vertex(bx + 1, by,     bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v1));
+            v[0] = Vertex(bx,     by,     bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v1);
+            v[1] = Vertex(bx,     by + 1, bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v0);
+            v[2] = Vertex(bx + 1, by + 1, bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v0);
+            v[3] = Vertex(bx + 1, by,     bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v1);
             break;
         case BlockFace::East:
-            vertices.AddVertex(Vertex(bx + 1, by,     bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v1));
-            vertices.AddVertex(Vertex(bx + 1, by + 1, bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v0));
-            vertices.AddVertex(Vertex(bx + 1, by + 1, bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v0));
-            vertices.AddVertex(Vertex(bx + 1, by,     bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v1));
+            v[0] = Vertex(bx + 1, by,     bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v1);
+            v[1] = Vertex(bx + 1, by + 1, bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v0);
+            v[2] = Vertex(bx + 1, by + 1, bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v0);
+            v[3] = Vertex(bx + 1, by,     bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v1);
             break;
         case BlockFace::West:
-            vertices.AddVertex(Vertex(bx, by,     bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v1));
-            vertices.AddVertex(Vertex(bx, by + 1, bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v0));
-            vertices.AddVertex(Vertex(bx, by + 1, bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v0));
-            vertices.AddVertex(Vertex(bx, by,     bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v1));
+            v[0] = Vertex(bx, by,     bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v1);
+            v[1] = Vertex(bx, by + 1, bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v0);
+            v[2] = Vertex(bx, by + 1, bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v0);
+            v[3] = Vertex(bx, by,     bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v1);
             break;
     }
 
-    indices.add(base);
-    indices.add(base + 2);
-    indices.add(base + 1);
-    indices.add(base);
-    indices.add(base + 3);
-    indices.add(base + 2);
+    for (int i = 0; i < 4; ++i) {
+        v[i].SetColor(ao[i], ao[i], ao[i], 1.0f);
+        vertices.AddVertex(v[i]);
+    }
+
+    // Flip quad diagonal when AO creates anisotropy to avoid ugly artifacts
+    if (ao[0] + ao[2] > ao[1] + ao[3]) {
+        indices.add(base);
+        indices.add(base + 2);
+        indices.add(base + 1);
+        indices.add(base);
+        indices.add(base + 3);
+        indices.add(base + 2);
+    } else {
+        indices.add(base);
+        indices.add(base + 3);
+        indices.add(base + 1);
+        indices.add(base + 1);
+        indices.add(base + 3);
+        indices.add(base + 2);
+    }
 }
 
 void Chunk::GenerateMeshData() {
