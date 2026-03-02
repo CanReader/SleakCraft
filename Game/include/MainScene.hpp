@@ -40,6 +40,7 @@ private:
 
     // UI state
     bool m_showUI = true;
+    bool m_showCrosshair = true;
     bool m_showColliders = false;
     Sleak::SystemMetricsData m_cachedMetrics;
     float m_metricTimer = 0.0f;

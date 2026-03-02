@@ -149,6 +149,14 @@ void MainScene::Update(float deltaTime) {
         if (m_saveMessageTimer > 0.0f)
             m_saveMessageTimer -= deltaTime;
 
+        if (m_showCrosshair) {
+            float cx = UI::GetViewportWidth() * 0.5f;
+            float cy = UI::GetViewportHeight() * 0.5f;
+            constexpr float arm = 10.0f;
+            UI::DrawLine(cx - arm, cy, cx + arm, cy, 1.0f, 1.0f, 1.0f, 0.8f, 2.0f);
+            UI::DrawLine(cx, cy - arm, cx, cy + arm, 1.0f, 1.0f, 1.0f, 0.8f, 2.0f);
+        }
+
         if (m_showUI)
             RenderUI();
     }
@@ -227,6 +235,8 @@ void MainScene::RenderUI() {
                     UI::PanelFlags_AutoResize |
                     UI::PanelFlags_NoMove |
                     UI::PanelFlags_NoFocusOnAppear);
+
+    UI::Checkbox("Show Crosshair", &m_showCrosshair);
 
     if (UI::Checkbox("Multithreaded Loading", &m_multithreadedLoading))
         m_chunkManager.SetMultithreaded(m_multithreadedLoading);
