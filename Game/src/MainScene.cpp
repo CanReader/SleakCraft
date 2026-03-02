@@ -31,7 +31,7 @@ bool MainScene::Initialize() {
 
     auto* cam = GetDebugCamera();
     if (cam) {
-        cam->SetPosition({8.0f, 6.62f, 8.0f});
+        cam->SetPosition({8.0f, 70.0f, 8.0f});
         cam->SetDirection({0.0f, 0.0f, 1.0f});
         cam->SetFarPlane(1500.0f);
         auto* fpc = cam->GetComponent<FirstPersonController>();
@@ -51,9 +51,17 @@ bool MainScene::Initialize() {
 
     m_chunkManager.Initialize(this, m_blockMaterial);
     m_chunkManager.SetRenderDistance(8);
-    m_chunkManager.Update(8.0f, 8.0f);
+    m_chunkManager.SetSeed(42);
+    m_chunkManager.Update(8.0f, 70.0f, 8.0f);
     m_chunkManager.FlushPendingChunks();
     m_chunkManager.SetMultithreaded(m_multithreadedLoading);
+
+    // Find surface height at spawn and position camera above it
+    if (cam) {
+        int surfaceY = m_chunkManager.GetGenerator().GetSurfaceHeight(8, 8);
+        float spawnY = static_cast<float>(surfaceY) + 2.62f; // feet on surface + eye offset
+        cam->SetPosition({8.0f, spawnY, 8.0f});
+    }
 
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
@@ -74,7 +82,13 @@ void MainScene::OnMousePressed(const Events::Input::MouseButtonPressedEvent& e) 
     if (button == MouseCode::ButtonLeft) {
         m_chunkManager.SetBlockAt(hit.blockX, hit.blockY, hit.blockZ, BlockType::Air);
     } else if (button == MouseCode::ButtonRight) {
-        m_chunkManager.SetBlockAt(hit.placeX, hit.placeY, hit.placeZ, m_selectedBlock);
+        // Prevent placing a block inside the player's bounding box
+        float feetY = pos.GetY() - 1.62f;
+        bool overlaps = (hit.placeX + 1 > pos.GetX() - 0.3f && hit.placeX < pos.GetX() + 0.3f) &&
+                        (hit.placeY + 1 > feetY             && hit.placeY < feetY + 1.8f) &&
+                        (hit.placeZ + 1 > pos.GetZ() - 0.3f && hit.placeZ < pos.GetZ() + 0.3f);
+        if (!overlaps)
+            m_chunkManager.SetBlockAt(hit.placeX, hit.placeY, hit.placeZ, m_selectedBlock);
     }
 }
 
@@ -124,7 +138,7 @@ void MainScene::Update(float deltaTime) {
             }
         }
 
-        m_chunkManager.Update(pos.GetX(), pos.GetZ());
+        m_chunkManager.Update(pos.GetX(), pos.GetY(), pos.GetZ());
 
         // Block outline always visible
         auto dir = cam->GetDirection();
@@ -268,6 +282,7 @@ void MainScene::SaveGame() {
     if (!cam) return;
 
     WorldMeta meta;
+    meta.seed = m_chunkManager.GetSeed();
     auto pos = cam->GetPosition();
     meta.player.posX = pos.GetX();
     meta.player.posY = pos.GetY();
@@ -331,12 +346,13 @@ void MainScene::LoadGame() {
 
     m_selectedBlock = static_cast<BlockType>(meta.player.selectedBlock);
 
-    // Load saved block data and force reload all chunks
+    // Restore seed and reload all chunks
+    m_chunkManager.SetSeed(meta.seed);
     m_chunkManager.LoadChunkData(chunkData);
     m_chunkManager.ForceReload();
 
     // Trigger immediate chunk loading around restored position
-    m_chunkManager.Update(meta.player.posX, meta.player.posZ);
+    m_chunkManager.Update(meta.player.posX, meta.player.posY, meta.player.posZ);
     m_chunkManager.FlushPendingChunks();
     m_chunkManager.SetMultithreaded(m_multithreadedLoading);
 

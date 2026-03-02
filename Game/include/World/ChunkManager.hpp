@@ -2,6 +2,7 @@
 #define _CHUNK_MANAGER_HPP_
 
 #include "Chunk.hpp"
+#include "WorldGenerator.hpp"
 #include <Math/Vector.hpp>
 #include <Memory/RefPtr.h>
 #include <unordered_map>
@@ -55,7 +56,7 @@ public:
     ~ChunkManager();
 
     void Initialize(Sleak::SceneBase* scene, const Sleak::RefPtr<Sleak::Material>& material);
-    void Update(float playerX, float playerZ);
+    void Update(float playerX, float playerY, float playerZ);
 
     void FlushPendingChunks();
     void SetRenderDistance(int chunks) { m_renderDistance = chunks; }
@@ -66,6 +67,10 @@ public:
 
     void SetDrawDistance(float dist) { m_drawDistance = dist; m_drawDistSq = dist * dist; }
     float GetDrawDistance() const { return m_drawDistance; }
+
+    void SetSeed(uint32_t seed) { m_generator.SetSeed(seed); }
+    uint32_t GetSeed() const { return m_generator.GetSeed(); }
+    const WorldGenerator& GetGenerator() const { return m_generator; }
 
     void FrustumCull() const;
 
@@ -89,7 +94,6 @@ public:
     void ForceReload();
 
 private:
-    void GenerateFlatTerrain(Chunk* chunk);
     void LinkNeighbors(const ChunkCoord& coord, Chunk* chunk);
     Chunk* GetChunk(int cx, int cy, int cz);
     const Chunk* GetChunk(int cx, int cy, int cz) const;
@@ -104,12 +108,14 @@ private:
     Sleak::SceneBase* m_scene = nullptr;
     Sleak::RefPtr<Sleak::Material> m_material;
     int m_renderDistance = 8;
-    int m_chunksPerFrame = 4;
-    int m_uploadsPerFrame = 4;
+    int m_chunksPerFrame = 8;
+    int m_uploadsPerFrame = 8;
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
     int m_lastCenterX = INT_MAX;
+    int m_lastCenterY = INT_MAX;
     int m_lastCenterZ = INT_MAX;
+    WorldGenerator m_generator;
 
     // Multithreading
     bool m_multithreaded = false;
@@ -120,8 +126,6 @@ private:
     std::mutex m_readyMutex;
     std::vector<Chunk*> m_readyQueue;
     std::atomic<bool> m_shutdown{false};
-
-    static constexpr int SURFACE_HEIGHT = 4;
 
     // Saved block data for chunk restoration
     std::unordered_map<int64_t, std::array<uint8_t, 4096>> m_savedBlockData;

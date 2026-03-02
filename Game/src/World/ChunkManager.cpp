@@ -80,6 +80,8 @@ void ChunkManager::WorkerThread() {
 void ChunkManager::Initialize(Sleak::SceneBase* scene, const Sleak::RefPtr<Sleak::Material>& material) {
     m_scene = scene;
     m_material = material;
+    m_drawDistance = static_cast<float>(m_renderDistance * Chunk::SIZE);
+    m_drawDistSq = m_drawDistance * m_drawDistance;
 }
 
 Chunk* ChunkManager::GetChunk(int cx, int cy, int cz) {
@@ -355,40 +357,22 @@ void ChunkManager::LinkNeighbors(const ChunkCoord& coord, Chunk* chunk) {
     }
 }
 
-void ChunkManager::GenerateFlatTerrain(Chunk* chunk) {
-    int worldBaseY = chunk->GetChunkY() * Chunk::SIZE;
-
-    for (int y = 0; y < Chunk::SIZE; ++y) {
-        int worldY = worldBaseY + y;
-        if (worldY > SURFACE_HEIGHT) break;
-
-        BlockType type;
-        if (worldY < SURFACE_HEIGHT - 1)
-            type = BlockType::Stone;
-        else if (worldY == SURFACE_HEIGHT - 1)
-            type = BlockType::Dirt;
-        else
-            type = BlockType::Grass;
-
-        for (int z = 0; z < Chunk::SIZE; ++z)
-            for (int x = 0; x < Chunk::SIZE; ++x)
-                chunk->SetBlock(x, y, z, type);
-    }
-}
-
-void ChunkManager::Update(float playerX, float playerZ) {
+void ChunkManager::Update(float playerX, float playerY, float playerZ) {
     int centerX = static_cast<int>(std::floor(playerX / Chunk::SIZE));
+    int centerY = static_cast<int>(std::floor(playerY / Chunk::SIZE));
     int centerZ = static_cast<int>(std::floor(playerZ / Chunk::SIZE));
 
-    if (centerX != m_lastCenterX || centerZ != m_lastCenterZ) {
+    if (centerX != m_lastCenterX || centerY != m_lastCenterY || centerZ != m_lastCenterZ) {
         m_lastCenterX = centerX;
+        m_lastCenterY = centerY;
         m_lastCenterZ = centerZ;
 
         // Unload chunks out of range
         std::vector<ChunkCoord> toRemove;
         for (auto& [coord, chunk] : m_chunks) {
             if (std::abs(coord.x - centerX) > m_renderDistance ||
-                std::abs(coord.z - centerZ) > m_renderDistance) {
+                std::abs(coord.z - centerZ) > m_renderDistance ||
+                coord.y < WorldGenerator::MIN_CHUNK_Y || coord.y > WorldGenerator::MAX_CHUNK_Y) {
                 chunk->RemoveFromScene(m_scene);
                 toRemove.push_back(coord);
             }
@@ -409,22 +393,27 @@ void ChunkManager::Update(float playerX, float playerZ) {
                 }),
             m_pendingLoad.end());
 
-        // Queue new chunks sorted by distance to player (closest first)
-        int cy = 0;
+        // Queue new chunks — iterate XZ then Y column
         for (int cx = centerX - m_renderDistance; cx <= centerX + m_renderDistance; ++cx) {
             for (int cz = centerZ - m_renderDistance; cz <= centerZ + m_renderDistance; ++cz) {
-                ChunkCoord coord{cx, cy, cz};
-                if (m_chunks.count(coord) || m_pendingSet.count(coord)) continue;
-                m_pendingLoad.push_back(coord);
-                m_pendingSet.insert(coord);
+                for (int cy = WorldGenerator::MIN_CHUNK_Y; cy <= WorldGenerator::MAX_CHUNK_Y; ++cy) {
+                    ChunkCoord coord{cx, cy, cz};
+                    if (m_chunks.count(coord) || m_pendingSet.count(coord)) continue;
+                    m_pendingLoad.push_back(coord);
+                    m_pendingSet.insert(coord);
+                }
             }
         }
 
+        // Sort: primary XZ distance, secondary Y distance from player
         std::sort(m_pendingLoad.begin(), m_pendingLoad.end(),
             [&](const ChunkCoord& a, const ChunkCoord& b) {
-                int da = (a.x - centerX) * (a.x - centerX) + (a.z - centerZ) * (a.z - centerZ);
-                int db = (b.x - centerX) * (b.x - centerX) + (b.z - centerZ) * (b.z - centerZ);
-                return da < db;
+                int daXZ = (a.x - centerX) * (a.x - centerX) + (a.z - centerZ) * (a.z - centerZ);
+                int dbXZ = (b.x - centerX) * (b.x - centerX) + (b.z - centerZ) * (b.z - centerZ);
+                if (daXZ != dbXZ) return daXZ < dbXZ;
+                int daY = std::abs(a.y - centerY);
+                int dbY = std::abs(b.y - centerY);
+                return daY < dbY;
             });
     }
 
@@ -470,10 +459,12 @@ void ChunkManager::Update(float playerX, float playerZ) {
                 std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                             savedIt->second.data(), 4096);
             } else {
-                GenerateFlatTerrain(chunk);
+                m_generator.Generate(chunk);
             }
             LinkNeighbors(coord, chunk);
-            batch.push_back(chunk);
+            if (!m_generator.IsChunkEmpty(chunk)) {
+                batch.push_back(chunk);
+            }
             ++dispatched;
         }
 
@@ -505,11 +496,13 @@ void ChunkManager::Update(float playerX, float playerZ) {
                 std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                             savedIt->second.data(), 4096);
             } else {
-                GenerateFlatTerrain(chunk);
+                m_generator.Generate(chunk);
             }
             LinkNeighbors(coord, chunk);
-            chunk->BuildMesh(m_material);
-            chunk->AddToScene(m_scene);
+            if (!m_generator.IsChunkEmpty(chunk)) {
+                chunk->BuildMesh(m_material);
+                chunk->AddToScene(m_scene);
+            }
             ++built;
         }
     }
@@ -533,11 +526,13 @@ void ChunkManager::FlushPendingChunks() {
             std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                         savedIt->second.data(), 4096);
         } else {
-            GenerateFlatTerrain(chunk);
+            m_generator.Generate(chunk);
         }
         LinkNeighbors(coord, chunk);
-        chunk->BuildMesh(m_material);
-        chunk->AddToScene(m_scene);
+        if (!m_generator.IsChunkEmpty(chunk)) {
+            chunk->BuildMesh(m_material);
+            chunk->AddToScene(m_scene);
+        }
     }
 }
 
@@ -581,6 +576,7 @@ void ChunkManager::ForceReload() {
     m_pendingLoad.clear();
     m_pendingSet.clear();
     m_lastCenterX = INT_MAX;
+    m_lastCenterY = INT_MAX;
     m_lastCenterZ = INT_MAX;
 
     if (wasMultithreaded) StartWorkers();

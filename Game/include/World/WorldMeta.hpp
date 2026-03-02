@@ -6,7 +6,7 @@
 #include <vector>
 
 struct PlayerState {
-    float posX = 8.0f, posY = 6.62f, posZ = 8.0f;
+    float posX = 8.0f, posY = 70.0f, posZ = 8.0f;
     float pitch = 0.0f, yaw = 0.0f;
     uint8_t selectedBlock = 1; // BlockType::Grass
     int32_t renderDistance = 8;
