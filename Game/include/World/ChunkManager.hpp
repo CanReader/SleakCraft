@@ -95,6 +95,8 @@ public:
 
 private:
     void LinkNeighbors(const ChunkCoord& coord, Chunk* chunk);
+    void UnlinkNeighbors(const ChunkCoord& coord, Chunk* chunk);
+    bool IsNeighborOfInFlight(const ChunkCoord& coord) const;
     Chunk* GetChunk(int cx, int cy, int cz);
     const Chunk* GetChunk(int cx, int cy, int cz) const;
 

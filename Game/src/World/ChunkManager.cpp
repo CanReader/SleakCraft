@@ -357,6 +357,33 @@ void ChunkManager::LinkNeighbors(const ChunkCoord& coord, Chunk* chunk) {
     }
 }
 
+void ChunkManager::UnlinkNeighbors(const ChunkCoord& coord, Chunk* chunk) {
+    struct { BlockFace face; int dx, dy, dz; BlockFace opposite; } dirs[] = {
+        {BlockFace::Top,    0,  1,  0, BlockFace::Bottom},
+        {BlockFace::Bottom, 0, -1,  0, BlockFace::Top},
+        {BlockFace::North,  0,  0,  1, BlockFace::South},
+        {BlockFace::South,  0,  0, -1, BlockFace::North},
+        {BlockFace::East,   1,  0,  0, BlockFace::West},
+        {BlockFace::West,  -1,  0,  0, BlockFace::East},
+    };
+
+    for (auto& d : dirs) {
+        chunk->SetNeighbor(d.face, nullptr);
+        Chunk* neighbor = GetChunk(coord.x + d.dx, coord.y + d.dy, coord.z + d.dz);
+        if (neighbor && !neighbor->IsInFlight())
+            neighbor->SetNeighbor(d.opposite, nullptr);
+    }
+}
+
+bool ChunkManager::IsNeighborOfInFlight(const ChunkCoord& coord) const {
+    static const int offsets[][3] = {{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},{1,0,0},{-1,0,0}};
+    for (auto& o : offsets) {
+        const Chunk* neighbor = GetChunk(coord.x + o[0], coord.y + o[1], coord.z + o[2]);
+        if (neighbor && neighbor->IsInFlight()) return true;
+    }
+    return false;
+}
+
 void ChunkManager::Update(float playerX, float playerY, float playerZ) {
     int centerX = static_cast<int>(std::floor(playerX / Chunk::SIZE));
     int centerY = static_cast<int>(std::floor(playerY / Chunk::SIZE));
@@ -367,17 +394,21 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         m_lastCenterX = centerX;
         m_lastCenterZ = centerZ;
 
-        // Unload chunks out of range
+        // Unload chunks out of range (but protect in-flight chunks and their neighbors)
         std::vector<ChunkCoord> toRemove;
         for (auto& [coord, chunk] : m_chunks) {
             if (std::abs(coord.x - centerX) > m_renderDistance ||
                 std::abs(coord.z - centerZ) > m_renderDistance ||
                 coord.y < WorldGenerator::MIN_CHUNK_Y || coord.y > WorldGenerator::MAX_CHUNK_Y) {
+                // Don't delete chunks being processed by workers or their neighbors
+                if (chunk->IsInFlight() || IsNeighborOfInFlight(coord))
+                    continue;
                 chunk->RemoveFromScene(m_scene);
                 toRemove.push_back(coord);
             }
         }
         for (auto& coord : toRemove) {
+            UnlinkNeighbors(coord, m_chunks[coord]);
             delete m_chunks[coord];
             m_chunks.erase(coord);
         }

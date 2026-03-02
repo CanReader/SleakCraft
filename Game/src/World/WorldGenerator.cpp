@@ -28,14 +28,14 @@ int WorldGenerator::GetSurfaceHeight(int worldX, int worldZ) const {
     float fx = static_cast<float>(worldX);
     float fz = static_cast<float>(worldZ);
 
-    // Continentalness — large-scale hills/mountains (scale ~0.005, 5 octaves)
-    float continent = m_continentalness.FBM2D(fx * 0.005f, fz * 0.005f, 5, 2.0f, 0.5f);
+    // Continentalness — large-scale hills/mountains (scale ~0.005, 4 octaves)
+    float continent = m_continentalness.FBM2D(fx * 0.005f, fz * 0.005f, 4, 2.0f, 0.5f);
 
-    // Erosion — medium-scale variation (scale ~0.01, 3 octaves)
-    float erosion = m_erosion.FBM2D(fx * 0.01f, fz * 0.01f, 3, 2.0f, 0.5f);
+    // Erosion — medium-scale variation (scale ~0.01, 2 octaves)
+    float erosion = m_erosion.FBM2D(fx * 0.01f, fz * 0.01f, 2, 2.0f, 0.5f);
 
-    // Detail — small bumps (scale ~0.02, 4 octaves)
-    float detail = m_detail.FBM2D(fx * 0.02f, fz * 0.02f, 4, 2.0f, 0.5f);
+    // Detail — small bumps (scale ~0.02, 2 octaves)
+    float detail = m_detail.FBM2D(fx * 0.02f, fz * 0.02f, 2, 2.0f, 0.5f);
 
     // Combine: continent controls major shape, erosion modulates amplitude, detail adds texture
     // continent [-1,1] -> terrain amplitude
@@ -51,21 +51,18 @@ int WorldGenerator::GetSurfaceHeight(int worldX, int worldZ) const {
 }
 
 bool WorldGenerator::IsCave(int worldX, int worldY, int worldZ) const {
-    // Never carve at Y=0 (bedrock layer) or at/above surface
+    // Never carve at Y=0 (bedrock layer)
     if (worldY <= 0) return false;
 
     float fx = static_cast<float>(worldX);
     float fy = static_cast<float>(worldY);
     float fz = static_cast<float>(worldZ);
 
-    // "Swiss cheese" approach — two 3D noise layers
-    // Cave exists where both |n1| < threshold AND |n2| < threshold
+    // Swiss cheese: two 3D Perlin checks — cave where both are near zero
     float n1 = m_cave1.Perlin3D(fx * 0.04f, fy * 0.04f, fz * 0.04f);
+    if (std::abs(n1) >= 0.15f) return false; // early out
     float n2 = m_cave2.Perlin3D(fx * 0.04f, fy * 0.04f, fz * 0.04f);
-
-    constexpr float threshold = 0.15f;
-
-    return (std::abs(n1) < threshold) && (std::abs(n2) < threshold);
+    return std::abs(n2) < 0.15f;
 }
 
 void WorldGenerator::Generate(Chunk* chunk) const {
