@@ -12,6 +12,7 @@ A voxel-based sandbox game built with [SleakEngine](https://github.com/CanReader
 - **Face culling** — Only visible faces between air and solid blocks are meshed
 - **Dynamic render distance** — Configurable chunk loading radius
 - **First-person camera** — Fly-mode exploration with configurable movement
+- **Save/Load system** — Persistent world with F5/F6, auto-save, RLE compression, CRC32 integrity
 - **Skybox** — Atmospheric sky rendering
 
 ## Tech Stack
@@ -47,6 +48,22 @@ cd bin
 | `-w` | Window width |
 | `-h` | Window height |
 | `-t` | Window title |
+
+## Controls
+
+| Key | Action |
+|-----|--------|
+| WASD | Move |
+| Space | Jump |
+| Shift | Sprint |
+| 1 / 2 / 3 | Select block (Grass / Dirt / Stone) |
+| Left Click | Break block |
+| Right Click | Place block |
+| F3 | Toggle HUD |
+| F5 | Save world |
+| F6 | Load world |
+
+World saves are stored in `saves/Default/` using a custom binary format. Auto-save triggers every 120 seconds when blocks have been modified.
 
 ## Project Structure
 
