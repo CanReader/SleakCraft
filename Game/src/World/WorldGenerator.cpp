@@ -72,6 +72,28 @@ void WorldGenerator::Generate(Chunk* chunk) const {
     int chunkBaseX = chunk->GetChunkX() * Chunk::SIZE;
     int chunkBaseY = chunk->GetChunkY() * Chunk::SIZE;
     int chunkBaseZ = chunk->GetChunkZ() * Chunk::SIZE;
+    int chunkTopY = chunkBaseY + Chunk::SIZE - 1;
+
+    // Quick reject: sample corners and center of XZ area to find max surface height.
+    // If the chunk is entirely above the tallest possible surface, it's all air — skip.
+    int maxH = 0;
+    int samples[][2] = {
+        {chunkBaseX, chunkBaseZ},
+        {chunkBaseX + Chunk::SIZE - 1, chunkBaseZ},
+        {chunkBaseX, chunkBaseZ + Chunk::SIZE - 1},
+        {chunkBaseX + Chunk::SIZE - 1, chunkBaseZ + Chunk::SIZE - 1},
+        {chunkBaseX + Chunk::SIZE / 2, chunkBaseZ + Chunk::SIZE / 2}
+    };
+    for (auto& s : samples) {
+        int h = GetSurfaceHeight(s[0], s[1]);
+        if (h > maxH) maxH = h;
+    }
+    // Add margin for height variation within the chunk
+    maxH += 8;
+    if (chunkBaseY > maxH) {
+        // Entire chunk is above terrain — already initialized to Air
+        return;
+    }
 
     for (int lx = 0; lx < Chunk::SIZE; ++lx) {
         int worldX = chunkBaseX + lx;

@@ -361,10 +361,10 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
     int centerX = static_cast<int>(std::floor(playerX / Chunk::SIZE));
     int centerY = static_cast<int>(std::floor(playerY / Chunk::SIZE));
     int centerZ = static_cast<int>(std::floor(playerZ / Chunk::SIZE));
+    m_lastCenterY = centerY;
 
-    if (centerX != m_lastCenterX || centerY != m_lastCenterY || centerZ != m_lastCenterZ) {
+    if (centerX != m_lastCenterX || centerZ != m_lastCenterZ) {
         m_lastCenterX = centerX;
-        m_lastCenterY = centerY;
         m_lastCenterZ = centerZ;
 
         // Unload chunks out of range
@@ -405,15 +405,15 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             }
         }
 
-        // Sort: primary XZ distance, secondary Y distance from player
+        // Sort: farthest first so closest chunks are at back (pop_back is O(1))
         std::sort(m_pendingLoad.begin(), m_pendingLoad.end(),
             [&](const ChunkCoord& a, const ChunkCoord& b) {
                 int daXZ = (a.x - centerX) * (a.x - centerX) + (a.z - centerZ) * (a.z - centerZ);
                 int dbXZ = (b.x - centerX) * (b.x - centerX) + (b.z - centerZ) * (b.z - centerZ);
-                if (daXZ != dbXZ) return daXZ < dbXZ;
+                if (daXZ != dbXZ) return daXZ > dbXZ;
                 int daY = std::abs(a.y - centerY);
                 int dbY = std::abs(b.y - centerY);
-                return daY < dbY;
+                return daY > dbY;
             });
     }
 
@@ -445,8 +445,8 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         std::vector<Chunk*> batch;
         int dispatched = 0;
         while (dispatched < m_chunksPerFrame && !m_pendingLoad.empty()) {
-            ChunkCoord coord = m_pendingLoad.front();
-            m_pendingLoad.erase(m_pendingLoad.begin());
+            ChunkCoord coord = m_pendingLoad.back();
+            m_pendingLoad.pop_back();
             m_pendingSet.erase(coord);
 
             if (m_chunks.count(coord)) continue;
@@ -482,8 +482,8 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         // Synchronous path
         int built = 0;
         while (built < m_chunksPerFrame && !m_pendingLoad.empty()) {
-            ChunkCoord coord = m_pendingLoad.front();
-            m_pendingLoad.erase(m_pendingLoad.begin());
+            ChunkCoord coord = m_pendingLoad.back();
+            m_pendingLoad.pop_back();
             m_pendingSet.erase(coord);
 
             if (m_chunks.count(coord)) continue;
@@ -512,8 +512,8 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
 
 void ChunkManager::FlushPendingChunks() {
     while (!m_pendingLoad.empty()) {
-        ChunkCoord coord = m_pendingLoad.front();
-        m_pendingLoad.erase(m_pendingLoad.begin());
+        ChunkCoord coord = m_pendingLoad.back();
+        m_pendingLoad.pop_back();
         m_pendingSet.erase(coord);
 
         if (m_chunks.count(coord)) continue;

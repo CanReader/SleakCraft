@@ -50,18 +50,23 @@ bool MainScene::Initialize() {
     SetupLighting();
 
     m_chunkManager.Initialize(this, m_blockMaterial);
-    m_chunkManager.SetRenderDistance(8);
     m_chunkManager.SetSeed(42);
-    m_chunkManager.Update(8.0f, 70.0f, 8.0f);
-    m_chunkManager.FlushPendingChunks();
-    m_chunkManager.SetMultithreaded(m_multithreadedLoading);
 
     // Find surface height at spawn and position camera above it
     if (cam) {
         int surfaceY = m_chunkManager.GetGenerator().GetSurfaceHeight(8, 8);
-        float spawnY = static_cast<float>(surfaceY) + 2.62f; // feet on surface + eye offset
+        float spawnY = static_cast<float>(surfaceY) + 2.62f;
         cam->SetPosition({8.0f, spawnY, 8.0f});
     }
+
+    // Load a small area synchronously so the player has ground, then stream the rest
+    m_chunkManager.SetRenderDistance(3);
+    m_chunkManager.Update(cam ? cam->GetPosition().GetX() : 8.0f,
+                          cam ? cam->GetPosition().GetY() : 70.0f,
+                          cam ? cam->GetPosition().GetZ() : 8.0f);
+    m_chunkManager.FlushPendingChunks();
+    m_chunkManager.SetRenderDistance(8);
+    m_chunkManager.SetMultithreaded(m_multithreadedLoading);
 
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
@@ -351,9 +356,11 @@ void MainScene::LoadGame() {
     m_chunkManager.LoadChunkData(chunkData);
     m_chunkManager.ForceReload();
 
-    // Trigger immediate chunk loading around restored position
+    // Load a small area synchronously, let the rest stream in
+    m_chunkManager.SetRenderDistance(3);
     m_chunkManager.Update(meta.player.posX, meta.player.posY, meta.player.posZ);
     m_chunkManager.FlushPendingChunks();
+    m_chunkManager.SetRenderDistance(8);
     m_chunkManager.SetMultithreaded(m_multithreadedLoading);
 
     m_saveMessage = "World Loaded!";
