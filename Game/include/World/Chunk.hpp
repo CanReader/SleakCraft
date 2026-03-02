@@ -47,6 +47,10 @@ public:
     void SetInFlight(bool v) { m_inFlight = v; }
     Sleak::GameObject* GetGameObject() const { return m_gameObject; }
 
+    bool IsDirty() const { return m_dirty; }
+    void SetDirty(bool d) { m_dirty = d; }
+    const uint8_t* GetBlockData() const { return m_blocks; }
+
 private:
     static int BlockIndex(int x, int y, int z) {
         return x + z * SIZE + y * SIZE * SIZE;
@@ -66,6 +70,7 @@ private:
     ChunkMeshData m_pendingMesh;
     bool m_hasPendingMesh = false;
     bool m_inFlight = false;
+    bool m_dirty = false;
 };
 
 #endif
