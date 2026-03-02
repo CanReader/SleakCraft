@@ -1,4 +1,5 @@
 #include "MainScene.hpp"
+#include <cstring>
 #include <Core/GameObject.hpp>
 #include <Core/Application.hpp>
 #include <Math/Vector.hpp>
@@ -82,6 +83,8 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
     if_key_press(KEY__2) { m_selectedBlock = BlockType::Dirt; }
     if_key_press(KEY__3) { m_selectedBlock = BlockType::Stone; }
     if_key_press(KEY__F3) { m_showUI = !m_showUI; }
+    if_key_press(KEY__F5) { SaveGame(); }
+    if_key_press(KEY__F6) { LoadGame(); }
 }
 
 void MainScene::Update(float deltaTime) {
@@ -134,6 +137,18 @@ void MainScene::Update(float deltaTime) {
             DebugLineRenderer::DrawAABB(blockAABB, 0.0f, 0.0f, 0.0f);
         }
 
+        // Auto-save
+        m_autoSaveTimer += deltaTime;
+        if (m_autoSaveTimer >= AUTO_SAVE_INTERVAL) {
+            m_autoSaveTimer = 0.0f;
+            if (!m_chunkManager.GetDirtyChunks().empty())
+                SaveGame();
+        }
+
+        // Save/load message fade
+        if (m_saveMessageTimer > 0.0f)
+            m_saveMessageTimer -= deltaTime;
+
         if (m_showUI)
             RenderUI();
     }
@@ -169,6 +184,15 @@ void MainScene::RenderUI() {
         cam->SetFieldOfView(fov);
 
     UI::EndPanel();
+
+    // --- Save/load feedback ---
+    if (m_saveMessageTimer > 0.0f) {
+        float alpha = (m_saveMessageTimer < 0.5f) ? m_saveMessageTimer * 2.0f : 1.0f;
+        float centerX = UI::GetViewportWidth() * 0.5f - 60.0f;
+        UI::BeginPanel("SaveMsg", centerX, 40, 0.5f);
+        UI::TextColored(0.2f, 1.0f, 0.2f, alpha, "%s", m_saveMessage.c_str());
+        UI::EndPanel();
+    }
 
     // --- Performance panel (top-right) ---
     UI::BeginPanel("Performance", UI::GetViewportWidth() - 200, 0,
@@ -227,6 +251,87 @@ void MainScene::RenderUI() {
     }
 
     UI::EndPanel();
+}
+
+void MainScene::SaveGame() {
+    auto* cam = GetDebugCamera();
+    if (!cam) return;
+
+    WorldMeta meta;
+    auto pos = cam->GetPosition();
+    meta.player.posX = pos.GetX();
+    meta.player.posY = pos.GetY();
+    meta.player.posZ = pos.GetZ();
+
+    auto* fpc = cam->GetComponent<FirstPersonController>();
+    if (fpc) {
+        meta.player.pitch = fpc->GetPitch();
+        meta.player.yaw = fpc->GetYaw();
+    }
+
+    meta.player.selectedBlock = static_cast<uint8_t>(m_selectedBlock);
+    meta.player.renderDistance = m_chunkManager.GetRenderDistance();
+
+    // Collect dirty chunks
+    auto dirtyInfos = m_chunkManager.GetDirtyChunks();
+    std::vector<ChunkSaveData> dirtyChunks;
+    dirtyChunks.reserve(dirtyInfos.size());
+    for (const auto& info : dirtyInfos) {
+        ChunkSaveData cd;
+        cd.cx = info.cx;
+        cd.cy = info.cy;
+        cd.cz = info.cz;
+        std::memcpy(cd.blocks.data(), info.blockData, 4096);
+        dirtyChunks.push_back(std::move(cd));
+    }
+
+    if (m_saveManager.SaveWorld(meta, dirtyChunks)) {
+        m_chunkManager.ClearDirtyFlags();
+        m_saveMessage = "World Saved!";
+        m_saveMessageTimer = 2.0f;
+    } else {
+        m_saveMessage = "Save Failed!";
+        m_saveMessageTimer = 3.0f;
+    }
+}
+
+void MainScene::LoadGame() {
+    WorldMeta meta;
+    std::unordered_map<int64_t, std::array<uint8_t, 4096>> chunkData;
+
+    if (!m_saveManager.LoadWorld(meta, chunkData)) {
+        m_saveMessage = "No Save Found!";
+        m_saveMessageTimer = 2.0f;
+        return;
+    }
+
+    // Restore player state
+    auto* cam = GetDebugCamera();
+    if (cam) {
+        cam->SetPosition({meta.player.posX, meta.player.posY, meta.player.posZ});
+        auto* fpc = cam->GetComponent<FirstPersonController>();
+        if (fpc) {
+            fpc->SetPitch(meta.player.pitch);
+            fpc->SetYaw(meta.player.yaw);
+        }
+        auto* rb = cam->GetComponent<RigidbodyComponent>();
+        if (rb)
+            rb->SetVelocity({0.0f, 0.0f, 0.0f});
+    }
+
+    m_selectedBlock = static_cast<BlockType>(meta.player.selectedBlock);
+
+    // Load saved block data and force reload all chunks
+    m_chunkManager.LoadChunkData(chunkData);
+    m_chunkManager.ForceReload();
+
+    // Trigger immediate chunk loading around restored position
+    m_chunkManager.Update(meta.player.posX, meta.player.posZ);
+    m_chunkManager.FlushPendingChunks();
+    m_chunkManager.SetMultithreaded(m_multithreadedLoading);
+
+    m_saveMessage = "World Loaded!";
+    m_saveMessageTimer = 2.0f;
 }
 
 void MainScene::SetupMaterial() {

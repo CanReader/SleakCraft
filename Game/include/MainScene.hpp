@@ -8,6 +8,7 @@
 #include <Debug/SystemMetrics.hpp>
 #include "World/ChunkManager.hpp"
 #include "World/Block.hpp"
+#include "World/SaveManager.hpp"
 
 namespace Sleak { class Material; }
 
@@ -28,8 +29,12 @@ private:
     void OnMousePressed(const Sleak::Events::Input::MouseButtonPressedEvent& e);
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
 
+    void SaveGame();
+    void LoadGame();
+
     Sleak::RefPtr<Sleak::Material> m_blockMaterial;
     ChunkManager m_chunkManager;
+    SaveManager m_saveManager;
     BlockType m_selectedBlock = BlockType::Grass;
     bool m_multithreadedLoading = true;
 
@@ -38,6 +43,14 @@ private:
     bool m_showColliders = false;
     Sleak::SystemMetricsData m_cachedMetrics;
     float m_metricTimer = 0.0f;
+
+    // Save/load UI feedback
+    float m_saveMessageTimer = 0.0f;
+    std::string m_saveMessage;
+
+    // Auto-save
+    float m_autoSaveTimer = 0.0f;
+    static constexpr float AUTO_SAVE_INTERVAL = 120.0f;
 };
 
 #endif
