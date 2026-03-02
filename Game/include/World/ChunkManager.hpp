@@ -13,6 +13,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
+#include <array>
 
 namespace Sleak {
     class Material;
@@ -77,6 +78,16 @@ public:
                                                 float halfWidth, float height,
                                                 float eyeOffset) const;
 
+    // Save/load support
+    struct DirtyChunkInfo {
+        int cx, cy, cz;
+        const uint8_t* blockData;
+    };
+    std::vector<DirtyChunkInfo> GetDirtyChunks() const;
+    void ClearDirtyFlags();
+    void LoadChunkData(const std::unordered_map<int64_t, std::array<uint8_t, 4096>>& data);
+    void ForceReload();
+
 private:
     void GenerateFlatTerrain(Chunk* chunk);
     void LinkNeighbors(const ChunkCoord& coord, Chunk* chunk);
@@ -111,6 +122,10 @@ private:
     std::atomic<bool> m_shutdown{false};
 
     static constexpr int SURFACE_HEIGHT = 4;
+
+    // Saved block data for chunk restoration
+    std::unordered_map<int64_t, std::array<uint8_t, 4096>> m_savedBlockData;
+    static int64_t PackCoord(int32_t cx, int32_t cy, int32_t cz);
 };
 
 #endif

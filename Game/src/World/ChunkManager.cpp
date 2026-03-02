@@ -130,6 +130,7 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
     int lz = floorMod(worldZ, Chunk::SIZE);
 
     chunk->SetBlock(lx, ly, lz, type);
+    chunk->SetDirty(true);
 
     chunk->RemoveFromScene(m_scene);
     chunk->BuildMesh(m_material);
@@ -463,7 +464,14 @@ void ChunkManager::Update(float playerX, float playerZ) {
 
             auto* chunk = new Chunk(coord.x, coord.y, coord.z);
             m_chunks[coord] = chunk;
-            GenerateFlatTerrain(chunk);
+            int64_t key = PackCoord(coord.x, coord.y, coord.z);
+            auto savedIt = m_savedBlockData.find(key);
+            if (savedIt != m_savedBlockData.end()) {
+                std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
+                            savedIt->second.data(), 4096);
+            } else {
+                GenerateFlatTerrain(chunk);
+            }
             LinkNeighbors(coord, chunk);
             batch.push_back(chunk);
             ++dispatched;
@@ -491,7 +499,14 @@ void ChunkManager::Update(float playerX, float playerZ) {
 
             auto* chunk = new Chunk(coord.x, coord.y, coord.z);
             m_chunks[coord] = chunk;
-            GenerateFlatTerrain(chunk);
+            int64_t key = PackCoord(coord.x, coord.y, coord.z);
+            auto savedIt = m_savedBlockData.find(key);
+            if (savedIt != m_savedBlockData.end()) {
+                std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
+                            savedIt->second.data(), 4096);
+            } else {
+                GenerateFlatTerrain(chunk);
+            }
             LinkNeighbors(coord, chunk);
             chunk->BuildMesh(m_material);
             chunk->AddToScene(m_scene);
@@ -512,11 +527,63 @@ void ChunkManager::FlushPendingChunks() {
 
         auto* chunk = new Chunk(coord.x, coord.y, coord.z);
         m_chunks[coord] = chunk;
-        GenerateFlatTerrain(chunk);
+        int64_t key = PackCoord(coord.x, coord.y, coord.z);
+        auto savedIt = m_savedBlockData.find(key);
+        if (savedIt != m_savedBlockData.end()) {
+            std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
+                        savedIt->second.data(), 4096);
+        } else {
+            GenerateFlatTerrain(chunk);
+        }
         LinkNeighbors(coord, chunk);
         chunk->BuildMesh(m_material);
         chunk->AddToScene(m_scene);
     }
+}
+
+int64_t ChunkManager::PackCoord(int32_t cx, int32_t cy, int32_t cz) {
+    uint64_t ux = static_cast<uint32_t>(cx);
+    uint64_t uy = static_cast<uint32_t>(cy) & 0xFFFF;
+    uint64_t uz = static_cast<uint32_t>(cz);
+    return static_cast<int64_t>((ux << 32) | (uy << 16) | (uz & 0xFFFF));
+}
+
+std::vector<ChunkManager::DirtyChunkInfo> ChunkManager::GetDirtyChunks() const {
+    std::vector<DirtyChunkInfo> result;
+    for (const auto& [coord, chunk] : m_chunks) {
+        if (chunk->IsDirty()) {
+            result.push_back({coord.x, coord.y, coord.z, chunk->GetBlockData()});
+        }
+    }
+    return result;
+}
+
+void ChunkManager::ClearDirtyFlags() {
+    for (auto& [coord, chunk] : m_chunks)
+        chunk->SetDirty(false);
+}
+
+void ChunkManager::LoadChunkData(const std::unordered_map<int64_t, std::array<uint8_t, 4096>>& data) {
+    m_savedBlockData = data;
+}
+
+void ChunkManager::ForceReload() {
+    // Stop workers to avoid races
+    bool wasMultithreaded = m_multithreaded;
+    if (wasMultithreaded) StopWorkers();
+
+    // Remove all chunks
+    for (auto& [coord, chunk] : m_chunks) {
+        chunk->RemoveFromScene(m_scene);
+        delete chunk;
+    }
+    m_chunks.clear();
+    m_pendingLoad.clear();
+    m_pendingSet.clear();
+    m_lastCenterX = INT_MAX;
+    m_lastCenterZ = INT_MAX;
+
+    if (wasMultithreaded) StartWorkers();
 }
 
 void ChunkManager::FrustumCull() const {
