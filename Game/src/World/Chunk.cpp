@@ -119,9 +119,10 @@ void Chunk::AddFace(BlockFace face, int x, int y, int z, BlockType type,
                     VertexGroup& vertices, IndexGroup& indices) {
     AtlasUV uv = TextureAtlas::GetTileUV(GetBlockTextureTile(type, face));
     uint32_t base = static_cast<uint32_t>(vertices.GetSize());
-    float bx = static_cast<float>(x);
-    float by = static_cast<float>(y);
-    float bz = static_cast<float>(z);
+    // World-space coordinates so column meshes can be merged without transform
+    float bx = static_cast<float>(x + m_cx * SIZE);
+    float by = static_cast<float>(y + m_cy * SIZE);
+    float bz = static_cast<float>(z + m_cz * SIZE);
 
     float ao[4];
     ComputeFaceAO(face, x, y, z, ao);
@@ -212,6 +213,7 @@ void Chunk::GenerateMeshData() {
     m_pendingMesh.vertices = std::move(vertices);
     m_pendingMesh.indices = std::move(indices);
     m_hasPendingMesh = true;
+    m_meshBuilt = true;
 }
 
 void Chunk::UploadMesh(const RefPtr<Material>& material) {

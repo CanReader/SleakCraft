@@ -110,6 +110,26 @@ private:
     void StopWorkers();
     void WorkerThread();
 
+    // Column mesh management — merges all Y-layer chunk meshes per XZ into one draw call
+    struct ColumnKey {
+        int x, z;
+        bool operator==(const ColumnKey& o) const { return x == o.x && z == o.z; }
+    };
+    struct ColumnKeyHash {
+        size_t operator()(const ColumnKey& c) const {
+            size_t h = std::hash<int>()(c.x);
+            h ^= std::hash<int>()(c.z) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            return h;
+        }
+    };
+    struct ColumnMesh {
+        Sleak::GameObject* gameObject = nullptr;
+        bool addedToScene = false;
+    };
+    void RebuildColumnMesh(int cx, int cz);
+    std::unordered_map<ColumnKey, ColumnMesh, ColumnKeyHash> m_columns;
+    std::unordered_set<ColumnKey, ColumnKeyHash> m_dirtyColumns;
+
     std::unordered_map<ChunkCoord, Chunk*, ChunkCoordHash> m_chunks;
     std::vector<ChunkCoord> m_pendingLoad;
     std::unordered_set<ChunkCoord, ChunkCoordHash> m_pendingSet;

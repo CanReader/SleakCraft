@@ -2,6 +2,10 @@
 #include <Camera/Camera.hpp>
 #include <Core/GameObject.hpp>
 #include <Core/SceneBase.hpp>
+#include <ECS/Components/TransformComponent.hpp>
+#include <ECS/Components/MeshComponent.hpp>
+#include <ECS/Components/MaterialComponent.hpp>
+#include <Runtime/Material.hpp>
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -10,10 +14,15 @@ ChunkManager::ChunkManager() {}
 
 ChunkManager::~ChunkManager() {
     StopWorkers();
-    for (auto& [coord, chunk] : m_chunks) {
-        if (m_scene) chunk->RemoveFromScene(m_scene);
-        delete chunk;
+    for (auto& [key, col] : m_columns) {
+        if (col.addedToScene && m_scene)
+            m_scene->RemoveObject(col.gameObject);  // deletes internally
+        else
+            delete col.gameObject;
     }
+    m_columns.clear();
+    for (auto& [coord, chunk] : m_chunks)
+        delete chunk;
     m_chunks.clear();
 }
 
@@ -48,7 +57,6 @@ void ChunkManager::StopWorkers() {
         w.join();
     m_workers.clear();
 
-    // Drain task queue — move remaining tasks to ready if they have pending mesh
     {
         std::lock_guard<std::mutex> lock(m_taskMutex);
         m_taskQueue.clear();
@@ -138,16 +146,16 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
     chunk->SetBlock(lx, ly, lz, type);
     chunk->SetDirty(true);
 
-    chunk->RemoveFromScene(m_scene);
-    chunk->BuildMesh(m_material);
-    chunk->AddToScene(m_scene);
+    chunk->GenerateMeshData();
+
+    std::unordered_set<ColumnKey, ColumnKeyHash> affectedColumns;
+    affectedColumns.insert({cx, cz});
 
     auto rebuildNeighbor = [&](int ncx, int ncy, int ncz) {
         Chunk* neighbor = GetChunk(ncx, ncy, ncz);
         if (neighbor) {
-            neighbor->RemoveFromScene(m_scene);
-            neighbor->BuildMesh(m_material);
-            neighbor->AddToScene(m_scene);
+            neighbor->GenerateMeshData();
+            affectedColumns.insert({ncx, ncz});
         }
     };
 
@@ -157,6 +165,9 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
     if (ly == Chunk::SIZE - 1)  rebuildNeighbor(cx, cy + 1, cz);
     if (lz == 0)                rebuildNeighbor(cx, cy, cz - 1);
     if (lz == Chunk::SIZE - 1)  rebuildNeighbor(cx, cy, cz + 1);
+
+    for (auto& col : affectedColumns)
+        RebuildColumnMesh(col.x, col.z);
 
     return true;
 }
@@ -256,11 +267,6 @@ VoxelCollisionResult ChunkManager::ResolveVoxelCollision(
         maxZ = fz + halfWidth;
     };
 
-    // Per-block minimum penetration axis (MTV) resolution.
-    // For each overlapping block, resolve on the axis with the smallest
-    // penetration depth. This correctly handles both cases:
-    //   - Standing on ground (tiny Y dip from gravity → resolves Y upward)
-    //   - Walking into a wall (tiny X/Z entry → resolves X/Z, blocks player)
     for (int iter = 0; iter < 16; ++iter) {
         float minX, minY, minZ, maxX, maxY, maxZ;
         computeAABB(posX, feetY, posZ, minX, minY, minZ, maxX, maxY, maxZ);
@@ -391,6 +397,69 @@ bool ChunkManager::IsNeighborOfInFlight(const ChunkCoord& coord) const {
     return false;
 }
 
+void ChunkManager::RebuildColumnMesh(int cx, int cz) {
+    ColumnKey key{cx, cz};
+
+    // Remove old column mesh (RemoveObject deletes the GameObject internally)
+    auto colIt = m_columns.find(key);
+    if (colIt != m_columns.end()) {
+        if (colIt->second.addedToScene)
+            m_scene->RemoveObject(colIt->second.gameObject);
+        else
+            delete colIt->second.gameObject;
+        m_columns.erase(colIt);
+    }
+
+    size_t totalVerts = 0, totalIndices = 0;
+    for (int cy = WorldGenerator::MIN_CHUNK_Y; cy <= WorldGenerator::MAX_CHUNK_Y; ++cy) {
+        Chunk* chunk = GetChunk(cx, cy, cz);
+        if (!chunk || !chunk->HasPendingMesh()) continue;
+        auto& md = chunk->GetPendingMeshData();
+        totalVerts += md.vertices.GetSize();
+        totalIndices += md.indices.GetSize();
+    }
+
+    if (totalVerts == 0) return;
+
+    Sleak::VertexGroup mergedVerts;
+    Sleak::IndexGroup mergedIndices;
+
+    for (int cy = WorldGenerator::MIN_CHUNK_Y; cy <= WorldGenerator::MAX_CHUNK_Y; ++cy) {
+        Chunk* chunk = GetChunk(cx, cy, cz);
+        if (!chunk || !chunk->HasPendingMesh()) continue;
+
+        auto& md = chunk->GetPendingMeshData();
+        if (md.vertices.GetSize() == 0) continue;
+
+        uint32_t baseVertex = static_cast<uint32_t>(mergedVerts.GetSize());
+
+        const Sleak::Vertex* vdata = md.vertices.GetData();
+        for (size_t i = 0; i < md.vertices.GetSize(); ++i)
+            mergedVerts.AddVertex(vdata[i]);
+
+        const uint32_t* idata = md.indices.GetData();
+        for (size_t i = 0; i < md.indices.GetSize(); ++i)
+            mergedIndices.add(idata[i] + baseVertex);
+    }
+
+    if (mergedVerts.GetSize() == 0) return;
+
+    // Create merged GameObject at origin (vertices are already in world-space)
+    Sleak::MeshData meshData;
+    meshData.vertices = std::move(mergedVerts);
+    meshData.indices = std::move(mergedIndices);
+
+    auto* go = new Sleak::GameObject("Column");
+    go->AddComponent<Sleak::TransformComponent>(Sleak::Math::Vector3D(0.0f, 0.0f, 0.0f));
+    go->AddComponent<Sleak::MaterialComponent>(m_material);
+    go->AddComponent<Sleak::MeshComponent>(std::move(meshData));
+    go->Initialize();
+
+    m_columns[key] = {go, false};
+    m_scene->AddObject(go);
+    m_columns[key].addedToScene = true;
+}
+
 void ChunkManager::Update(float playerX, float playerY, float playerZ) {
     int centerX = static_cast<int>(std::floor(playerX / Chunk::SIZE));
     int centerY = static_cast<int>(std::floor(playerY / Chunk::SIZE));
@@ -402,20 +471,39 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         m_lastCenterZ = centerZ;
 
         std::vector<ChunkCoord> toRemove;
+        std::unordered_set<ColumnKey, ColumnKeyHash> columnsToCheck;
         for (auto& [coord, chunk] : m_chunks) {
             if (std::abs(coord.x - centerX) > m_renderDistance ||
                 std::abs(coord.z - centerZ) > m_renderDistance ||
                 coord.y < WorldGenerator::MIN_CHUNK_Y || coord.y > WorldGenerator::MAX_CHUNK_Y) {
                 if (chunk->IsInFlight() || IsNeighborOfInFlight(coord))
                     continue;
-                chunk->RemoveFromScene(m_scene);
                 toRemove.push_back(coord);
+                columnsToCheck.insert({coord.x, coord.z});
             }
         }
         for (auto& coord : toRemove) {
             UnlinkNeighbors(coord, m_chunks[coord]);
             delete m_chunks[coord];
             m_chunks.erase(coord);
+        }
+
+        // Remove column meshes for columns that lost all their chunks
+        for (auto& colKey : columnsToCheck) {
+            bool hasChunks = false;
+            for (int cy = WorldGenerator::MIN_CHUNK_Y; cy <= WorldGenerator::MAX_CHUNK_Y; ++cy) {
+                if (GetChunk(colKey.x, cy, colKey.z)) { hasChunks = true; break; }
+            }
+            if (!hasChunks) {
+                auto colIt = m_columns.find(colKey);
+                if (colIt != m_columns.end()) {
+                    if (colIt->second.addedToScene)
+                        m_scene->RemoveObject(colIt->second.gameObject);
+                    else
+                        delete colIt->second.gameObject;
+                    m_columns.erase(colIt);
+                }
+            }
         }
 
         m_pendingLoad.erase(
@@ -453,33 +541,22 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
     }
 
     if (m_multithreaded) {
-        // Phase 1: Upload meshes completed by workers (GPU work, main thread only)
-        // Do this FIRST so meshes appear as soon as possible
+        // Phase 1: Process completed chunks from workers — mark columns dirty
         {
             std::vector<Chunk*> ready;
             {
                 std::lock_guard<std::mutex> lock(m_readyMutex);
                 ready.swap(m_readyQueue);
             }
-            int uploaded = 0;
             for (auto* chunk : ready) {
                 chunk->SetInFlight(false);
-                if (!chunk->HasPendingMesh()) continue;
-                if (uploaded < m_uploadsPerFrame) {
-                    chunk->RemoveFromScene(m_scene);
-                    chunk->UploadMesh(m_material);
-                    chunk->AddToScene(m_scene);
-                    ++uploaded;
-                } else {
-                    // Put back for next frame
-                    std::lock_guard<std::mutex> lock(m_readyMutex);
-                    m_readyQueue.push_back(chunk);
+                if (chunk->HasPendingMesh()) {
+                    m_dirtyColumns.insert({chunk->GetChunkX(), chunk->GetChunkZ()});
                 }
             }
         }
 
-        // Phase 2: Prepare a batch of new chunks (allocate + link on main thread,
-        //          terrain generation deferred to workers)
+        // Phase 2: Dispatch new chunks to workers
         std::vector<Chunk*> batch;
         int dispatched = 0;
         while (dispatched < m_chunksPerFrame && !m_pendingLoad.empty()) {
@@ -504,7 +581,6 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                             savedIt->second.data(), 4096);
                 chunk->SetNeedsGeneration(false);
             }
-            // Generation happens on worker thread (if NeedsGeneration is true)
             LinkNeighbors(coord, chunk);
             batch.push_back(chunk);
             ++dispatched;
@@ -519,6 +595,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         }
         m_taskCV.notify_all();
 
+        // Phase 3: Dispatch remesh requests to workers
         {
             std::vector<Chunk*> remeshBatch;
             int remeshBudget = m_chunksPerFrame;
@@ -540,9 +617,20 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                 m_taskCV.notify_all();
             }
         }
+
+        // Phase 4: Rebuild dirty column meshes (GPU upload)
+        {
+            int rebuilt = 0;
+            for (auto it = m_dirtyColumns.begin(); it != m_dirtyColumns.end() && rebuilt < m_uploadsPerFrame; ) {
+                RebuildColumnMesh(it->x, it->z);
+                it = m_dirtyColumns.erase(it);
+                ++rebuilt;
+            }
+        }
     } else {
         // Synchronous path
         int built = 0;
+        std::unordered_set<ColumnKey, ColumnKeyHash> syncDirtyColumns;
         while (built < m_chunksPerFrame && !m_pendingLoad.empty()) {
             ChunkCoord coord = m_pendingLoad.back();
             m_pendingLoad.pop_back();
@@ -567,8 +655,8 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             }
             chunk->SetNeedsGeneration(false);
             LinkNeighbors(coord, chunk);
-            chunk->BuildMesh(m_material);
-            chunk->AddToScene(m_scene);
+            chunk->GenerateMeshData();
+            syncDirtyColumns.insert({coord.x, coord.z});
             ++built;
         }
 
@@ -577,18 +665,22 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             if (rebuilt >= m_chunksPerFrame) break;
             if (ch->NeedsMeshRebuild() && !ch->NeedsGeneration()) {
                 ch->SetNeedsMeshRebuild(false);
-                ch->RemoveFromScene(m_scene);
-                ch->BuildMesh(m_material);
-                ch->AddToScene(m_scene);
+                ch->GenerateMeshData();
+                syncDirtyColumns.insert({c.x, c.z});
                 ++rebuilt;
             }
         }
+
+        for (auto& col : syncDirtyColumns)
+            RebuildColumnMesh(col.x, col.z);
     }
 
     FrustumCull();
 }
 
 void ChunkManager::FlushPendingChunks() {
+    std::unordered_set<ColumnKey, ColumnKeyHash> flushDirtyColumns;
+
     while (!m_pendingLoad.empty()) {
         ChunkCoord coord = m_pendingLoad.back();
         m_pendingLoad.pop_back();
@@ -611,9 +703,12 @@ void ChunkManager::FlushPendingChunks() {
         }
         chunk->SetNeedsGeneration(false);
         LinkNeighbors(coord, chunk);
-        chunk->BuildMesh(m_material);
-        chunk->AddToScene(m_scene);
+        chunk->GenerateMeshData();
+        flushDirtyColumns.insert({coord.x, coord.z});
     }
+
+    for (auto& col : flushDirtyColumns)
+        RebuildColumnMesh(col.x, col.z);
 }
 
 int64_t ChunkManager::PackCoord(int32_t cx, int32_t cy, int32_t cz) {
@@ -643,15 +738,22 @@ void ChunkManager::LoadChunkData(const std::unordered_map<int64_t, std::array<ui
 }
 
 void ChunkManager::ForceReload() {
-    // Stop workers to avoid races
     bool wasMultithreaded = m_multithreaded;
     if (wasMultithreaded) StopWorkers();
 
-    // Remove all chunks
-    for (auto& [coord, chunk] : m_chunks) {
-        chunk->RemoveFromScene(m_scene);
-        delete chunk;
+    // Remove all column meshes (RemoveObject deletes internally)
+    for (auto& [key, col] : m_columns) {
+        if (col.addedToScene)
+            m_scene->RemoveObject(col.gameObject);
+        else
+            delete col.gameObject;
     }
+    m_columns.clear();
+    m_dirtyColumns.clear();
+
+    // Remove all chunks
+    for (auto& [coord, chunk] : m_chunks)
+        delete chunk;
     m_chunks.clear();
     m_pendingLoad.clear();
     m_pendingSet.clear();
@@ -669,21 +771,22 @@ void ChunkManager::FrustumCull() const {
     float cy = camPos.GetY();
     float cz = camPos.GetZ();
 
-    for (auto& [coord, chunk] : m_chunks) {
-        auto* go = chunk->GetGameObject();
+    float colMinY = static_cast<float>(WorldGenerator::MIN_CHUNK_Y * Chunk::SIZE);
+    float colMaxY = static_cast<float>((WorldGenerator::MAX_CHUNK_Y + 1) * Chunk::SIZE);
+
+    for (auto& [key, col] : m_columns) {
+        auto* go = col.gameObject;
         if (!go) continue;
 
-        float minX = static_cast<float>(coord.x * Chunk::SIZE);
-        float minY = static_cast<float>(coord.y * Chunk::SIZE);
-        float minZ = static_cast<float>(coord.z * Chunk::SIZE);
+        float minX = static_cast<float>(key.x * Chunk::SIZE);
+        float minZ = static_cast<float>(key.z * Chunk::SIZE);
         float maxX = minX + Chunk::SIZE;
-        float maxY = minY + Chunk::SIZE;
         float maxZ = minZ + Chunk::SIZE;
 
+        // Distance check (XZ only for columns)
         float dx = (cx < minX) ? (minX - cx) : (cx > maxX) ? (cx - maxX) : 0.0f;
-        float dy = (cy < minY) ? (minY - cy) : (cy > maxY) ? (cy - maxY) : 0.0f;
         float dz = (cz < minZ) ? (minZ - cz) : (cz > maxZ) ? (cz - maxZ) : 0.0f;
-        float distSq = dx * dx + dy * dy + dz * dz;
+        float distSq = dx * dx + dz * dz;
 
         if (distSq > m_drawDistSq) {
             go->SetActive(false);
@@ -691,8 +794,8 @@ void ChunkManager::FrustumCull() const {
         }
 
         bool visible = frustum.IsAABBVisible(
-            Sleak::Math::Vector3D(minX, minY, minZ),
-            Sleak::Math::Vector3D(maxX, maxY, maxZ));
+            Sleak::Math::Vector3D(minX, colMinY, minZ),
+            Sleak::Math::Vector3D(maxX, colMaxY, maxZ));
 
         go->SetActive(visible);
     }

@@ -60,6 +60,7 @@ public:
     void SetNeedsMeshRebuild(bool v) { m_needsRebuild = v; }
     bool NeedsGeneration() const { return m_needsGeneration; }
     void SetNeedsGeneration(bool v) { m_needsGeneration = v; }
+    ChunkMeshData& GetPendingMeshData() { return m_pendingMesh; }
 
 private:
     static int BlockIndex(int x, int y, int z) {
