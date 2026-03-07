@@ -59,7 +59,13 @@ public:
     void Update(float playerX, float playerY, float playerZ);
 
     void FlushPendingChunks();
-    void SetRenderDistance(int chunks) { m_renderDistance = chunks; }
+    void SetRenderDistance(int chunks) {
+        if (chunks == m_renderDistance) return;
+        m_renderDistance = chunks;
+        m_drawDistance = static_cast<float>(chunks * Chunk::SIZE);
+        m_drawDistSq = m_drawDistance * m_drawDistance;
+        m_lastCenterX = INT_MAX;
+    }
     int GetRenderDistance() const { return m_renderDistance; }
 
     void SetMultithreaded(bool enabled);
@@ -110,8 +116,8 @@ private:
     Sleak::SceneBase* m_scene = nullptr;
     Sleak::RefPtr<Sleak::Material> m_material;
     int m_renderDistance = 8;
-    int m_chunksPerFrame = 4;
-    int m_uploadsPerFrame = 4;
+    int m_chunksPerFrame = 16;
+    int m_uploadsPerFrame = 32;
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
     int m_lastCenterX = INT_MAX;

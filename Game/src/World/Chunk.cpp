@@ -52,7 +52,7 @@ bool Chunk::IsBlockSolidAt(int x, int y, int z) const {
     if (x < 0 && m_neighbors[static_cast<uint8_t>(BlockFace::West)])
         return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::West)]->GetBlock(x + SIZE, y, z));
 
-    return false;
+    return true;
 }
 
 static int CalcAO(bool side1, bool side2, bool corner) {

@@ -32,7 +32,7 @@ void ChunkManager::StartWorkers() {
     m_shutdown.store(false);
     int count = static_cast<int>(std::thread::hardware_concurrency()) - 1;
     if (count < 2) count = 2;
-    if (count > 4) count = 4;
+    if (count > 6) count = 6;
     for (int i = 0; i < count; ++i)
         m_workers.emplace_back(&ChunkManager::WorkerThread, this);
 }
@@ -68,6 +68,10 @@ void ChunkManager::WorkerThread() {
             if (m_shutdown.load() && m_taskQueue.empty()) return;
             chunk = m_taskQueue.back();
             m_taskQueue.pop_back();
+        }
+        if (chunk->NeedsGeneration()) {
+            m_generator.Generate(chunk);
+            chunk->SetNeedsGeneration(false);
         }
         chunk->GenerateMeshData();
         {
@@ -350,9 +354,12 @@ void ChunkManager::LinkNeighbors(const ChunkCoord& coord, Chunk* chunk) {
         Chunk* neighbor = GetChunk(coord.x + d.dx, coord.y + d.dy, coord.z + d.dz);
         if (neighbor) {
             chunk->SetNeighbor(d.face, neighbor);
-            // Don't write to neighbors that are being processed by worker threads
-            if (!neighbor->IsInFlight())
+            if (!neighbor->IsInFlight()) {
                 neighbor->SetNeighbor(d.opposite, chunk);
+                if (neighbor->IsMeshBuilt() && !neighbor->NeedsMeshRebuild()
+                    && !m_generator.IsChunkFullySolid(neighbor))
+                    neighbor->SetNeedsMeshRebuild(true);
+            }
         }
     }
 }
@@ -394,13 +401,11 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         m_lastCenterX = centerX;
         m_lastCenterZ = centerZ;
 
-        // Unload chunks out of range (but protect in-flight chunks and their neighbors)
         std::vector<ChunkCoord> toRemove;
         for (auto& [coord, chunk] : m_chunks) {
             if (std::abs(coord.x - centerX) > m_renderDistance ||
                 std::abs(coord.z - centerZ) > m_renderDistance ||
                 coord.y < WorldGenerator::MIN_CHUNK_Y || coord.y > WorldGenerator::MAX_CHUNK_Y) {
-                // Don't delete chunks being processed by workers or their neighbors
                 if (chunk->IsInFlight() || IsNeighborOfInFlight(coord))
                     continue;
                 chunk->RemoveFromScene(m_scene);
@@ -413,7 +418,6 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             m_chunks.erase(coord);
         }
 
-        // Remove pending chunks that are now out of range
         m_pendingLoad.erase(
             std::remove_if(m_pendingLoad.begin(), m_pendingLoad.end(),
                 [&](const ChunkCoord& c) {
@@ -460,7 +464,9 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             int uploaded = 0;
             for (auto* chunk : ready) {
                 chunk->SetInFlight(false);
+                if (!chunk->HasPendingMesh()) continue;
                 if (uploaded < m_uploadsPerFrame) {
+                    chunk->RemoveFromScene(m_scene);
                     chunk->UploadMesh(m_material);
                     chunk->AddToScene(m_scene);
                     ++uploaded;
@@ -472,7 +478,8 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             }
         }
 
-        // Phase 2: Prepare a batch of new chunks (allocate, terrain, link on main thread)
+        // Phase 2: Prepare a batch of new chunks (allocate + link on main thread,
+        //          terrain generation deferred to workers)
         std::vector<Chunk*> batch;
         int dispatched = 0;
         while (dispatched < m_chunksPerFrame && !m_pendingLoad.empty()) {
@@ -482,6 +489,12 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
 
             if (m_chunks.count(coord)) continue;
 
+            // Skip chunks guaranteed to be entirely above terrain
+            if (m_generator.IsChunkAboveTerrain(coord.x, coord.y, coord.z)) {
+                ++dispatched;
+                continue;
+            }
+
             auto* chunk = new Chunk(coord.x, coord.y, coord.z);
             m_chunks[coord] = chunk;
             int64_t key = PackCoord(coord.x, coord.y, coord.z);
@@ -489,18 +502,14 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             if (savedIt != m_savedBlockData.end()) {
                 std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                             savedIt->second.data(), 4096);
-            } else {
-                m_generator.Generate(chunk);
+                chunk->SetNeedsGeneration(false);
             }
+            // Generation happens on worker thread (if NeedsGeneration is true)
             LinkNeighbors(coord, chunk);
-            if (!m_generator.IsChunkEmpty(chunk)) {
-                batch.push_back(chunk);
-            }
+            batch.push_back(chunk);
             ++dispatched;
         }
 
-        // Phase 3: Mark batch as in-flight and submit all to workers at once
-        // This prevents intra-frame races (all linking done before any worker reads)
         if (!batch.empty()) {
             std::lock_guard<std::mutex> lock(m_taskMutex);
             for (auto* chunk : batch) {
@@ -509,6 +518,28 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             }
         }
         m_taskCV.notify_all();
+
+        {
+            std::vector<Chunk*> remeshBatch;
+            int remeshBudget = m_chunksPerFrame;
+            for (auto& [c, ch] : m_chunks) {
+                if (remeshBudget <= 0) break;
+                if (ch->NeedsMeshRebuild() && !ch->IsInFlight()
+                    && !ch->NeedsGeneration()) {
+                    ch->SetNeedsMeshRebuild(false);
+                    remeshBatch.push_back(ch);
+                    --remeshBudget;
+                }
+            }
+            if (!remeshBatch.empty()) {
+                std::lock_guard<std::mutex> lock(m_taskMutex);
+                for (auto* ch : remeshBatch) {
+                    ch->SetInFlight(true);
+                    m_taskQueue.push_back(ch);
+                }
+                m_taskCV.notify_all();
+            }
+        }
     } else {
         // Synchronous path
         int built = 0;
@@ -519,6 +550,11 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
 
             if (m_chunks.count(coord)) continue;
 
+            if (m_generator.IsChunkAboveTerrain(coord.x, coord.y, coord.z)) {
+                ++built;
+                continue;
+            }
+
             auto* chunk = new Chunk(coord.x, coord.y, coord.z);
             m_chunks[coord] = chunk;
             int64_t key = PackCoord(coord.x, coord.y, coord.z);
@@ -529,12 +565,23 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             } else {
                 m_generator.Generate(chunk);
             }
+            chunk->SetNeedsGeneration(false);
             LinkNeighbors(coord, chunk);
-            if (!m_generator.IsChunkEmpty(chunk)) {
-                chunk->BuildMesh(m_material);
-                chunk->AddToScene(m_scene);
-            }
+            chunk->BuildMesh(m_material);
+            chunk->AddToScene(m_scene);
             ++built;
+        }
+
+        int rebuilt = 0;
+        for (auto& [c, ch] : m_chunks) {
+            if (rebuilt >= m_chunksPerFrame) break;
+            if (ch->NeedsMeshRebuild() && !ch->NeedsGeneration()) {
+                ch->SetNeedsMeshRebuild(false);
+                ch->RemoveFromScene(m_scene);
+                ch->BuildMesh(m_material);
+                ch->AddToScene(m_scene);
+                ++rebuilt;
+            }
         }
     }
 
@@ -549,6 +596,9 @@ void ChunkManager::FlushPendingChunks() {
 
         if (m_chunks.count(coord)) continue;
 
+        if (m_generator.IsChunkAboveTerrain(coord.x, coord.y, coord.z))
+            continue;
+
         auto* chunk = new Chunk(coord.x, coord.y, coord.z);
         m_chunks[coord] = chunk;
         int64_t key = PackCoord(coord.x, coord.y, coord.z);
@@ -559,11 +609,10 @@ void ChunkManager::FlushPendingChunks() {
         } else {
             m_generator.Generate(chunk);
         }
+        chunk->SetNeedsGeneration(false);
         LinkNeighbors(coord, chunk);
-        if (!m_generator.IsChunkEmpty(chunk)) {
-            chunk->BuildMesh(m_material);
-            chunk->AddToScene(m_scene);
-        }
+        chunk->BuildMesh(m_material);
+        chunk->AddToScene(m_scene);
     }
 }
 

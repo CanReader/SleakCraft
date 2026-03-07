@@ -124,11 +124,40 @@ void WorldGenerator::Generate(Chunk* chunk) const {
     }
 }
 
-bool WorldGenerator::IsChunkEmpty(Chunk* chunk) const {
+bool WorldGenerator::IsChunkEmpty(const Chunk* chunk) const {
     const uint8_t* data = chunk->GetBlockData();
     for (int i = 0; i < Chunk::VOLUME; ++i) {
         if (data[i] != static_cast<uint8_t>(BlockType::Air))
             return false;
     }
     return true;
+}
+
+bool WorldGenerator::IsChunkFullySolid(const Chunk* chunk) const {
+    const uint8_t* data = chunk->GetBlockData();
+    for (int i = 0; i < Chunk::VOLUME; ++i) {
+        if (!IsBlockSolid(static_cast<BlockType>(data[i])))
+            return false;
+    }
+    return true;
+}
+
+bool WorldGenerator::IsChunkAboveTerrain(int cx, int cy, int cz) const {
+    int baseY = cy * Chunk::SIZE;
+    if (baseY <= 0) return false;
+
+    int baseX = cx * Chunk::SIZE;
+    int baseZ = cz * Chunk::SIZE;
+
+    // Sample surface height at corners and center
+    int maxH = 0;
+    int xs[] = {baseX, baseX + Chunk::SIZE - 1, baseX + Chunk::SIZE / 2};
+    int zs[] = {baseZ, baseZ + Chunk::SIZE - 1, baseZ + Chunk::SIZE / 2};
+    for (int x : xs)
+        for (int z : zs) {
+            int h = GetSurfaceHeight(x, z);
+            if (h > maxH) maxH = h;
+        }
+    // Add margin for height variation within the chunk
+    return baseY > maxH + 8;
 }

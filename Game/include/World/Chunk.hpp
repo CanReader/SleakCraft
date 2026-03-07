@@ -51,6 +51,16 @@ public:
     void SetDirty(bool d) { m_dirty = d; }
     const uint8_t* GetBlockData() const { return m_blocks; }
 
+    bool HasAllNeighbors() const {
+        for (int i = 0; i < 6; ++i)
+            if (!m_neighbors[i]) return false;
+        return true;
+    }
+    bool NeedsMeshRebuild() const { return m_needsRebuild; }
+    void SetNeedsMeshRebuild(bool v) { m_needsRebuild = v; }
+    bool NeedsGeneration() const { return m_needsGeneration; }
+    void SetNeedsGeneration(bool v) { m_needsGeneration = v; }
+
 private:
     static int BlockIndex(int x, int y, int z) {
         return x + z * SIZE + y * SIZE * SIZE;
@@ -71,6 +81,8 @@ private:
     bool m_hasPendingMesh = false;
     bool m_inFlight = false;
     bool m_dirty = false;
+    bool m_needsRebuild = false;
+    bool m_needsGeneration = true;
 };
 
 #endif

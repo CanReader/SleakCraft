@@ -23,8 +23,9 @@ public:
     int GetSurfaceHeight(int worldX, int worldZ) const;
     bool IsCave(int worldX, int worldY, int worldZ) const;
 
-    // Returns true if chunk has any non-air blocks after generation
-    bool IsChunkEmpty(Chunk* chunk) const;
+    bool IsChunkEmpty(const Chunk* chunk) const;
+    bool IsChunkFullySolid(const Chunk* chunk) const;
+    bool IsChunkAboveTerrain(int cx, int cy, int cz) const;
 
 private:
     Noise m_continentalness;

@@ -108,6 +108,11 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
 
 void MainScene::Update(float deltaTime) {
     if (deltaTime > 0.05f) deltaTime = 0.05f;
+
+    // Frustum cull BEFORE Scene::Update so that inactive chunks
+    // don't submit draw commands this frame.
+    m_chunkManager.FrustumCull();
+
     Scene::Update(deltaTime);
 
     // Refresh cached metrics
@@ -279,6 +284,11 @@ void MainScene::RenderUI() {
             app->SetMSAASampleCount(values[current]);
     }
 
+    UI::Separator();
+    float rd = static_cast<float>(m_chunkManager.GetRenderDistance());
+    if (UI::DragFloat("Render Distance", &rd, 1.0f, 2.0f, 16.0f))
+        m_chunkManager.SetRenderDistance(static_cast<int>(rd));
+
     UI::EndPanel();
 }
 
@@ -393,7 +403,7 @@ void MainScene::SetupLighting() {
     sun->SetDirection(Vector3D(-0.35f, -0.75f, -0.45f));
     sun->SetColor(1.0f, 0.95f, 0.85f);
     sun->SetIntensity(0.85f);
-    sun->SetCastShadows(true);
+    sun->SetCastShadows(false);
     sun->SetShadowBias(0.002f);
     sun->SetShadowNormalBias(0.03f);
     sun->SetLightSize(6.0f);
