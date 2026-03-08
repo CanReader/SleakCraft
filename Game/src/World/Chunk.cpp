@@ -232,10 +232,8 @@ void Chunk::UploadMesh(const RefPtr<Material>& material) {
     meshData.indices = std::move(m_pendingMesh.indices);
 
     m_gameObject = new GameObject("Chunk");
-    m_gameObject->AddComponent<TransformComponent>(
-        Vector3D(static_cast<float>(m_cx * SIZE),
-                 static_cast<float>(m_cy * SIZE),
-                 static_cast<float>(m_cz * SIZE)));
+    // Vertices are already in world-space, so transform is at origin
+    m_gameObject->AddComponent<TransformComponent>(Vector3D(0.0f, 0.0f, 0.0f));
     m_gameObject->AddComponent<MaterialComponent>(material);
     m_gameObject->AddComponent<MeshComponent>(std::move(meshData));
     m_gameObject->Initialize();

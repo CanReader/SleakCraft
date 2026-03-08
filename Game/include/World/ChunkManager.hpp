@@ -110,14 +110,17 @@ private:
     void StopWorkers();
     void WorkerThread();
 
-    // Column mesh management — merges all Y-layer chunk meshes per XZ into one draw call
+    // Column mesh management — merges chunks per XZ+Y-band for fewer draw calls
+    // while allowing vertical frustum culling
+    static constexpr int BAND_SIZE = 2; // chunks per band (32 blocks tall)
     struct ColumnKey {
-        int x, z;
-        bool operator==(const ColumnKey& o) const { return x == o.x && z == o.z; }
+        int x, yBand, z;
+        bool operator==(const ColumnKey& o) const { return x == o.x && yBand == o.yBand && z == o.z; }
     };
     struct ColumnKeyHash {
         size_t operator()(const ColumnKey& c) const {
             size_t h = std::hash<int>()(c.x);
+            h ^= std::hash<int>()(c.yBand) + 0x9e3779b9 + (h << 6) + (h >> 2);
             h ^= std::hash<int>()(c.z) + 0x9e3779b9 + (h << 6) + (h >> 2);
             return h;
         }
@@ -126,18 +129,20 @@ private:
         Sleak::GameObject* gameObject = nullptr;
         bool addedToScene = false;
     };
-    void RebuildColumnMesh(int cx, int cz);
+    void RebuildColumnMesh(int cx, int yBand, int cz);
+    static int ChunkYToBand(int cy) { return cy / BAND_SIZE; }
     std::unordered_map<ColumnKey, ColumnMesh, ColumnKeyHash> m_columns;
     std::unordered_set<ColumnKey, ColumnKeyHash> m_dirtyColumns;
 
     std::unordered_map<ChunkCoord, Chunk*, ChunkCoordHash> m_chunks;
     std::vector<ChunkCoord> m_pendingLoad;
     std::unordered_set<ChunkCoord, ChunkCoordHash> m_pendingSet;
+    std::vector<ChunkCoord> m_pendingUnload;
     Sleak::SceneBase* m_scene = nullptr;
     Sleak::RefPtr<Sleak::Material> m_material;
     int m_renderDistance = 8;
-    int m_chunksPerFrame = 16;
-    int m_uploadsPerFrame = 32;
+    int m_chunksPerFrame = 8;
+    int m_uploadsPerFrame = 6;
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
     int m_lastCenterX = INT_MAX;
