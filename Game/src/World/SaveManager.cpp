@@ -3,6 +3,9 @@
 #include <cstring>
 #include <chrono>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#endif
 
 // ── Binary write helpers ─────────────────────────────────────────────
 
