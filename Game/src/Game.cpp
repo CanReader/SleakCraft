@@ -1,6 +1,7 @@
 #include "Game.hpp"
 #include "MainMenuScene.hpp"
 #include "MainScene.hpp"
+#include <Core/Application.hpp>
 
 Game::Game() {
   bIsGameRunning = true;
@@ -25,6 +26,10 @@ void Game::Loop(float DeltaTime) {
 
 void Game::StartWorld(const std::string& savePath, const std::string& worldName,
                       uint32_t seed, bool isNew) {
+    // Wait for GPU before destroying old scene resources
+    auto* app = Sleak::Application::GetInstance();
+    if (app) app->WaitGPUIdle();
+
     // Remove old game scene if it exists
     if (m_gameScene) {
         RemoveScene(m_gameScene);
@@ -37,6 +42,10 @@ void Game::StartWorld(const std::string& savePath, const std::string& worldName,
 }
 
 void Game::ReturnToMenu() {
+    // Wait for GPU before destroying scene resources
+    auto* app = Sleak::Application::GetInstance();
+    if (app) app->WaitGPUIdle();
+
     // Save the game before returning
     if (m_gameScene) {
         m_gameScene->SaveGame();
