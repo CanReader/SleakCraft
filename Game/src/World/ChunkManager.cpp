@@ -146,16 +146,25 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
     chunk->SetBlock(lx, ly, lz, type);
     chunk->SetDirty(true);
 
-    chunk->GenerateMeshData();
-
     std::unordered_set<ColumnKey, ColumnKeyHash> affectedColumns;
-    affectedColumns.insert({cx, ChunkYToBand(cy), cz});
+
+    // Only rebuild mesh if the chunk is not being processed by a worker thread
+    if (chunk->IsInFlight()) {
+        chunk->SetNeedsMeshRebuild(true);
+    } else {
+        chunk->GenerateMeshData();
+        affectedColumns.insert({cx, ChunkYToBand(cy), cz});
+    }
 
     auto rebuildNeighbor = [&](int ncx, int ncy, int ncz) {
         Chunk* neighbor = GetChunk(ncx, ncy, ncz);
         if (neighbor) {
-            neighbor->GenerateMeshData();
-            affectedColumns.insert({ncx, ChunkYToBand(ncy), ncz});
+            if (neighbor->IsInFlight()) {
+                neighbor->SetNeedsMeshRebuild(true);
+            } else {
+                neighbor->GenerateMeshData();
+                affectedColumns.insert({ncx, ChunkYToBand(ncy), ncz});
+            }
         }
     };
 
