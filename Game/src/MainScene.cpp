@@ -1,5 +1,6 @@
 #include "MainScene.hpp"
 #include "Game.hpp"
+#include "World/TextureAtlas.hpp"
 #include <cstring>
 #include <Core/GameObject.hpp>
 #include <Core/Application.hpp>
@@ -116,6 +117,12 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
     if_key_press(KEY__1) { m_selectedBlock = BlockType::Grass; }
     if_key_press(KEY__2) { m_selectedBlock = BlockType::Dirt; }
     if_key_press(KEY__3) { m_selectedBlock = BlockType::Stone; }
+    if_key_press(KEY__4) { m_selectedBlock = BlockType::Cobblestone; }
+    if_key_press(KEY__5) { m_selectedBlock = BlockType::OakLog; }
+    if_key_press(KEY__6) { m_selectedBlock = BlockType::DarkOakLog; }
+    if_key_press(KEY__7) { m_selectedBlock = BlockType::SpruceLog; }
+    if_key_press(KEY__8) { m_selectedBlock = BlockType::OakPlanks; }
+    if_key_press(KEY__9) { m_selectedBlock = BlockType::Bricks; }
     if_key_press(KEY__ESCAPE) {
         auto* app = Application::GetInstance();
         if (app) {
@@ -404,9 +411,19 @@ void MainScene::LoadGame() {
 void MainScene::SetupMaterial() {
     auto* mat = new Material();
     mat->SetShader("assets/shaders/flat_shader.hlsl");
-    mat->SetDiffuseTexture("assets/textures/block_atlas.png");
-    mat->GetDiffuseTexture()->SetFilter(TextureFilter::Nearest);
-    mat->GetDiffuseTexture()->SetWrapMode(TextureWrapMode::ClampToEdge);
+
+    // Build runtime atlas from individual block textures
+    auto* atlasTex = TextureAtlas::BuildAtlas();
+    if (atlasTex) {
+        atlasTex->SetFilter(TextureFilter::Nearest);
+        atlasTex->SetWrapMode(TextureWrapMode::ClampToEdge);
+        mat->SetDiffuseTexture(atlasTex);
+    } else {
+        // Fallback to old atlas file
+        mat->SetDiffuseTexture("assets/textures/block_atlas.png");
+        mat->GetDiffuseTexture()->SetFilter(TextureFilter::Nearest);
+        mat->GetDiffuseTexture()->SetWrapMode(TextureWrapMode::ClampToEdge);
+    }
     mat->SetDiffuseColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
     mat->SetSpecularColor((uint8_t)0, (uint8_t)0, (uint8_t)0);
     mat->SetShininess(0.0f);

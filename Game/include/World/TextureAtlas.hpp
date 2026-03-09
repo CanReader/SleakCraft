@@ -2,6 +2,10 @@
 #define _TEXTURE_ATLAS_HPP_
 
 #include <cstdint>
+#include <vector>
+#include <string>
+
+namespace Sleak { class Texture; }
 
 struct AtlasUV {
     float u0, v0; // bottom-left
@@ -10,18 +14,27 @@ struct AtlasUV {
 
 class TextureAtlas {
 public:
-    static constexpr int TILE_SIZE = 512;
     static constexpr int TILES_PER_ROW = 4;
-    static constexpr int ATLAS_WIDTH = TILE_SIZE * TILES_PER_ROW;
-    static constexpr int ATLAS_HEIGHT = TILE_SIZE;
+
+    // Build atlas from individual block textures, returns the texture
+    // Tile order must match BlockTile enum in Block.hpp
+    static Sleak::Texture* BuildAtlas();
 
     static AtlasUV GetTileUV(uint8_t tileIndex) {
-        float tileWidth = 1.0f / TILES_PER_ROW;
+        int col = tileIndex % TILES_PER_ROW;
+        int row = tileIndex / TILES_PER_ROW;
+        float tw = 1.0f / static_cast<float>(TILES_PER_ROW);
+        float th = 1.0f / static_cast<float>(s_rows);
         return {
-            tileIndex * tileWidth,        0.0f,
-            (tileIndex + 1) * tileWidth,  1.0f
+            col * tw,       row * th,
+            (col + 1) * tw, (row + 1) * th
         };
     }
+
+    static int GetRows() { return s_rows; }
+
+private:
+    static int s_rows;
 };
 
 #endif
