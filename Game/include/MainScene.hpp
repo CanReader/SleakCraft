@@ -14,11 +14,16 @@ namespace Sleak { class Material; }
 
 class MainScene : public Sleak::Scene {
 public:
-    explicit MainScene(const std::string& name);
+    MainScene(const std::string& name, const std::string& savePath,
+              const std::string& worldName, uint32_t seed, bool isNewWorld);
     ~MainScene() override = default;
 
     bool Initialize() override;
     void Update(float deltaTime) override;
+
+    // Save current world state (called by Game when returning to menu)
+    void SaveGame();
+    bool HasUnsavedChanges() const;
 
 private:
     void SetupMaterial();
@@ -29,8 +34,12 @@ private:
     void OnMousePressed(const Sleak::Events::Input::MouseButtonPressedEvent& e);
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
 
-    void SaveGame();
     void LoadGame();
+
+    std::string m_savePath;
+    std::string m_worldName;
+    uint32_t m_worldSeed;
+    bool m_isNewWorld;
 
     Sleak::RefPtr<Sleak::Material> m_blockMaterial;
     ChunkManager m_chunkManager;

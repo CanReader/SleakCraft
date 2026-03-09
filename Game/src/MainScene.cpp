@@ -1,4 +1,5 @@
 #include "MainScene.hpp"
+#include "Game.hpp"
 #include <cstring>
 #include <Core/GameObject.hpp>
 #include <Core/Application.hpp>
@@ -20,8 +21,10 @@
 using namespace Sleak;
 using namespace Sleak::Math;
 
-MainScene::MainScene(const std::string& name)
-    : Scene(name) {}
+MainScene::MainScene(const std::string& name, const std::string& savePath,
+                     const std::string& worldName, uint32_t seed, bool isNewWorld)
+    : Scene(name), m_savePath(savePath), m_worldName(worldName),
+      m_worldSeed(seed), m_isNewWorld(isNewWorld) {}
 
 bool MainScene::Initialize() {
     SetupMaterial();
@@ -44,34 +47,46 @@ bool MainScene::Initialize() {
             fpc->SetPitch(0.0f);
             fpc->SetYaw(0.0f);
         }
-        auto* rb = cam->GetComponent<RigidbodyComponent>();
     }
 
     SetupLighting();
 
+    m_saveManager.SetSavePath(m_savePath);
     m_chunkManager.Initialize(this, m_blockMaterial);
-    m_chunkManager.SetSeed(42);
 
-    // Find surface height at spawn and position camera above it
-    if (cam) {
-        int surfaceY = m_chunkManager.GetGenerator().GetSurfaceHeight(8, 8);
-        float spawnY = static_cast<float>(surfaceY) + 2.62f;
-        cam->SetPosition({8.0f, spawnY, 8.0f});
+    if (m_isNewWorld) {
+        m_chunkManager.SetSeed(m_worldSeed);
+
+        // Find surface height at spawn and position camera above it
+        if (cam) {
+            int surfaceY = m_chunkManager.GetGenerator().GetSurfaceHeight(8, 8);
+            float spawnY = static_cast<float>(surfaceY) + 2.62f;
+            cam->SetPosition({8.0f, spawnY, 8.0f});
+        }
+
+        // Load a small area synchronously so the player has ground
+        m_chunkManager.SetRenderDistance(3);
+        m_chunkManager.Update(cam ? cam->GetPosition().GetX() : 8.0f,
+                              cam ? cam->GetPosition().GetY() : 70.0f,
+                              cam ? cam->GetPosition().GetZ() : 8.0f);
+        m_chunkManager.FlushPendingChunks();
+        m_chunkManager.SetRenderDistance(8);
+        m_chunkManager.SetMultithreaded(m_multithreadedLoading);
+
+        // Save initial world.dat so it appears in world list
+        SaveGame();
+    } else {
+        LoadGame();
     }
-
-    // Load a small area synchronously so the player has ground, then stream the rest
-    m_chunkManager.SetRenderDistance(3);
-    m_chunkManager.Update(cam ? cam->GetPosition().GetX() : 8.0f,
-                          cam ? cam->GetPosition().GetY() : 70.0f,
-                          cam ? cam->GetPosition().GetZ() : 8.0f);
-    m_chunkManager.FlushPendingChunks();
-    m_chunkManager.SetRenderDistance(8);
-    m_chunkManager.SetMultithreaded(m_multithreadedLoading);
 
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
 
     return true;
+}
+
+bool MainScene::HasUnsavedChanges() const {
+    return !m_chunkManager.GetDirtyChunks().empty();
 }
 
 void MainScene::OnMousePressed(const Events::Input::MouseButtonPressedEvent& e) {
@@ -101,6 +116,14 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
     if_key_press(KEY__1) { m_selectedBlock = BlockType::Grass; }
     if_key_press(KEY__2) { m_selectedBlock = BlockType::Dirt; }
     if_key_press(KEY__3) { m_selectedBlock = BlockType::Stone; }
+    if_key_press(KEY__ESCAPE) {
+        auto* app = Application::GetInstance();
+        if (app) {
+            auto* game = static_cast<Game*>(app->GetGame());
+            if (game) game->ReturnToMenu();
+        }
+        return;
+    }
     if_key_press(KEY__F3) { m_showUI = !m_showUI; }
     if_key_press(KEY__F5) { SaveGame(); }
     if_key_press(KEY__F6) { LoadGame(); }
@@ -297,6 +320,7 @@ void MainScene::SaveGame() {
     if (!cam) return;
 
     WorldMeta meta;
+    meta.worldName = m_worldName;
     meta.seed = m_chunkManager.GetSeed();
     auto pos = cam->GetPosition();
     meta.player.posX = pos.GetX();
