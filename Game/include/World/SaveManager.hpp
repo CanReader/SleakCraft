@@ -4,6 +4,7 @@
 #include "WorldMeta.hpp"
 #include "RegionFile.hpp"
 #include <string>
+#include <vector>
 #include <unordered_map>
 #include <array>
 
@@ -23,6 +24,11 @@ public:
 
     bool HasSave() const;
     const std::string& GetSavePath() const { return m_savePath; }
+
+    // Static utility methods for multi-world support
+    static std::vector<std::string> ListSaveDirectories(const std::string& basePath = "saves");
+    static bool ReadWorldMetaOnly(const std::string& savePath, WorldMeta& meta);
+    static bool DeleteSaveDirectory(const std::string& path);
 
 private:
     bool EnsureDirectories() const;

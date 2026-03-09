@@ -2,6 +2,7 @@
 #include <fstream>
 #include <cstring>
 #include <chrono>
+#include <filesystem>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
@@ -335,4 +336,34 @@ bool SaveManager::ReadWorldDat(WorldMeta& meta) const {
     }
 
     return true;
+}
+
+// ── Static utility methods ───────────────────────────────────────────
+
+std::vector<std::string> SaveManager::ListSaveDirectories(const std::string& basePath) {
+    std::vector<std::string> dirs;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::exists(basePath, ec)) return dirs;
+    for (auto& entry : fs::directory_iterator(basePath, ec)) {
+        if (entry.is_directory(ec)) {
+            std::string worldDat = entry.path().string() + "/world.dat";
+            if (fs::exists(worldDat, ec))
+                dirs.push_back(entry.path().string());
+        }
+    }
+    return dirs;
+}
+
+bool SaveManager::ReadWorldMetaOnly(const std::string& savePath, WorldMeta& meta) {
+    SaveManager tmp;
+    tmp.SetSavePath(savePath);
+    return tmp.ReadWorldDat(meta);
+}
+
+bool SaveManager::DeleteSaveDirectory(const std::string& path) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::remove_all(path, ec);
+    return !ec;
 }
