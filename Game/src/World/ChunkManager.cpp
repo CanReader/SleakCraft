@@ -137,7 +137,16 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
     int cz = floorDiv(worldZ, Chunk::SIZE);
 
     Chunk* chunk = GetChunk(cx, cy, cz);
-    if (!chunk) return false;
+    if (!chunk) {
+        // Create the chunk on-demand if within valid Y range
+        // (it was likely skipped by IsChunkAboveTerrain)
+        if (cy < WorldGenerator::MIN_CHUNK_Y || cy > WorldGenerator::MAX_CHUNK_Y)
+            return false;
+        chunk = new Chunk(cx, cy, cz);
+        m_chunks[{cx, cy, cz}] = chunk;
+        chunk->SetNeedsGeneration(false);
+        LinkNeighbors({cx, cy, cz}, chunk);
+    }
 
     int lx = floorMod(worldX, Chunk::SIZE);
     int ly = floorMod(worldY, Chunk::SIZE);

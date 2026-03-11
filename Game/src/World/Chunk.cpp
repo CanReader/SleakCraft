@@ -39,18 +39,33 @@ bool Chunk::IsBlockSolidAt(int x, int y, int z) const {
     if (x >= 0 && x < SIZE && y >= 0 && y < SIZE && z >= 0 && z < SIZE)
         return IsBlockSolid(static_cast<BlockType>(m_blocks[BlockIndex(x, y, z)]));
 
-    if (y >= SIZE && m_neighbors[static_cast<uint8_t>(BlockFace::Top)])
-        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::Top)]->GetBlock(x, y - SIZE, z));
-    if (y < 0 && m_neighbors[static_cast<uint8_t>(BlockFace::Bottom)])
-        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::Bottom)]->GetBlock(x, y + SIZE, z));
-    if (z >= SIZE && m_neighbors[static_cast<uint8_t>(BlockFace::North)])
-        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::North)]->GetBlock(x, y, z - SIZE));
-    if (z < 0 && m_neighbors[static_cast<uint8_t>(BlockFace::South)])
-        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::South)]->GetBlock(x, y, z + SIZE));
-    if (x >= SIZE && m_neighbors[static_cast<uint8_t>(BlockFace::East)])
-        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::East)]->GetBlock(x - SIZE, y, z));
-    if (x < 0 && m_neighbors[static_cast<uint8_t>(BlockFace::West)])
-        return IsBlockSolid(m_neighbors[static_cast<uint8_t>(BlockFace::West)]->GetBlock(x + SIZE, y, z));
+    if (y >= SIZE) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::Top)];
+        if (nb) return IsBlockSolid(nb->GetBlock(x, y - SIZE, z));
+        // No chunk above — at world ceiling, treat as air so top faces render
+        return false;
+    }
+    if (y < 0) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::Bottom)];
+        if (nb) return IsBlockSolid(nb->GetBlock(x, y + SIZE, z));
+        return false;
+    }
+    if (z >= SIZE) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::North)];
+        if (nb) return IsBlockSolid(nb->GetBlock(x, y, z - SIZE));
+    }
+    if (z < 0) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::South)];
+        if (nb) return IsBlockSolid(nb->GetBlock(x, y, z + SIZE));
+    }
+    if (x >= SIZE) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::East)];
+        if (nb) return IsBlockSolid(nb->GetBlock(x - SIZE, y, z));
+    }
+    if (x < 0) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::West)];
+        if (nb) return IsBlockSolid(nb->GetBlock(x + SIZE, y, z));
+    }
 
     return true;
 }
