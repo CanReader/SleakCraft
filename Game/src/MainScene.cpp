@@ -66,12 +66,12 @@ bool MainScene::Initialize() {
         }
 
         // Load a small area synchronously so the player has ground
-        m_chunkManager.SetRenderDistance(3);
+        m_chunkManager.SetRenderDistance(16);
         m_chunkManager.Update(cam ? cam->GetPosition().GetX() : 8.0f,
                               cam ? cam->GetPosition().GetY() : 70.0f,
                               cam ? cam->GetPosition().GetZ() : 8.0f);
         m_chunkManager.FlushPendingChunks();
-        m_chunkManager.SetRenderDistance(8);
+        m_chunkManager.SetRenderDistance(32);
         m_chunkManager.SetMultithreaded(m_multithreadedLoading);
 
         // Save initial world.dat so it appears in world list
@@ -316,8 +316,14 @@ void MainScene::RenderUI() {
 
     UI::Separator();
     float rd = static_cast<float>(m_chunkManager.GetRenderDistance());
-    if (UI::DragFloat("Render Distance", &rd, 1.0f, 2.0f, 16.0f))
+    if (UI::DragFloat("Render Distance", &rd, 1.0f, 2.0f, 256.0f)) {
         m_chunkManager.SetRenderDistance(static_cast<int>(rd));
+        auto* lm = GetLightManager();
+        if (lm) {
+            float drawDist = m_chunkManager.GetDrawDistance();
+            lm->SetFogDistances(drawDist * 0.8f, drawDist);
+        }
+    }
 
     UI::EndPanel();
 }
@@ -458,5 +464,11 @@ void MainScene::SetupLighting() {
     if (lm) {
         lm->SetAmbientColor(0.45f, 0.52f, 0.65f);
         lm->SetAmbientIntensity(0.2f);
+
+        // Fog — matches sky/clear color, fades at render distance edges
+        lm->SetFogColor(0.6f, 0.75f, 1.0f);
+        float drawDist = m_chunkManager.GetDrawDistance();
+        lm->SetFogDistances(drawDist * 0.8f, drawDist);
+        lm->SetFogEnabled(true);
     }
 }

@@ -22,6 +22,10 @@ layout(set = 2, binding = 0) uniform ShadowLightUBO {
     float uShadowStrength;
     float uShadowTexelSize;
     float uLightSize;
+    vec4  uFogColor;
+    float uFogStart;
+    float uFogEnd;
+    float _fogPad[2];
 };
 
 layout(set = 3, binding = 0) uniform sampler2DShadow shadowMap;
@@ -92,6 +96,13 @@ void main() {
 
     vec3 lit = baseColor.rgb * (ambient + shadow * diffuse);
     lit = lit / (lit + vec3(1.0));
+
+    // Distance fog (Minecraft-style linear fog)
+    if (uFogEnd > 0.0) {
+        float dist = length(fragWorldPos - uCameraPos.xyz);
+        float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
+        lit = mix(uFogColor.rgb, lit, fogFactor);
+    }
 
     outColor = vec4(lit, baseColor.a);
 }

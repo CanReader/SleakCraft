@@ -20,7 +20,10 @@ layout(std140, binding = 2) uniform LightUBO {
     uint NumActiveLights;
     vec3 AmbientColor;
     float AmbientIntensity;
-    vec4 _reserved[2];
+    vec4 FogColor;
+    float FogStart;
+    float FogEnd;
+    float _pad0, _pad1;
     LightData Lights[16];
 };
 
@@ -55,6 +58,13 @@ void main() {
 
     // Reinhard tone mapping
     lit = lit / (lit + vec3(1.0));
+
+    // Distance fog (Minecraft-style linear fog)
+    if (FogEnd > 0.0) {
+        float dist = length(fragWorldPos - CameraPos);
+        float fogFactor = clamp((FogEnd - dist) / (FogEnd - FogStart), 0.0, 1.0);
+        lit = mix(FogColor.rgb, lit, fogFactor);
+    }
 
     outColor = vec4(lit, baseColor.a);
 }

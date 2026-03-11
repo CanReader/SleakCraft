@@ -43,7 +43,10 @@ cbuffer LightCB : register(b2) {
     uint NumActiveLights;
     float3 AmbientColor;
     float AmbientIntensity;
-    float4 _reserved[2];
+    float4 FogColor;
+    float FogStart;
+    float FogEnd;
+    float2 _reserved;
     LightData Lights[16];
 };
 
@@ -159,6 +162,13 @@ float4 PS_Main(VS_OUTPUT input) : SV_Target
 
     // ---- Tone mapping (Reinhard) ----
     lit = lit / (lit + float3(1.0, 1.0, 1.0));
+
+    // ---- Distance fog (Minecraft-style) ----
+    if (FogEnd > 0.0) {
+        float dist = length(input.WorldPos - CameraPos);
+        float fogFactor = saturate((FogEnd - dist) / (FogEnd - FogStart));
+        lit = lerp(FogColor.rgb, lit, fogFactor);
+    }
 
     return float4(lit, baseColor.a);
 }

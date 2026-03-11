@@ -20,7 +20,11 @@ layout(set = 2, binding = 0) uniform ShadowLightUBO {
     float uShadowBias;
     float uShadowStrength;
     float uShadowTexelSize;
-    float _pad;
+    float uLightSize;
+    vec4  uFogColor;       // rgb + alpha
+    float uFogStart;       // distance where fog begins
+    float uFogEnd;         // distance where fog fully obscures
+    float _fogPad[2];
 };
 
 layout(location = 0) out vec3 fragWorldPos;
