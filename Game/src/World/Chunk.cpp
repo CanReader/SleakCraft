@@ -70,6 +70,40 @@ bool Chunk::IsBlockSolidAt(int x, int y, int z) const {
     return true;
 }
 
+bool Chunk::IsBlockOpaqueAt(int x, int y, int z) const {
+    if (x >= 0 && x < SIZE && y >= 0 && y < SIZE && z >= 0 && z < SIZE)
+        return IsBlockOpaque(static_cast<BlockType>(m_blocks[BlockIndex(x, y, z)]));
+
+    if (y >= SIZE) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::Top)];
+        if (nb) return IsBlockOpaque(nb->GetBlock(x, y - SIZE, z));
+        return false;
+    }
+    if (y < 0) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::Bottom)];
+        if (nb) return IsBlockOpaque(nb->GetBlock(x, y + SIZE, z));
+        return false;
+    }
+    if (z >= SIZE) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::North)];
+        if (nb) return IsBlockOpaque(nb->GetBlock(x, y, z - SIZE));
+    }
+    if (z < 0) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::South)];
+        if (nb) return IsBlockOpaque(nb->GetBlock(x, y, z + SIZE));
+    }
+    if (x >= SIZE) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::East)];
+        if (nb) return IsBlockOpaque(nb->GetBlock(x - SIZE, y, z));
+    }
+    if (x < 0) {
+        auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::West)];
+        if (nb) return IsBlockOpaque(nb->GetBlock(x + SIZE, y, z));
+    }
+
+    return true;
+}
+
 static int CalcAO(bool side1, bool side2, bool corner) {
     if (side1 && side2) return 0;
     return 3 - (static_cast<int>(side1) + static_cast<int>(side2) + static_cast<int>(corner));
@@ -213,14 +247,14 @@ void Chunk::GenerateMeshData() {
         for (int z = 0; z < SIZE; ++z) {
             for (int x = 0; x < SIZE; ++x) {
                 BlockType type = GetBlock(x, y, z);
-                if (!IsBlockSolid(type)) continue;
+                if (!IsBlockRenderable(type)) continue;
 
-                if (!IsBlockSolidAt(x, y + 1, z)) AddFace(BlockFace::Top,    x, y, z, type, vertices, indices);
-                if (!IsBlockSolidAt(x, y - 1, z)) AddFace(BlockFace::Bottom, x, y, z, type, vertices, indices);
-                if (!IsBlockSolidAt(x, y, z + 1)) AddFace(BlockFace::North,  x, y, z, type, vertices, indices);
-                if (!IsBlockSolidAt(x, y, z - 1)) AddFace(BlockFace::South,  x, y, z, type, vertices, indices);
-                if (!IsBlockSolidAt(x + 1, y, z)) AddFace(BlockFace::East,   x, y, z, type, vertices, indices);
-                if (!IsBlockSolidAt(x - 1, y, z)) AddFace(BlockFace::West,   x, y, z, type, vertices, indices);
+                if (!IsBlockOpaqueAt(x, y + 1, z)) AddFace(BlockFace::Top,    x, y, z, type, vertices, indices);
+                if (!IsBlockOpaqueAt(x, y - 1, z)) AddFace(BlockFace::Bottom, x, y, z, type, vertices, indices);
+                if (!IsBlockOpaqueAt(x, y, z + 1)) AddFace(BlockFace::North,  x, y, z, type, vertices, indices);
+                if (!IsBlockOpaqueAt(x, y, z - 1)) AddFace(BlockFace::South,  x, y, z, type, vertices, indices);
+                if (!IsBlockOpaqueAt(x + 1, y, z)) AddFace(BlockFace::East,   x, y, z, type, vertices, indices);
+                if (!IsBlockOpaqueAt(x - 1, y, z)) AddFace(BlockFace::West,   x, y, z, type, vertices, indices);
             }
         }
     }

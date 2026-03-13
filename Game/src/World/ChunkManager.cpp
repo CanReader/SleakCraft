@@ -737,7 +737,8 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
 }
 
 void ChunkManager::FlushPendingChunks() {
-    std::unordered_set<ColumnKey, ColumnKeyHash> flushDirtyColumns;
+    // Pass 1: Generate all chunks and link neighbors
+    std::vector<ChunkCoord> generated;
     while (!m_pendingLoad.empty()) {
         ChunkCoord coord = m_pendingLoad.back();
         m_pendingLoad.pop_back();
@@ -760,10 +761,20 @@ void ChunkManager::FlushPendingChunks() {
         }
         chunk->SetNeedsGeneration(false);
         LinkNeighbors(coord, chunk);
-        chunk->GenerateMeshData();
-        flushDirtyColumns.insert({coord.x, ChunkYToBand(coord.y), coord.z});
+        generated.push_back(coord);
     }
 
+    // Pass 2: Mesh all chunks (now that all neighbors exist and are linked)
+    std::unordered_set<ColumnKey, ColumnKeyHash> flushDirtyColumns;
+    for (auto& coord : generated) {
+        Chunk* chunk = GetChunk(coord.x, coord.y, coord.z);
+        if (chunk) {
+            chunk->GenerateMeshData();
+            flushDirtyColumns.insert({coord.x, ChunkYToBand(coord.y), coord.z});
+        }
+    }
+
+    // Pass 3: Build column meshes
     for (auto& col : flushDirtyColumns)
         RebuildColumnMesh(col.x, col.yBand, col.z);
 }

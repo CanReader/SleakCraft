@@ -6,6 +6,18 @@
 
 class Chunk;
 
+enum class Biome : uint8_t {
+    Plains,
+    Forest,
+    Mountains,
+    Desert
+};
+
+struct ColumnInfo {
+    int surfaceHeight;
+    Biome biome;
+};
+
 class WorldGenerator {
 public:
     static constexpr int MIN_CHUNK_Y = 0;
@@ -22,6 +34,7 @@ public:
     void Generate(Chunk* chunk) const;
     int GetSurfaceHeight(int worldX, int worldZ) const;
     bool IsCave(int worldX, int worldY, int worldZ) const;
+    Biome GetBiome(int worldX, int worldZ) const;
 
     bool IsChunkEmpty(const Chunk* chunk) const;
     bool IsChunkFullySolid(const Chunk* chunk) const;
@@ -30,12 +43,22 @@ public:
 private:
     Noise m_continentalness;
     Noise m_erosion;
+    Noise m_peaksValleys;
     Noise m_detail;
-    Noise m_cave1;
-    Noise m_cave2;
+    Noise m_temperature;
+    Noise m_humidity;
+    Noise m_spaghettiA;
+    Noise m_spaghettiB;
+    Noise m_cheese;
+    Noise m_caveY;
+    Noise m_gravelNoise;
     uint32_t m_seed = 0;
 
     void InitNoises();
+    void PlaceTrees(Chunk* chunk) const;
+    ColumnInfo GetColumnInfo(int worldX, int worldZ) const;
+
+    static uint32_t HashPosition(int x, int z, uint32_t seed);
 };
 
 #endif

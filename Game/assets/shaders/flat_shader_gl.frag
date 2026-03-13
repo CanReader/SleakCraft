@@ -31,6 +31,8 @@ layout(binding = 0) uniform sampler2D diffuseTexture;
 
 void main() {
     vec4 texColor = texture(diffuseTexture, fragUV);
+    if (texColor.a < 0.5)
+        discard;
     vec4 baseColor = texColor * fragColor;
 
     vec3 N = normalize(fragWorldNorm);

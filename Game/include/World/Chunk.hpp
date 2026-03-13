@@ -68,6 +68,7 @@ private:
     }
 
     bool IsBlockSolidAt(int x, int y, int z) const;
+    bool IsBlockOpaqueAt(int x, int y, int z) const;
     void ComputeFaceAO(BlockFace face, int x, int y, int z, float ao[4]) const;
     void AddFace(BlockFace face, int x, int y, int z, BlockType type,
                  Sleak::VertexGroup& vertices, Sleak::IndexGroup& indices);

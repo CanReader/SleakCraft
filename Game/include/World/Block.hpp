@@ -90,6 +90,14 @@ inline bool IsBlockSolid(BlockType type) {
     return type != BlockType::Air;
 }
 
+inline bool IsBlockOpaque(BlockType type) {
+    return type != BlockType::Air && type != BlockType::OakLeaves;
+}
+
+inline bool IsBlockRenderable(BlockType type) {
+    return type != BlockType::Air;
+}
+
 inline const char* GetBlockName(BlockType type) {
     switch (type) {
         case BlockType::Grass:       return "Grass";

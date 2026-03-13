@@ -66,7 +66,7 @@ bool MainScene::Initialize() {
         }
 
         // Load a small area synchronously so the player has ground
-        m_chunkManager.SetRenderDistance(16);
+        m_chunkManager.SetRenderDistance(4);
         m_chunkManager.Update(cam ? cam->GetPosition().GetX() : 8.0f,
                               cam ? cam->GetPosition().GetY() : 70.0f,
                               cam ? cam->GetPosition().GetZ() : 8.0f);
