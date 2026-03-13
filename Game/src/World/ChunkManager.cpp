@@ -39,9 +39,9 @@ void ChunkManager::SetMultithreaded(bool enabled) {
 void ChunkManager::StartWorkers() {
     if (!m_workers.empty()) return;
     m_shutdown.store(false);
-    int count = static_cast<int>(std::thread::hardware_concurrency()) - 1;
+    int count = static_cast<int>(std::thread::hardware_concurrency()) - 2;
     if (count < 2) count = 2;
-    if (count > 6) count = 6;
+    if (count > 12) count = 12;
     for (int i = 0; i < count; ++i)
         m_workers.emplace_back(&ChunkManager::WorkerThread, this);
 }
@@ -593,10 +593,9 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             if (m_chunks.count(coord)) continue;
 
             // Skip chunks guaranteed to be entirely above terrain
-            if (m_generator.IsChunkAboveTerrain(coord.x, coord.y, coord.z)) {
-                ++dispatched;
+            // (don't count against budget — this is a cheap check)
+            if (m_generator.IsChunkAboveTerrain(coord.x, coord.y, coord.z))
                 continue;
-            }
 
             auto* chunk = new Chunk(coord.x, coord.y, coord.z);
             m_chunks[coord] = chunk;
@@ -645,6 +644,8 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         }
 
         // Phase 4: Rebuild dirty band column meshes (GPU upload)
+        // Buffer copies are batched into a single GPU submission, so we can
+        // afford to process many columns per frame without stalling.
         {
             int rebuilt = 0;
             for (auto it = m_dirtyColumns.begin(); it != m_dirtyColumns.end() && rebuilt < m_uploadsPerFrame; ) {
@@ -664,10 +665,8 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
 
             if (m_chunks.count(coord)) continue;
 
-            if (m_generator.IsChunkAboveTerrain(coord.x, coord.y, coord.z)) {
-                ++built;
+            if (m_generator.IsChunkAboveTerrain(coord.x, coord.y, coord.z))
                 continue;
-            }
 
             auto* chunk = new Chunk(coord.x, coord.y, coord.z);
             m_chunks[coord] = chunk;
