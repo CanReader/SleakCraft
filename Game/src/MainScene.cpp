@@ -307,6 +307,9 @@ void MainScene::RenderUI() {
 
     UI::Checkbox("Show Crosshair", &m_showCrosshair);
 
+    if (UI::Checkbox("VSync", &m_vsync))
+        app->SetVSync(m_vsync);
+
     if (UI::Checkbox("Multithreaded Loading", &m_multithreadedLoading))
         m_chunkManager.SetMultithreaded(m_multithreadedLoading);
 

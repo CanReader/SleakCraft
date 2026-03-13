@@ -58,6 +58,7 @@ private:
     std::array<uint64_t, HOTBAR_SLOTS> m_hotbarTextures = {};
     bool m_hotbarTexturesLoaded = false;
     bool m_multithreadedLoading = true;
+    bool m_vsync = false;
 
     // UI state
     bool m_showUI = true;
