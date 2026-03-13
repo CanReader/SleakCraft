@@ -644,14 +644,36 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         }
 
         // Phase 4: Rebuild dirty band column meshes (GPU upload)
-        // Buffer copies are batched into a single GPU submission, so we can
-        // afford to process many columns per frame without stalling.
+        // Two-pass approach: destroy old meshes first (no GPU batch active),
+        // then create all new meshes (GPU copies batched into one submission).
         {
-            int rebuilt = 0;
-            for (auto it = m_dirtyColumns.begin(); it != m_dirtyColumns.end() && rebuilt < m_uploadsPerFrame; ) {
-                RebuildColumnMesh(it->x, it->yBand, it->z);
-                it = m_dirtyColumns.erase(it);
-                ++rebuilt;
+            // Collect columns to rebuild this frame
+            std::vector<ColumnKey> toRebuild;
+            {
+                int count = 0;
+                for (auto it = m_dirtyColumns.begin();
+                     it != m_dirtyColumns.end() && count < m_uploadsPerFrame; ) {
+                    toRebuild.push_back(*it);
+                    it = m_dirtyColumns.erase(it);
+                    ++count;
+                }
+            }
+
+            // Pass 1: Destroy old column meshes (before GPU batch starts)
+            for (auto& key : toRebuild) {
+                auto colIt = m_columns.find(key);
+                if (colIt != m_columns.end()) {
+                    if (colIt->second.addedToScene)
+                        m_scene->RemoveObject(colIt->second.gameObject);
+                    else
+                        delete colIt->second.gameObject;
+                    m_columns.erase(colIt);
+                }
+            }
+
+            // Pass 2: Create new column meshes (GPU copies batch together)
+            for (auto& key : toRebuild) {
+                RebuildColumnMesh(key.x, key.yBand, key.z);
             }
         }
     } else {
@@ -696,6 +718,17 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             }
         }
 
+        // Two-pass: destroy old meshes first, then create new ones
+        for (auto& col : syncDirtyColumns) {
+            auto colIt = m_columns.find(col);
+            if (colIt != m_columns.end()) {
+                if (colIt->second.addedToScene)
+                    m_scene->RemoveObject(colIt->second.gameObject);
+                else
+                    delete colIt->second.gameObject;
+                m_columns.erase(colIt);
+            }
+        }
         for (auto& col : syncDirtyColumns)
             RebuildColumnMesh(col.x, col.yBand, col.z);
     }
