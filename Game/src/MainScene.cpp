@@ -81,6 +81,7 @@ bool MainScene::Initialize() {
     }
 
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
+    EventDispatcher::RegisterEventHandler(this, &MainScene::OnMouseScrolled);
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
 
     return true;
@@ -113,16 +114,28 @@ void MainScene::OnMousePressed(const Events::Input::MouseButtonPressedEvent& e) 
     }
 }
 
+void MainScene::OnMouseScrolled(const Events::Input::MouseScrolledEvent& e) {
+    float y = e.GetYOffset();
+    if (y > 0.0f) {
+        m_selectedSlot--;
+        if (m_selectedSlot < 0) m_selectedSlot = HOTBAR_SLOTS - 1;
+    } else if (y < 0.0f) {
+        m_selectedSlot++;
+        if (m_selectedSlot >= HOTBAR_SLOTS) m_selectedSlot = 0;
+    }
+    m_selectedBlock = m_hotbar[m_selectedSlot];
+}
+
 void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
-    if_key_press(KEY__1) { m_selectedBlock = BlockType::Grass; }
-    if_key_press(KEY__2) { m_selectedBlock = BlockType::Dirt; }
-    if_key_press(KEY__3) { m_selectedBlock = BlockType::Stone; }
-    if_key_press(KEY__4) { m_selectedBlock = BlockType::Cobblestone; }
-    if_key_press(KEY__5) { m_selectedBlock = BlockType::OakLog; }
-    if_key_press(KEY__6) { m_selectedBlock = BlockType::DarkOakLog; }
-    if_key_press(KEY__7) { m_selectedBlock = BlockType::SpruceLog; }
-    if_key_press(KEY__8) { m_selectedBlock = BlockType::OakPlanks; }
-    if_key_press(KEY__9) { m_selectedBlock = BlockType::Bricks; }
+    if_key_press(KEY__1) { m_selectedSlot = 0; m_selectedBlock = m_hotbar[0]; }
+    if_key_press(KEY__2) { m_selectedSlot = 1; m_selectedBlock = m_hotbar[1]; }
+    if_key_press(KEY__3) { m_selectedSlot = 2; m_selectedBlock = m_hotbar[2]; }
+    if_key_press(KEY__4) { m_selectedSlot = 3; m_selectedBlock = m_hotbar[3]; }
+    if_key_press(KEY__5) { m_selectedSlot = 4; m_selectedBlock = m_hotbar[4]; }
+    if_key_press(KEY__6) { m_selectedSlot = 5; m_selectedBlock = m_hotbar[5]; }
+    if_key_press(KEY__7) { m_selectedSlot = 6; m_selectedBlock = m_hotbar[6]; }
+    if_key_press(KEY__8) { m_selectedSlot = 7; m_selectedBlock = m_hotbar[7]; }
+    if_key_press(KEY__9) { m_selectedSlot = 8; m_selectedBlock = m_hotbar[8]; }
     if_key_press(KEY__ESCAPE) {
         auto* app = Application::GetInstance();
         if (app) {
@@ -213,6 +226,8 @@ void MainScene::Update(float deltaTime) {
 
         if (m_showUI)
             RenderUI();
+
+        RenderHotbar();
     }
 }
 
@@ -412,6 +427,85 @@ void MainScene::LoadGame() {
 
     m_saveMessage = "World Loaded!";
     m_saveMessageTimer = 2.0f;
+}
+
+// Helper: get the representative texture path for a block type (front/side face)
+static const char* GetBlockTexturePath(BlockType type) {
+    switch (type) {
+        case BlockType::Grass:       return "assets/textures/blocks/grass_block_side.png";
+        case BlockType::Dirt:        return "assets/textures/blocks/dirt.png";
+        case BlockType::Stone:       return "assets/textures/blocks/stone.png";
+        case BlockType::Cobblestone: return "assets/textures/blocks/cobblestone.png";
+        case BlockType::OakLog:      return "assets/textures/blocks/oak_log.png";
+        case BlockType::DarkOakLog:  return "assets/textures/blocks/dark_oak_log.png";
+        case BlockType::SpruceLog:   return "assets/textures/blocks/spruce_log.png";
+        case BlockType::OakPlanks:   return "assets/textures/blocks/oak_planks.png";
+        case BlockType::Bricks:      return "assets/textures/blocks/brick.png";
+        case BlockType::Sand:        return "assets/textures/blocks/sand.png";
+        case BlockType::Gravel:      return "assets/textures/blocks/gravel.png";
+        case BlockType::OakLeaves:   return "assets/textures/blocks/oak_leaves.png";
+        default:                     return "assets/textures/blocks/stone.png";
+    }
+}
+
+void MainScene::RenderHotbar() {
+    // Lazy-load block textures for UI display
+    if (!m_hotbarTexturesLoaded) {
+        for (int i = 0; i < HOTBAR_SLOTS; i++)
+            m_hotbarTextures[i] = UI::LoadTextureForUI(GetBlockTexturePath(m_hotbar[i]));
+        m_hotbarTexturesLoaded = true;
+    }
+
+    constexpr float slotSize = 48.0f;
+    constexpr float slotPadding = 4.0f;
+    constexpr float iconPadding = 4.0f;
+    constexpr float borderWidth = 2.0f;
+    constexpr float bottomMargin = 20.0f;
+
+    float totalWidth = HOTBAR_SLOTS * slotSize + (HOTBAR_SLOTS - 1) * slotPadding;
+    float startX = (UI::GetViewportWidth() - totalWidth) * 0.5f;
+    float startY = UI::GetViewportHeight() - slotSize - bottomMargin;
+
+    // Background bar
+    UI::DrawFilledRect(startX - 6.0f, startY - 6.0f,
+                       totalWidth + 12.0f, slotSize + 12.0f,
+                       0.0f, 0.0f, 0.0f, 0.45f, 6.0f);
+
+    for (int i = 0; i < HOTBAR_SLOTS; i++) {
+        float x = startX + i * (slotSize + slotPadding);
+        float y = startY;
+
+        bool selected = (i == m_selectedSlot);
+
+        // Slot background
+        if (selected) {
+            UI::DrawFilledRect(x, y, slotSize, slotSize,
+                               1.0f, 1.0f, 1.0f, 0.25f, 4.0f);
+        } else {
+            UI::DrawFilledRect(x, y, slotSize, slotSize,
+                               0.2f, 0.2f, 0.2f, 0.5f, 4.0f);
+        }
+
+        // Block texture
+        if (m_hotbarTextures[i] != 0) {
+            UI::DrawImage(m_hotbarTextures[i],
+                          x + iconPadding, y + iconPadding,
+                          slotSize - iconPadding * 2, slotSize - iconPadding * 2);
+        }
+
+        // Selection border
+        if (selected) {
+            UI::DrawRect(x - 1.0f, y - 1.0f, slotSize + 2.0f, slotSize + 2.0f,
+                         1.0f, 1.0f, 1.0f, 0.9f, borderWidth, 4.0f);
+        } else {
+            UI::DrawRect(x, y, slotSize, slotSize,
+                         0.5f, 0.5f, 0.5f, 0.3f, 1.0f, 4.0f);
+        }
+
+        // Slot number
+        char num[2] = { static_cast<char>('1' + i), '\0' };
+        UI::DrawText(num, x + 3.0f, y + 1.0f, 0.7f, 0.7f, 0.7f, 0.7f);
+    }
 }
 
 void MainScene::SetupMaterial() {

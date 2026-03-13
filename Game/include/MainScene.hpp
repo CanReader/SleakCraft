@@ -5,6 +5,7 @@
 #include <Memory/RefPtr.h>
 #include <Events/MouseEvent.h>
 #include <Events/KeyboardEvent.h>
+#include <array>
 #include <Debug/SystemMetrics.hpp>
 #include "World/ChunkManager.hpp"
 #include "World/Block.hpp"
@@ -32,7 +33,9 @@ private:
     void RenderUI();
 
     void OnMousePressed(const Sleak::Events::Input::MouseButtonPressedEvent& e);
+    void OnMouseScrolled(const Sleak::Events::Input::MouseScrolledEvent& e);
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
+    void RenderHotbar();
 
     void LoadGame();
 
@@ -45,6 +48,15 @@ private:
     ChunkManager m_chunkManager;
     SaveManager m_saveManager;
     BlockType m_selectedBlock = BlockType::Grass;
+    int m_selectedSlot = 0;
+    static constexpr int HOTBAR_SLOTS = 9;
+    std::array<BlockType, HOTBAR_SLOTS> m_hotbar = {{
+        BlockType::Grass, BlockType::Dirt, BlockType::Stone,
+        BlockType::Cobblestone, BlockType::OakLog, BlockType::DarkOakLog,
+        BlockType::SpruceLog, BlockType::OakPlanks, BlockType::Bricks
+    }};
+    std::array<uint64_t, HOTBAR_SLOTS> m_hotbarTextures = {};
+    bool m_hotbarTexturesLoaded = false;
     bool m_multithreadedLoading = true;
 
     // UI state
