@@ -43,6 +43,7 @@ public:
 
     bool IsMeshBuilt() const { return m_meshBuilt; }
     bool HasPendingMesh() const { return m_hasPendingMesh; }
+    void ClearPendingMesh() { m_hasPendingMesh = false; }
     bool IsInFlight() const { return m_inFlight; }
     void SetInFlight(bool v) { m_inFlight = v; }
     Sleak::GameObject* GetGameObject() const { return m_gameObject; }

@@ -435,10 +435,22 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz) {
 
     for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
         Chunk* chunk = GetChunk(cx, cy, cz);
-        if (!chunk || !chunk->HasPendingMesh()) continue;
+        // Skip chunks not ready (in-flight or not yet generated)
+        if (!chunk || chunk->IsInFlight() || chunk->NeedsGeneration()) continue;
+
+        // Regenerate mesh from block data if previously released
+        if (!chunk->HasPendingMesh()) {
+            chunk->GenerateMeshData();
+        }
 
         auto& md = chunk->GetPendingMeshData();
-        if (md.vertices.GetSize() == 0) continue;
+        chunk->ClearPendingMesh();
+
+        if (md.vertices.GetSize() == 0) {
+            md.vertices.release();
+            md.indices.release();
+            continue;
+        }
 
         uint32_t baseVertex = static_cast<uint32_t>(mergedVerts.GetSize());
 
@@ -449,6 +461,10 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz) {
         const uint32_t* idata = md.indices.GetData();
         for (size_t i = 0; i < md.indices.GetSize(); ++i)
             mergedIndices.add(idata[i] + baseVertex);
+
+        // Free CPU-side mesh data — it's now merged into the column
+        md.vertices.release();
+        md.indices.release();
     }
 
     if (mergedVerts.GetSize() == 0) return;
@@ -644,10 +660,9 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         }
 
         // Phase 4: Rebuild dirty band column meshes (GPU upload)
-        // Two-pass approach: destroy old meshes first (no GPU batch active),
-        // then create all new meshes (GPU copies batched into one submission).
+        // RebuildColumnMesh handles destruction and creation internally,
+        // and defers if any chunk in the band is still in-flight.
         {
-            // Collect columns to rebuild this frame
             std::vector<ColumnKey> toRebuild;
             {
                 int count = 0;
@@ -659,19 +674,6 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                 }
             }
 
-            // Pass 1: Destroy old column meshes (before GPU batch starts)
-            for (auto& key : toRebuild) {
-                auto colIt = m_columns.find(key);
-                if (colIt != m_columns.end()) {
-                    if (colIt->second.addedToScene)
-                        m_scene->RemoveObject(colIt->second.gameObject);
-                    else
-                        delete colIt->second.gameObject;
-                    m_columns.erase(colIt);
-                }
-            }
-
-            // Pass 2: Create new column meshes (GPU copies batch together)
             for (auto& key : toRebuild) {
                 RebuildColumnMesh(key.x, key.yBand, key.z);
             }
@@ -718,17 +720,6 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             }
         }
 
-        // Two-pass: destroy old meshes first, then create new ones
-        for (auto& col : syncDirtyColumns) {
-            auto colIt = m_columns.find(col);
-            if (colIt != m_columns.end()) {
-                if (colIt->second.addedToScene)
-                    m_scene->RemoveObject(colIt->second.gameObject);
-                else
-                    delete colIt->second.gameObject;
-                m_columns.erase(colIt);
-            }
-        }
         for (auto& col : syncDirtyColumns)
             RebuildColumnMesh(col.x, col.yBand, col.z);
     }
