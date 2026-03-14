@@ -1,8 +1,7 @@
 // ============================================================
 // Flat Material Shader (DirectX 12 HLSL)
-// Hardcoded directional light fallback
-// (DX12 root signature does not yet support Material/Light CBs)
 // Hemisphere ambient + Lambert diffuse, no specular
+// Distance fog support via LightCB at register(b2)
 // ============================================================
 
 struct VS_INPUT
@@ -31,7 +30,25 @@ cbuffer TransformCB : register(b0) {
     row_major float4x4 World;
 };
 
-// Texture + sampler — root parameter 1, register(t0/s0)
+// Light/fog CB — root parameter 3, register(b2)
+// Layout matches ShadowLightUBO from ConstantBuffer.hpp
+cbuffer LightCB : register(b2) {
+    float4 LightDir;        // xyz = direction, w = shadow normal bias
+    float4 LightColor;      // rgb = color, a = intensity
+    float4 Ambient;         // rgb = color, a = intensity
+    float4 CameraPos;       // xyz = position
+    row_major float4x4 LightVP;
+    float ShadowBias;
+    float ShadowStrength;
+    float ShadowTexelSize;
+    float LightSize;
+    float4 FogColor;        // rgb = color
+    float FogStart;
+    float FogEnd;
+    float2 _fogPad;
+};
+
+// Texture + sampler — root parameter 2, register(t0/s0)
 Texture2D diffuseTexture : register(t0);
 SamplerState mainSampler : register(s0);
 
@@ -71,15 +88,13 @@ float4 PS_Main(VS_OUTPUT input) : SV_Target
         discard;
     float4 baseColor = texColor * input.Color;
 
-    // Hardcoded directional light (sun-like)
-    float3 lightDir = normalize(float3(-0.3, -1.0, -0.4));
-    float3 lightColor = float3(1.0, 0.95, 0.9);
-    float lightIntensity = 1.2;
-
     float3 N = normalize(input.WorldNorm);
+    float3 lightDir = normalize(LightDir.xyz);
+    float3 lightColor = LightColor.rgb;
+    float lightIntensity = LightColor.a;
 
     // ---- Hemisphere Ambient ----
-    float3 ambientColor = float3(0.15, 0.15, 0.18);
+    float3 ambientColor = Ambient.rgb * Ambient.a;
     float3 groundColor = ambientColor * float3(0.7, 0.65, 0.6);
     float hemisphere = N.y * 0.5 + 0.5;
     float3 ambient = lerp(groundColor, ambientColor, hemisphere);
@@ -93,6 +108,13 @@ float4 PS_Main(VS_OUTPUT input) : SV_Target
 
     // ---- Tone mapping (Reinhard) ----
     lit = lit / (lit + float3(1.0, 1.0, 1.0));
+
+    // ---- Distance fog (Minecraft-style linear fog) ----
+    if (FogEnd > 0.0) {
+        float dist = length(input.WorldPos - CameraPos.xyz);
+        float fogFactor = saturate((FogEnd - dist) / (FogEnd - FogStart));
+        lit = lerp(FogColor.rgb, lit, fogFactor);
+    }
 
     return float4(lit, baseColor.a);
 }
