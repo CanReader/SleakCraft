@@ -141,8 +141,8 @@ private:
     Sleak::SceneBase* m_scene = nullptr;
     Sleak::RefPtr<Sleak::Material> m_material;
     int m_renderDistance = 8;
-    int m_chunksPerFrame = 64;
-    int m_uploadsPerFrame = 16;
+    int m_chunksPerFrame = 16;
+    int m_uploadsPerFrame = 4;
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
     int m_lastCenterX = INT_MAX;
