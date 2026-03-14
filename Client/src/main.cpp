@@ -3,6 +3,7 @@
 #include <Game.hpp>
 #include <string>
 #include <Logger.hpp>
+#include <filesystem>
 
 #define PROJECT_NAME "SleakCraft"
 
@@ -15,6 +16,10 @@ std::string HelpMessage =
   ";
 
 int main(int argc, char** argv) {
+  // Set working directory to executable location so relative asset paths resolve correctly
+  std::filesystem::current_path(std::filesystem::path(argv[0]).parent_path().empty()
+      ? std::filesystem::current_path()
+      : std::filesystem::weakly_canonical(std::filesystem::path(argv[0])).parent_path());
 
   Sleak::Logger::Init((char*)PROJECT_NAME);
 
