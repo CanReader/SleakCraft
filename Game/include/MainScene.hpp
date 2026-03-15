@@ -35,6 +35,7 @@ private:
     void OnMousePressed(const Sleak::Events::Input::MouseButtonPressedEvent& e);
     void OnMouseScrolled(const Sleak::Events::Input::MouseScrolledEvent& e);
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
+    void OnKeyReleased(const Sleak::Events::Input::KeyReleasedEvent& e);
     void RenderHotbar();
 
     void LoadGame();
@@ -74,6 +75,17 @@ private:
     // Auto-save
     float m_autoSaveTimer = 0.0f;
     static constexpr float AUTO_SAVE_INTERVAL = 120.0f;
+
+    // Minecraft-style double-tap space to toggle fly
+    bool m_flying = false;
+    float m_lastSpacePressTime = -1.0f;
+    float m_gameTime = 0.0f;
+    float m_flySpeed = 6.0f;
+    float m_flySprintMultiplier = 2.5f;
+    static constexpr float DOUBLE_TAP_WINDOW = 0.3f;
+    bool m_spaceHeld = false;
+    bool m_shiftHeld = false;
+    bool m_ctrlHeld = false;
 };
 
 #endif

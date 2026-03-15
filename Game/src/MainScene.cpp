@@ -83,6 +83,7 @@ bool MainScene::Initialize() {
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnMouseScrolled);
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
+    EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyReleased);
 
     return true;
 }
@@ -127,6 +128,36 @@ void MainScene::OnMouseScrolled(const Events::Input::MouseScrolledEvent& e) {
 }
 
 void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
+    // Minecraft-style: double-tap space toggles fly on/off
+    if (e.GetKeyCode() == Input::KEY_CODE::KEY__SPACE) {
+        m_spaceHeld = true;
+        if (!e.IsRepeat()) {
+            float now = m_gameTime;
+            if ((now - m_lastSpacePressTime) < DOUBLE_TAP_WINDOW) {
+                m_flying = !m_flying;
+                auto* cam = GetDebugCamera();
+                auto* rb = cam ? cam->GetComponent<RigidbodyComponent>() : nullptr;
+                if (rb) {
+                    rb->SetUseGravity(!m_flying);
+                    if (m_flying)
+                        rb->SetVelocity({0.0f, 0.0f, 0.0f});
+                }
+                m_lastSpacePressTime = -1.0f; // reset so triple-tap doesn't re-toggle
+            } else {
+                m_lastSpacePressTime = now;
+            }
+        }
+    }
+
+    if (e.GetKeyCode() == Input::KEY_CODE::KEY__LCTRL ||
+        e.GetKeyCode() == Input::KEY_CODE::KEY__RCTRL) {
+        m_ctrlHeld = true;
+    }
+    if (e.GetKeyCode() == Input::KEY_CODE::KEY__LSHIFT ||
+        e.GetKeyCode() == Input::KEY_CODE::KEY__RSHIFT) {
+        m_shiftHeld = true;
+    }
+
     if_key_press(KEY__1) { m_selectedSlot = 0; m_selectedBlock = m_hotbar[0]; }
     if_key_press(KEY__2) { m_selectedSlot = 1; m_selectedBlock = m_hotbar[1]; }
     if_key_press(KEY__3) { m_selectedSlot = 2; m_selectedBlock = m_hotbar[2]; }
@@ -149,8 +180,20 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
     if_key_press(KEY__F6) { LoadGame(); }
 }
 
+void MainScene::OnKeyReleased(const Events::Input::KeyReleasedEvent& e) {
+    if (e.GetKeyCode() == Input::KEY_CODE::KEY__SPACE)
+        m_spaceHeld = false;
+    if (e.GetKeyCode() == Input::KEY_CODE::KEY__LCTRL ||
+        e.GetKeyCode() == Input::KEY_CODE::KEY__RCTRL)
+        m_ctrlHeld = false;
+    if (e.GetKeyCode() == Input::KEY_CODE::KEY__LSHIFT ||
+        e.GetKeyCode() == Input::KEY_CODE::KEY__RSHIFT)
+        m_shiftHeld = false;
+}
+
 void MainScene::Update(float deltaTime) {
     if (deltaTime > 0.05f) deltaTime = 0.05f;
+    m_gameTime += deltaTime;
 
     // Frustum cull BEFORE Scene::Update so that inactive chunks
     // don't submit draw commands this frame.
@@ -169,24 +212,47 @@ void MainScene::Update(float deltaTime) {
     if (cam) {
         auto pos = cam->GetPosition();
 
-        auto collision = m_chunkManager.ResolveVoxelCollision(pos, 0.3f, 1.8f, 1.62f);
-        if (collision.onGround || collision.hitCeiling || collision.hitWall) {
-            cam->SetPosition({pos.GetX() + collision.correction.GetX(),
-                              pos.GetY() + collision.correction.GetY(),
-                              pos.GetZ() + collision.correction.GetZ()});
+        // Fly mode: space=up, ctrl=down, shift=faster, no gravity
+        if (m_flying) {
             auto* rb = cam->GetComponent<RigidbodyComponent>();
+            float speed = m_shiftHeld ? m_flySpeed * m_flySprintMultiplier : m_flySpeed;
+            float verticalMove = 0.0f;
+            if (m_spaceHeld) verticalMove += speed * deltaTime;
+            if (m_ctrlHeld)  verticalMove -= speed * deltaTime;
+            if (verticalMove != 0.0f) {
+                auto p = cam->GetPosition();
+                cam->SetPosition({p.GetX(), p.GetY() + verticalMove, p.GetZ()});
+            }
             if (rb) {
-                auto vel = rb->GetVelocity();
-                if (collision.onGround && vel.GetY() < 0.0f) {
-                    rb->SetVelocity({vel.GetX(), 0.0f, vel.GetZ()});
-                    rb->SetGrounded(true);
-                }
-                if (collision.hitCeiling && vel.GetY() > 0.0f)
-                    rb->SetVelocity({vel.GetX(), 0.0f, vel.GetZ()});
-                if (collision.hitWall) {
-                    float vx = (collision.correction.GetX() != 0.0f) ? 0.0f : vel.GetX();
-                    float vz = (collision.correction.GetZ() != 0.0f) ? 0.0f : vel.GetZ();
-                    rb->SetVelocity({vx, vel.GetY(), vz});
+                rb->SetVelocity({0.0f, 0.0f, 0.0f});
+                rb->SetGrounded(false);
+            }
+        }
+
+        // Collision resolution (always active)
+        {
+            auto curPos = cam->GetPosition();
+            auto collision = m_chunkManager.ResolveVoxelCollision(curPos, 0.3f, 1.8f, 1.62f);
+            if (collision.onGround || collision.hitCeiling || collision.hitWall) {
+                cam->SetPosition({curPos.GetX() + collision.correction.GetX(),
+                                  curPos.GetY() + collision.correction.GetY(),
+                                  curPos.GetZ() + collision.correction.GetZ()});
+                if (!m_flying) {
+                    auto* rb = cam->GetComponent<RigidbodyComponent>();
+                    if (rb) {
+                        auto vel = rb->GetVelocity();
+                        if (collision.onGround && vel.GetY() < 0.0f) {
+                            rb->SetVelocity({vel.GetX(), 0.0f, vel.GetZ()});
+                            rb->SetGrounded(true);
+                        }
+                        if (collision.hitCeiling && vel.GetY() > 0.0f)
+                            rb->SetVelocity({vel.GetX(), 0.0f, vel.GetZ()});
+                        if (collision.hitWall) {
+                            float vx = (collision.correction.GetX() != 0.0f) ? 0.0f : vel.GetX();
+                            float vz = (collision.correction.GetZ() != 0.0f) ? 0.0f : vel.GetZ();
+                            rb->SetVelocity({vx, vel.GetY(), vz});
+                        }
+                    }
                 }
             }
         }
