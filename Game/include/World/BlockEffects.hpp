@@ -35,7 +35,7 @@ public:
     void SpawnPlaceEffect(int x, int y, int z, BlockType type);
     void SpawnBreakEffect(int x, int y, int z, BlockType type);
 
-    void Update(float deltaTime);
+    void Update(float deltaTime, const Sleak::Math::Vector3D& cameraPos);
     void Cleanup();
 
     struct CompletedPlace { int x, y, z; BlockType type; };

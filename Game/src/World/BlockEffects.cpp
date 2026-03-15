@@ -86,14 +86,14 @@ GameObject* BlockEffects::CreateParticleQuad(uint8_t tileIndex) {
 
     AtlasUV uv = TextureAtlas::GetTileUV(tileIndex);
 
-    // Two-sided quad (visible from both sides) lying flat on XZ plane
-    // centered at origin, unit size — scaled via TransformComponent
-    // Front face
+    // Two-sided quad on XY plane facing +Z, centered at origin
+    // Rotated each frame to face camera via TransformComponent
+    float h = 0.5f;
     uint32_t base = 0;
-    Vertex v0(0, 0, 0,  0, 1, 0,  1, 0, 0, 1,  uv.u0, uv.v1);
-    Vertex v1(0, 0, 1,  0, 1, 0,  1, 0, 0, 1,  uv.u0, uv.v0);
-    Vertex v2(1, 0, 1,  0, 1, 0,  1, 0, 0, 1,  uv.u1, uv.v0);
-    Vertex v3(1, 0, 0,  0, 1, 0,  1, 0, 0, 1,  uv.u1, uv.v1);
+    Vertex v0(-h, -h, 0,  0, 0, 1,  1, 0, 0, 1,  uv.u0, uv.v1);
+    Vertex v1(-h,  h, 0,  0, 0, 1,  1, 0, 0, 1,  uv.u0, uv.v0);
+    Vertex v2( h,  h, 0,  0, 0, 1,  1, 0, 0, 1,  uv.u1, uv.v0);
+    Vertex v3( h, -h, 0,  0, 0, 1,  1, 0, 0, 1,  uv.u1, uv.v1);
     v0.SetColor(1, 1, 1, 1); v1.SetColor(1, 1, 1, 1);
     v2.SetColor(1, 1, 1, 1); v3.SetColor(1, 1, 1, 1);
     verts.AddVertex(v0); verts.AddVertex(v1);
@@ -174,7 +174,7 @@ void BlockEffects::SpawnBreakEffect(int x, int y, int z, BlockType type) {
     }
 }
 
-void BlockEffects::Update(float deltaTime) {
+void BlockEffects::Update(float deltaTime, const Vector3D& cameraPos) {
     // Update place effects — animate scale
     for (auto& effect : m_placeEffects) {
         effect.timer += deltaTime;
@@ -215,7 +215,10 @@ void BlockEffects::Update(float deltaTime) {
         p.pos = p.pos + p.vel * deltaTime;
 
         auto* tr = p.obj->GetComponent<TransformComponent>();
-        if (tr) tr->SetPosition(p.pos);
+        if (tr) {
+            tr->SetPosition(p.pos);
+            tr->LookAt(cameraPos);
+        }
     }
 
     // Remove dead particles from list
