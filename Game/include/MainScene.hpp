@@ -10,6 +10,7 @@
 #include "World/ChunkManager.hpp"
 #include "World/Block.hpp"
 #include "World/SaveManager.hpp"
+#include "World/BlockEffects.hpp"
 
 namespace Sleak { class Material; }
 
@@ -47,6 +48,7 @@ private:
 
     Sleak::RefPtr<Sleak::Material> m_blockMaterial;
     ChunkManager m_chunkManager;
+    BlockEffects m_blockEffects;
     SaveManager m_saveManager;
     BlockType m_selectedBlock = BlockType::Grass;
     int m_selectedSlot = 0;

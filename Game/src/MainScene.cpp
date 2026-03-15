@@ -54,6 +54,7 @@ bool MainScene::Initialize() {
 
     m_saveManager.SetSavePath(m_savePath);
     m_chunkManager.Initialize(this, m_blockMaterial);
+    m_blockEffects.Initialize(this, m_blockMaterial);
 
     if (m_isNewWorld) {
         m_chunkManager.SetSeed(m_worldSeed);
@@ -103,7 +104,10 @@ void MainScene::OnMousePressed(const Events::Input::MouseButtonPressedEvent& e) 
 
     MouseCode button = e.GetMouseButton();
     if (button == MouseCode::ButtonLeft) {
+        BlockType broken = hit.blockType;
         m_chunkManager.SetBlockAt(hit.blockX, hit.blockY, hit.blockZ, BlockType::Air);
+        if (broken != BlockType::Air)
+            m_blockEffects.SpawnBreakEffect(hit.blockX, hit.blockY, hit.blockZ, broken);
     } else if (button == MouseCode::ButtonRight) {
         // Prevent placing a block inside the player's bounding box
         float feetY = pos.GetY() - 1.62f;
@@ -111,7 +115,7 @@ void MainScene::OnMousePressed(const Events::Input::MouseButtonPressedEvent& e) 
                         (hit.placeY + 1 > feetY             && hit.placeY < feetY + 1.8f) &&
                         (hit.placeZ + 1 > pos.GetZ() - 0.3f && hit.placeZ < pos.GetZ() + 0.3f);
         if (!overlaps)
-            m_chunkManager.SetBlockAt(hit.placeX, hit.placeY, hit.placeZ, m_selectedBlock);
+            m_blockEffects.SpawnPlaceEffect(hit.placeX, hit.placeY, hit.placeZ, m_selectedBlock);
     }
 }
 
@@ -200,6 +204,12 @@ void MainScene::Update(float deltaTime) {
     m_chunkManager.FrustumCull();
 
     Scene::Update(deltaTime);
+
+    // Process block effects (place animations, break particles)
+    m_blockEffects.Update(deltaTime);
+    for (auto& completed : m_blockEffects.PopCompletedPlacements()) {
+        m_chunkManager.SetBlockAt(completed.x, completed.y, completed.z, completed.type);
+    }
 
     // Refresh cached metrics
     m_metricTimer += deltaTime;
