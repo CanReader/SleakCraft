@@ -205,12 +205,6 @@ void MainScene::Update(float deltaTime) {
 
     Scene::Update(deltaTime);
 
-    // Process block effects (place animations, break particles)
-    m_blockEffects.Update(deltaTime);
-    for (auto& completed : m_blockEffects.PopCompletedPlacements()) {
-        m_chunkManager.SetBlockAt(completed.x, completed.y, completed.z, completed.type);
-    }
-
     // Refresh cached metrics
     m_metricTimer += deltaTime;
     if (m_metricTimer >= 0.5f) {
@@ -221,6 +215,12 @@ void MainScene::Update(float deltaTime) {
     auto* cam = GetDebugCamera();
     if (cam) {
         auto pos = cam->GetPosition();
+
+        // Process block effects (place animations, break particles)
+        m_blockEffects.Update(deltaTime, pos);
+        for (auto& completed : m_blockEffects.PopCompletedPlacements()) {
+            m_chunkManager.SetBlockAt(completed.x, completed.y, completed.z, completed.type);
+        }
 
         // Fly mode: space=up, ctrl=down, shift=faster, no gravity
         if (m_flying) {

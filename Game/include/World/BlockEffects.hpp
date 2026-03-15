@@ -25,7 +25,7 @@ struct BreakParticle {
     Sleak::Math::Vector3D vel;
     float life;
     float maxLife;
-    Sleak::GameObject* obj = nullptr;
+    uint8_t tileIndex;
 };
 
 class BlockEffects {
@@ -35,24 +35,24 @@ public:
     void SpawnPlaceEffect(int x, int y, int z, BlockType type);
     void SpawnBreakEffect(int x, int y, int z, BlockType type);
 
-    void Update(float deltaTime);
+    void Update(float deltaTime, const Sleak::Math::Vector3D& cameraPos);
     void Cleanup();
 
-    // Get completed place effects so the caller can actually set the blocks
     struct CompletedPlace { int x, y, z; BlockType type; };
     std::vector<CompletedPlace> PopCompletedPlacements();
 
 private:
-    // Build a unit cube (0..1) for place effects, positioned via transform
     Sleak::GameObject* CreatePlaceCube(BlockType type);
-    // Build a small particle cube centered at origin
-    Sleak::GameObject* CreateParticleCube(uint8_t tileIndex);
+    void RebuildParticleMesh(const Sleak::Math::Vector3D& cameraPos);
 
     Sleak::SceneBase* m_scene = nullptr;
     Sleak::RefPtr<Sleak::Material> m_material;
 
     std::vector<PlaceEffect> m_placeEffects;
     std::vector<BreakParticle> m_breakParticles;
+
+    // Single batched mesh for all break particles
+    Sleak::GameObject* m_particleMeshObj = nullptr;
 
     static constexpr float PLACE_DURATION = 0.15f;
     static constexpr float BREAK_LIFETIME = 0.6f;
