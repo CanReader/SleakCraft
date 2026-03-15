@@ -25,7 +25,7 @@ struct BreakParticle {
     Sleak::Math::Vector3D vel;
     float life;
     float maxLife;
-    uint8_t tileIndex;
+    Sleak::GameObject* obj = nullptr;
 };
 
 class BlockEffects {
@@ -35,7 +35,7 @@ public:
     void SpawnPlaceEffect(int x, int y, int z, BlockType type);
     void SpawnBreakEffect(int x, int y, int z, BlockType type);
 
-    void Update(float deltaTime, const Sleak::Math::Vector3D& cameraPos);
+    void Update(float deltaTime);
     void Cleanup();
 
     struct CompletedPlace { int x, y, z; BlockType type; };
@@ -43,7 +43,7 @@ public:
 
 private:
     Sleak::GameObject* CreatePlaceCube(BlockType type);
-    void RebuildParticleMesh(const Sleak::Math::Vector3D& cameraPos);
+    Sleak::GameObject* CreateParticleQuad(uint8_t tileIndex);
 
     Sleak::SceneBase* m_scene = nullptr;
     Sleak::RefPtr<Sleak::Material> m_material;
@@ -51,12 +51,9 @@ private:
     std::vector<PlaceEffect> m_placeEffects;
     std::vector<BreakParticle> m_breakParticles;
 
-    // Single batched mesh for all break particles
-    Sleak::GameObject* m_particleMeshObj = nullptr;
-
     static constexpr float PLACE_DURATION = 0.15f;
     static constexpr float BREAK_LIFETIME = 0.6f;
-    static constexpr float PARTICLE_SIZE = 0.15f;
+    static constexpr float PARTICLE_SIZE = 0.2f;
     static constexpr int PARTICLES_PER_BLOCK = 8;
     static constexpr float PARTICLE_GRAVITY = -12.0f;
 };

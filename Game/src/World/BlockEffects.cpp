@@ -8,7 +8,6 @@
 #include <Runtime/MeshData.hpp>
 #include <Runtime/Material.hpp>
 #include <cstdlib>
-#include <cmath>
 
 using namespace Sleak;
 using namespace Sleak::Math;
@@ -27,22 +26,15 @@ static void BuildBlockCube(BlockType type, VertexGroup& verts, IndexGroup& inds)
     };
 
     FaceInfo faces[6] = {
-        // Top
         {{{0,1,0}, {0,1,1}, {1,1,1}, {1,1,0}}, 0, 1, 0, BlockFace::Top},
-        // Bottom
         {{{0,0,1}, {0,0,0}, {1,0,0}, {1,0,1}}, 0, -1, 0, BlockFace::Bottom},
-        // North (+Z)
         {{{1,0,1}, {1,1,1}, {0,1,1}, {0,0,1}}, 0, 0, 1, BlockFace::North},
-        // South (-Z)
         {{{0,0,0}, {0,1,0}, {1,1,0}, {1,0,0}}, 0, 0, -1, BlockFace::South},
-        // East (+X)
         {{{1,0,0}, {1,1,0}, {1,1,1}, {1,0,1}}, 1, 0, 0, BlockFace::East},
-        // West (-X)
         {{{0,0,1}, {0,1,1}, {0,1,0}, {0,0,0}}, -1, 0, 0, BlockFace::West},
     };
 
     for (int f = 0; f < 6; f++) {
-        // Use the correct texture tile for each face
         AtlasUV uv = TextureAtlas::GetTileUV(
             GetBlockTextureTile(type, faces[f].face));
 
@@ -88,6 +80,48 @@ GameObject* BlockEffects::CreatePlaceCube(BlockType type) {
     return obj;
 }
 
+GameObject* BlockEffects::CreateParticleQuad(uint8_t tileIndex) {
+    VertexGroup verts;
+    IndexGroup inds;
+
+    AtlasUV uv = TextureAtlas::GetTileUV(tileIndex);
+
+    // Two-sided quad (visible from both sides) lying flat on XZ plane
+    // centered at origin, unit size — scaled via TransformComponent
+    // Front face
+    uint32_t base = 0;
+    Vertex v0(0, 0, 0,  0, 1, 0,  1, 0, 0, 1,  uv.u0, uv.v1);
+    Vertex v1(0, 0, 1,  0, 1, 0,  1, 0, 0, 1,  uv.u0, uv.v0);
+    Vertex v2(1, 0, 1,  0, 1, 0,  1, 0, 0, 1,  uv.u1, uv.v0);
+    Vertex v3(1, 0, 0,  0, 1, 0,  1, 0, 0, 1,  uv.u1, uv.v1);
+    v0.SetColor(1, 1, 1, 1); v1.SetColor(1, 1, 1, 1);
+    v2.SetColor(1, 1, 1, 1); v3.SetColor(1, 1, 1, 1);
+    verts.AddVertex(v0); verts.AddVertex(v1);
+    verts.AddVertex(v2); verts.AddVertex(v3);
+
+    // Front
+    inds.add(base);     inds.add(base + 2); inds.add(base + 1);
+    inds.add(base);     inds.add(base + 3); inds.add(base + 2);
+    // Back (reverse winding)
+    inds.add(base);     inds.add(base + 1); inds.add(base + 2);
+    inds.add(base);     inds.add(base + 2); inds.add(base + 3);
+
+    MeshData meshData;
+    meshData.vertices = std::move(verts);
+    meshData.indices = std::move(inds);
+
+    auto* obj = new GameObject("BreakParticle");
+    obj->AddComponent<TransformComponent>(Vector3D(0, 0, 0));
+    obj->AddComponent<MaterialComponent>(m_material);
+    obj->AddComponent<MeshComponent>(std::move(meshData));
+    obj->Initialize();
+
+    auto* tr = obj->GetComponent<TransformComponent>();
+    if (tr) tr->SetScale(Vector3D(PARTICLE_SIZE, PARTICLE_SIZE, PARTICLE_SIZE));
+
+    return obj;
+}
+
 void BlockEffects::SpawnPlaceEffect(int x, int y, int z, BlockType type) {
     auto* obj = CreatePlaceCube(type);
 
@@ -119,99 +153,29 @@ void BlockEffects::SpawnBreakEffect(int x, int y, int z, BlockType type) {
     float cz = static_cast<float>(z) + 0.5f;
 
     for (int i = 0; i < PARTICLES_PER_BLOCK; i++) {
+        float px = cx + RandFloat(-0.3f, 0.3f);
+        float py = cy + RandFloat(-0.3f, 0.3f);
+        float pz = cz + RandFloat(-0.3f, 0.3f);
+
+        auto* obj = CreateParticleQuad(tile);
+        auto* tr = obj->GetComponent<TransformComponent>();
+        if (tr) tr->SetPosition(Vector3D(px, py, pz));
+        m_scene->AddObject(obj);
+
         BreakParticle p;
-        p.pos = Vector3D(cx + RandFloat(-0.3f, 0.3f),
-                         cy + RandFloat(-0.3f, 0.3f),
-                         cz + RandFloat(-0.3f, 0.3f));
+        p.pos = Vector3D(px, py, pz);
         p.vel = Vector3D(RandFloat(-1.5f, 1.5f),
                          RandFloat(1.5f, 4.0f),
                          RandFloat(-1.5f, 1.5f));
         p.life = 0.0f;
         p.maxLife = BREAK_LIFETIME + RandFloat(-0.1f, 0.1f);
-        p.tileIndex = tile;
+        p.obj = obj;
         m_breakParticles.push_back(p);
     }
 }
 
-void BlockEffects::RebuildParticleMesh(const Vector3D& cameraPos) {
-    // Remove old batched mesh
-    if (m_particleMeshObj) {
-        m_scene->RemoveObject(m_particleMeshObj);
-        m_particleMeshObj = nullptr;
-    }
-
-    if (m_breakParticles.empty()) return;
-
-    VertexGroup verts;
-    IndexGroup inds;
-
-    for (const auto& p : m_breakParticles) {
-        AtlasUV uv = TextureAtlas::GetTileUV(p.tileIndex);
-
-        // Billboard: compute right/up vectors facing camera
-        Vector3D toCamera = cameraPos - p.pos;
-        float dist = toCamera.Magnitude();
-        if (dist < 0.001f) continue;
-        toCamera = toCamera * (1.0f / dist); // normalize
-
-        Vector3D worldUp(0, 1, 0);
-        Vector3D right = worldUp.Cross(toCamera);
-        float rightLen = right.Magnitude();
-        if (rightLen < 0.001f) {
-            right = Vector3D(1, 0, 0);
-        } else {
-            right = right * (1.0f / rightLen);
-        }
-        Vector3D up = toCamera.Cross(right);
-
-        float half = PARTICLE_SIZE * 0.5f;
-        // Fade out near end of life
-        float alpha = 1.0f;
-        if (p.life > p.maxLife * 0.7f)
-            alpha = (p.maxLife - p.life) / (p.maxLife * 0.3f);
-
-        Vector3D corners[4] = {
-            p.pos - right * half - up * half,
-            p.pos - right * half + up * half,
-            p.pos + right * half + up * half,
-            p.pos + right * half - up * half,
-        };
-
-        uint32_t base = static_cast<uint32_t>(verts.GetSize());
-        float uvCoords[4][2] = {
-            {uv.u0, uv.v1}, {uv.u0, uv.v0}, {uv.u1, uv.v0}, {uv.u1, uv.v1}
-        };
-
-        // Normal faces camera
-        for (int i = 0; i < 4; i++) {
-            Vertex v(corners[i].GetX(), corners[i].GetY(), corners[i].GetZ(),
-                     toCamera.GetX(), toCamera.GetY(), toCamera.GetZ(),
-                     1, 0, 0, 1,
-                     uvCoords[i][0], uvCoords[i][1]);
-            v.SetColor(1.0f, 1.0f, 1.0f, alpha);
-            verts.AddVertex(v);
-        }
-
-        inds.add(base);     inds.add(base + 2); inds.add(base + 1);
-        inds.add(base);     inds.add(base + 3); inds.add(base + 2);
-    }
-
-    if (verts.GetSize() == 0) return;
-
-    MeshData meshData;
-    meshData.vertices = std::move(verts);
-    meshData.indices = std::move(inds);
-
-    m_particleMeshObj = new GameObject("BreakParticles");
-    m_particleMeshObj->AddComponent<TransformComponent>(Vector3D(0, 0, 0));
-    m_particleMeshObj->AddComponent<MaterialComponent>(m_material);
-    m_particleMeshObj->AddComponent<MeshComponent>(std::move(meshData));
-    m_particleMeshObj->Initialize();
-    m_scene->AddObject(m_particleMeshObj);
-}
-
-void BlockEffects::Update(float deltaTime, const Vector3D& cameraPos) {
-    // Update place effects — animate scale via TransformComponent
+void BlockEffects::Update(float deltaTime) {
+    // Update place effects — animate scale
     for (auto& effect : m_placeEffects) {
         effect.timer += deltaTime;
         if (effect.timer >= effect.duration) {
@@ -223,7 +187,7 @@ void BlockEffects::Update(float deltaTime, const Vector3D& cameraPos) {
         }
 
         float t = effect.timer / effect.duration;
-        t = 1.0f - (1.0f - t) * (1.0f - t); // ease-out
+        t = 1.0f - (1.0f - t) * (1.0f - t);
         float scale = 0.3f + t * 0.7f;
         float offset = (1.0f - scale) * 0.5f;
 
@@ -236,21 +200,29 @@ void BlockEffects::Update(float deltaTime, const Vector3D& cameraPos) {
         }
     }
 
-    // Update break particles physics
+    // Update break particles — move via TransformComponent
     for (auto& p : m_breakParticles) {
         p.life += deltaTime;
+        if (p.life >= p.maxLife) {
+            if (p.obj) {
+                m_scene->RemoveObject(p.obj);
+                p.obj = nullptr;
+            }
+            continue;
+        }
+
         p.vel = p.vel + Vector3D(0, PARTICLE_GRAVITY, 0) * deltaTime;
         p.pos = p.pos + p.vel * deltaTime;
+
+        auto* tr = p.obj->GetComponent<TransformComponent>();
+        if (tr) tr->SetPosition(p.pos);
     }
 
-    // Remove dead particles
+    // Remove dead particles from list
     m_breakParticles.erase(
         std::remove_if(m_breakParticles.begin(), m_breakParticles.end(),
-            [](const BreakParticle& p) { return p.life >= p.maxLife; }),
+            [](const BreakParticle& p) { return p.obj == nullptr; }),
         m_breakParticles.end());
-
-    // Rebuild single batched billboard mesh for all particles
-    RebuildParticleMesh(cameraPos);
 }
 
 std::vector<BlockEffects::CompletedPlace> BlockEffects::PopCompletedPlacements() {
@@ -270,10 +242,9 @@ void BlockEffects::Cleanup() {
     for (auto& e : m_placeEffects) {
         if (e.obj) m_scene->RemoveObject(e.obj);
     }
+    for (auto& p : m_breakParticles) {
+        if (p.obj) m_scene->RemoveObject(p.obj);
+    }
     m_placeEffects.clear();
     m_breakParticles.clear();
-    if (m_particleMeshObj) {
-        m_scene->RemoveObject(m_particleMeshObj);
-        m_particleMeshObj = nullptr;
-    }
 }
