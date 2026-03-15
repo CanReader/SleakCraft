@@ -199,6 +199,15 @@ void MainScene::Update(float deltaTime) {
     if (deltaTime > 0.05f) deltaTime = 0.05f;
     m_gameTime += deltaTime;
 
+    // Process block effects before Scene::Update so the mesh exists during rendering
+    auto* cam = GetDebugCamera();
+    if (cam) {
+        m_blockEffects.Update(deltaTime, cam->GetPosition());
+        for (auto& completed : m_blockEffects.PopCompletedPlacements()) {
+            m_chunkManager.SetBlockAt(completed.x, completed.y, completed.z, completed.type);
+        }
+    }
+
     // Frustum cull BEFORE Scene::Update so that inactive chunks
     // don't submit draw commands this frame.
     m_chunkManager.FrustumCull();
@@ -212,15 +221,8 @@ void MainScene::Update(float deltaTime) {
         m_metricTimer = 0.0f;
     }
 
-    auto* cam = GetDebugCamera();
     if (cam) {
         auto pos = cam->GetPosition();
-
-        // Process block effects (place animations, break particles)
-        m_blockEffects.Update(deltaTime, pos);
-        for (auto& completed : m_blockEffects.PopCompletedPlacements()) {
-            m_chunkManager.SetBlockAt(completed.x, completed.y, completed.z, completed.type);
-        }
 
         // Fly mode: space=up, ctrl=down, shift=faster, no gravity
         if (m_flying) {
