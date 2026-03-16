@@ -57,6 +57,12 @@ public:
             if (!m_neighbors[i]) return false;
         return true;
     }
+    int CountNeighbors() const {
+        int count = 0;
+        for (int i = 0; i < 6; ++i)
+            if (m_neighbors[i]) ++count;
+        return count;
+    }
     bool NeedsMeshRebuild() const { return m_needsRebuild; }
     void SetNeedsMeshRebuild(bool v) { m_needsRebuild = v; }
     bool NeedsGeneration() const { return m_needsGeneration; }
