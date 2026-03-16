@@ -81,6 +81,22 @@ bool MainScene::Initialize() {
         LoadGame();
     }
 
+    // Register game-specific benchmark metrics
+    auto* app = Sleak::Application::GetInstance();
+    if (app && app->GetBenchmark()) {
+        app->GetBenchmark()->RegisterMetric("RenderDistance", [this]() {
+            return static_cast<float>(m_chunkManager.GetRenderDistance());
+        });
+        app->GetBenchmark()->RegisterMetric("IsMoving", [this]() {
+            auto* cam = GetDebugCamera();
+            if (!cam) return 0.0f;
+            auto* rb = cam->GetComponent<RigidbodyComponent>();
+            if (!rb) return 0.0f;
+            auto vel = rb->GetVelocity();
+            return (vel.Magnitude() > 0.01f) ? 1.0f : 0.0f;
+        });
+    }
+
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnMouseScrolled);
     EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
@@ -208,10 +224,6 @@ void MainScene::Update(float deltaTime) {
         }
     }
 
-    // Frustum cull BEFORE Scene::Update so that inactive chunks
-    // don't submit draw commands this frame.
-    m_chunkManager.FrustumCull();
-
     Scene::Update(deltaTime);
 
     // Refresh cached metrics
@@ -270,6 +282,7 @@ void MainScene::Update(float deltaTime) {
         }
 
         m_chunkManager.Update(pos.GetX(), pos.GetY(), pos.GetZ());
+        m_chunkManager.RenderColumns();
 
         // Block outline always visible
         auto dir = cam->GetDirection();
