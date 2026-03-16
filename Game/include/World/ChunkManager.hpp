@@ -5,6 +5,7 @@
 #include "WorldGenerator.hpp"
 #include <Math/Vector.hpp>
 #include <Memory/RefPtr.h>
+#include <Runtime/MeshBatch.hpp>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -78,7 +79,8 @@ public:
     uint32_t GetSeed() const { return m_generator.GetSeed(); }
     const WorldGenerator& GetGenerator() const { return m_generator; }
 
-    void FrustumCull() const;
+    // Render all visible column meshes via MeshBatch (call from scene Update)
+    void RenderColumns();
 
     BlockType GetBlockAt(int worldX, int worldY, int worldZ) const;
     bool SetBlockAt(int worldX, int worldY, int worldZ, BlockType type);
@@ -110,9 +112,8 @@ private:
     void StopWorkers();
     void WorkerThread();
 
-    // Column mesh management — merges chunks per XZ+Y-band for fewer draw calls
-    // while allowing vertical frustum culling
-    static constexpr int BAND_SIZE = 2; // chunks per band (32 blocks tall)
+    // Column mesh management — merges all Y chunks per XZ column into one mesh
+    static constexpr int BAND_SIZE = 8; // chunks per band (full Y column)
     struct ColumnKey {
         int x, yBand, z;
         bool operator==(const ColumnKey& o) const { return x == o.x && yBand == o.yBand && z == o.z; }
@@ -126,13 +127,15 @@ private:
         }
     };
     struct ColumnMesh {
-        Sleak::GameObject* gameObject = nullptr;
-        bool addedToScene = false;
+        Sleak::MeshHandle mesh;
+        bool visible = true;
     };
     void RebuildColumnMesh(int cx, int yBand, int cz);
     static int ChunkYToBand(int cy) { return cy / BAND_SIZE; }
     std::unordered_map<ColumnKey, ColumnMesh, ColumnKeyHash> m_columns;
     std::unordered_set<ColumnKey, ColumnKeyHash> m_dirtyColumns;
+
+    void FrustumCull();
 
     std::unordered_map<ChunkCoord, Chunk*, ChunkCoordHash> m_chunks;
     std::vector<ChunkCoord> m_pendingLoad;
@@ -141,7 +144,7 @@ private:
     Sleak::SceneBase* m_scene = nullptr;
     Sleak::RefPtr<Sleak::Material> m_material;
     int m_renderDistance = 8;
-    int m_chunksPerFrame = 16;
+    int m_chunksPerFrame = 32;
     int m_uploadsPerFrame = 4;
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
