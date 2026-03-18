@@ -18,6 +18,7 @@
 #include <UI/UI.hpp>
 #include <Debug/DebugLineRenderer.hpp>
 #include <Physics/Colliders.hpp>
+#include <Physics/ColliderComponent.hpp>
 
 using namespace Sleak;
 using namespace Sleak::Math;
@@ -33,21 +34,30 @@ bool MainScene::Initialize() {
 
     Scene::Initialize();
 
-    auto* cam = GetDebugCamera();
-    if (cam) {
-        cam->SetPosition({8.0f, 70.0f, 8.0f});
-        cam->SetDirection({0.0f, 0.0f, 1.0f});
-        cam->SetFarPlane(1500.0f);
-        auto* fpc = cam->GetComponent<FirstPersonController>();
-        if (fpc) {
-            fpc->SetMaxWalkSpeed(4.3f);
-            fpc->SetMaxAcceleration(1000.0f);
-            fpc->SetBrakingDeceleration(1000.0f);
-            fpc->SetGroundFriction(1.0f);
-            fpc->SetJumpZVelocity(fpc->GetJumpZVelocity()*1.8);
-            fpc->SetPitch(0.0f);
-            fpc->SetYaw(0.0f);
-        }
+    // Create the player camera as a regular scene object
+    auto* cam = new Sleak::Camera("PlayerCamera", {8.0f, 70.0f, 8.0f}, 60, 0.01f, 1500.0f);
+    cam->SetDirection({0.0f, 0.0f, 1.0f});
+    cam->AddComponent<FirstPersonController>();
+    cam->AddComponent<Sleak::ColliderComponent>(
+        Sleak::Physics::BoundingSphere(Vector3D(0, 0, 0), 0.3f));
+    cam->AddComponent<Sleak::RigidbodyComponent>(Sleak::BodyType::Dynamic);
+    auto* rb = cam->GetComponent<Sleak::RigidbodyComponent>();
+    rb->SetUseGravity(true);
+    rb->SetGravity(Vector3D(0, -9.81f, 0));
+    AddObject(cam);
+    cam->Initialize();
+    SetActiveCamera(cam);
+
+    auto* fpc = cam->GetComponent<FirstPersonController>();
+    if (fpc) {
+        fpc->SetMaxWalkSpeed(4.3f);
+        fpc->SetMaxAcceleration(1000.0f);
+        fpc->SetBrakingDeceleration(1000.0f);
+        fpc->SetGroundFriction(1.0f);
+        fpc->SetJumpZVelocity(fpc->GetJumpZVelocity()*1.8);
+        fpc->SetPitch(0.0f);
+        fpc->SetYaw(0.0f);
+        fpc->SetEnabled(true);
     }
 
     SetupLighting();
@@ -88,7 +98,7 @@ bool MainScene::Initialize() {
             return static_cast<float>(m_chunkManager.GetRenderDistance());
         });
         app->GetBenchmark()->RegisterMetric("IsMoving", [this]() {
-            auto* cam = GetDebugCamera();
+            auto* cam = GetActiveCamera();
             if (!cam) return 0.0f;
             auto* rb = cam->GetComponent<RigidbodyComponent>();
             if (!rb) return 0.0f;
@@ -110,7 +120,7 @@ bool MainScene::HasUnsavedChanges() const {
 }
 
 void MainScene::OnMousePressed(const Events::Input::MouseButtonPressedEvent& e) {
-    auto* cam = GetDebugCamera();
+    auto* cam = GetActiveCamera();
     if (!cam) return;
 
     auto pos = cam->GetPosition();
@@ -155,7 +165,7 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
             float now = m_gameTime;
             if ((now - m_lastSpacePressTime) < DOUBLE_TAP_WINDOW) {
                 m_flying = !m_flying;
-                auto* cam = GetDebugCamera();
+                auto* cam = GetActiveCamera();
                 auto* rb = cam ? cam->GetComponent<RigidbodyComponent>() : nullptr;
                 if (rb) {
                     rb->SetUseGravity(!m_flying);
@@ -216,7 +226,7 @@ void MainScene::Update(float deltaTime) {
     m_gameTime += deltaTime;
 
     // Process block effects before Scene::Update so the mesh exists during rendering
-    auto* cam = GetDebugCamera();
+    auto* cam = GetActiveCamera();
     if (cam) {
         m_blockEffects.Update(deltaTime, cam->GetPosition());
         for (auto& completed : m_blockEffects.PopCompletedPlacements()) {
@@ -323,7 +333,7 @@ void MainScene::Update(float deltaTime) {
 }
 
 void MainScene::RenderUI() {
-    auto* cam = GetDebugCamera();
+    auto* cam = GetActiveCamera();
     auto* app = Application::GetInstance();
     if (!cam || !app) return;
 
@@ -438,7 +448,7 @@ void MainScene::RenderUI() {
 }
 
 void MainScene::SaveGame() {
-    auto* cam = GetDebugCamera();
+    auto* cam = GetActiveCamera();
     if (!cam) return;
 
     WorldMeta meta;
@@ -492,7 +502,7 @@ void MainScene::LoadGame() {
     }
 
     // Restore player state
-    auto* cam = GetDebugCamera();
+    auto* cam = GetActiveCamera();
     if (cam) {
         cam->SetPosition({meta.player.posX, meta.player.posY, meta.player.posZ});
         auto* fpc = cam->GetComponent<FirstPersonController>();

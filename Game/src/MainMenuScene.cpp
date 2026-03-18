@@ -1,8 +1,6 @@
 #include "MainMenuScene.hpp"
 #include "Game.hpp"
 #include <Core/Application.hpp>
-#include <Camera/Camera.hpp>
-#include <ECS/Components/FirstPersonController.hpp>
 #include <Events/KeyboardEvent.h>
 #include <UI/UI.hpp>
 #include "World/SaveManager.hpp"
@@ -19,11 +17,11 @@ MainMenuScene::MainMenuScene(const std::string& name)
 bool MainMenuScene::Initialize() {
     Scene::Initialize();
 
-    // Disable camera controller in menu (Scene::Initialize creates one by default)
-    auto* cam = GetDebugCamera();
-    if (cam) {
-        auto* fpc = cam->GetComponent<FirstPersonController>();
-        if (fpc) fpc->SetEnabled(false);
+    // Ensure cursor is visible in menu
+    auto* app = Application::GetInstance();
+    if (app) {
+        app->SetMouseRelativeMode(false);
+        app->SetCursorVisible(true);
     }
 
     EventDispatcher::RegisterEventHandler(this, &MainMenuScene::OnKeyPressed);
@@ -35,11 +33,11 @@ bool MainMenuScene::Initialize() {
 void MainMenuScene::OnActivate() {
     Scene::OnActivate();
 
-    // Disable camera controller so cursor is visible
-    auto* cam = GetDebugCamera();
-    if (cam) {
-        auto* fpc = cam->GetComponent<FirstPersonController>();
-        if (fpc) fpc->SetEnabled(false);
+    // Ensure cursor is visible when returning to menu
+    auto* app = Application::GetInstance();
+    if (app) {
+        app->SetMouseRelativeMode(false);
+        app->SetCursorVisible(true);
     }
 
     m_menuState = MenuState::Main;
