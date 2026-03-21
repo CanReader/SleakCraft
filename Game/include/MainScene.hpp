@@ -18,10 +18,11 @@ class MainScene : public Sleak::Scene {
 public:
     MainScene(const std::string& name, const std::string& savePath,
               const std::string& worldName, uint32_t seed, bool isNewWorld);
-    ~MainScene() override = default;
+    ~MainScene() override;
 
     bool Initialize() override;
     void Update(float deltaTime) override;
+    void OnDeactivate() override;
 
     // Save current world state (called by Game when returning to menu)
     void SaveGame();
@@ -88,6 +89,11 @@ private:
     bool m_spaceHeld = false;
     bool m_shiftHeld = false;
     bool m_ctrlHeld = false;
+
+    std::string m_mousePressedHandlerId;
+    std::string m_mouseScrolledHandlerId;
+    std::string m_keyPressedHandlerId;
+    std::string m_keyReleasedHandlerId;
 };
 
 #endif

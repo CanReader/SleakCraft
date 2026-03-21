@@ -107,12 +107,32 @@ bool MainScene::Initialize() {
         });
     }
 
-    EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
-    EventDispatcher::RegisterEventHandler(this, &MainScene::OnMouseScrolled);
-    EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
-    EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyReleased);
+    m_mousePressedHandlerId  = EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
+    m_mouseScrolledHandlerId = EventDispatcher::RegisterEventHandler(this, &MainScene::OnMouseScrolled);
+    m_keyPressedHandlerId    = EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
+    m_keyReleasedHandlerId   = EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyReleased);
 
     return true;
+}
+
+MainScene::~MainScene() {
+    // Unregister anything that OnDeactivate may not have caught
+    EventDispatcher::UnregisterEvent(EventType::MousePressed,  m_mousePressedHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::MouseScrolled, m_mouseScrolledHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::KeyPressed,    m_keyPressedHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::KeyReleased,   m_keyReleasedHandlerId);
+}
+
+void MainScene::OnDeactivate() {
+    Scene::OnDeactivate();
+    EventDispatcher::UnregisterEvent(EventType::MousePressed,  m_mousePressedHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::MouseScrolled, m_mouseScrolledHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::KeyPressed,    m_keyPressedHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::KeyReleased,   m_keyReleasedHandlerId);
+    m_mousePressedHandlerId.clear();
+    m_mouseScrolledHandlerId.clear();
+    m_keyPressedHandlerId.clear();
+    m_keyReleasedHandlerId.clear();
 }
 
 bool MainScene::HasUnsavedChanges() const {

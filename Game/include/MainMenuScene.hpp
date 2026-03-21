@@ -10,11 +10,12 @@
 class MainMenuScene : public Sleak::Scene {
 public:
     explicit MainMenuScene(const std::string& name);
-    ~MainMenuScene() override = default;
+    ~MainMenuScene() override;
 
     bool Initialize() override;
     void Update(float deltaTime) override;
     void OnActivate() override;
+    void OnDeactivate() override;
 
 private:
     enum class MenuState {
@@ -68,6 +69,8 @@ private:
 
     // Delete confirmation
     int m_deleteConfirmIndex = -1;
+
+    std::string m_keyPressedHandlerId;
 };
 
 #endif

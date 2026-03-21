@@ -14,20 +14,21 @@ using namespace Sleak::UI;
 MainMenuScene::MainMenuScene(const std::string& name)
     : Scene(name) {}
 
+MainMenuScene::~MainMenuScene() {
+    EventDispatcher::UnregisterEvent(Sleak::EventType::KeyPressed, m_keyPressedHandlerId);
+}
+
 bool MainMenuScene::Initialize() {
     Scene::Initialize();
 
-    // Ensure cursor is visible in menu
-    auto* app = Application::GetInstance();
-    if (app) {
-        app->SetMouseRelativeMode(false);
-        app->SetCursorVisible(true);
-    }
-
-    EventDispatcher::RegisterEventHandler(this, &MainMenuScene::OnKeyPressed);
-
     ScanSaveDirectory();
     return true;
+}
+
+void MainMenuScene::OnDeactivate() {
+    Scene::OnDeactivate();
+    EventDispatcher::UnregisterEvent(Sleak::EventType::KeyPressed, m_keyPressedHandlerId);
+    m_keyPressedHandlerId.clear();
 }
 
 void MainMenuScene::OnActivate() {
@@ -39,6 +40,9 @@ void MainMenuScene::OnActivate() {
         app->SetMouseRelativeMode(false);
         app->SetCursorVisible(true);
     }
+
+    // Register key handler only while menu is active
+    m_keyPressedHandlerId = EventDispatcher::RegisterEventHandler(this, &MainMenuScene::OnKeyPressed);
 
     m_menuState = MenuState::Main;
     m_errorMessage.clear();
