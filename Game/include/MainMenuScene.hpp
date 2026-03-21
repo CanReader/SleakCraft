@@ -25,6 +25,7 @@ private:
         Loading
     };
 
+    void RenderBackground();
     void RenderMainMenu();
     void RenderCreateWorld();
     void RenderLoadWorld();

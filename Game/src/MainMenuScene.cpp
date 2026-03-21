@@ -116,12 +116,35 @@ void MainMenuScene::Update(float deltaTime) {
         }
     }
 
+    RenderBackground();
+
     switch (m_menuState) {
         case MenuState::Main:       RenderMainMenu(); break;
         case MenuState::CreateWorld: RenderCreateWorld(); break;
         case MenuState::LoadWorld:   RenderLoadWorld(); break;
         case MenuState::Loading:     RenderLoading(); break;
     }
+}
+
+void MainMenuScene::RenderBackground() {
+    float vw = GetViewportWidth();
+    float vh = GetViewportHeight();
+
+    uint64_t bgTex = LoadTextureForUI("assets/textures/background.png");
+    if (bgTex == 0) return;
+
+    SetNextWindowPos(0, 0, true);
+    SetNextWindowSize(vw, vh, true);
+    PushStyleVarVec(StyleVar_WindowPadding, 0.0f, 0.0f);
+    BeginPanel("##MenuBackground", 0, 0, 0.0f,
+               PanelFlags_NoTitleBar | PanelFlags_NoMove | PanelFlags_NoInput);
+    PopStyleVar(1);
+
+    SetCursorPosX(0.0f);
+    SetCursorPosY(0.0f);
+    Image(bgTex, vw, vh);
+
+    EndPanel();
 }
 
 void MainMenuScene::RenderMainMenu() {
