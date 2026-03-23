@@ -57,6 +57,7 @@ void ChunkManager::StopWorkers() {
         std::lock_guard<std::mutex> lock(m_readyMutex);
         m_readyQueue.clear();
     }
+    m_chunksNeedingRemesh.clear();
 }
 
 void ChunkManager::WorkerThread() {
@@ -152,6 +153,7 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
     // Only rebuild mesh if the chunk is not being processed by a worker thread
     if (chunk->IsInFlight()) {
         chunk->SetNeedsMeshRebuild(true);
+        m_chunksNeedingRemesh.insert({cx, cy, cz});
     } else {
         chunk->GenerateMeshData();
         affectedColumns.insert({cx, ChunkYToBand(cy), cz});
@@ -162,6 +164,7 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
         if (neighbor) {
             if (neighbor->IsInFlight()) {
                 neighbor->SetNeedsMeshRebuild(true);
+                m_chunksNeedingRemesh.insert({ncx, ncy, ncz});
             } else {
                 neighbor->GenerateMeshData();
                 affectedColumns.insert({ncx, ChunkYToBand(ncy), ncz});
@@ -177,7 +180,7 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
     if (lz == Chunk::SIZE - 1)  rebuildNeighbor(cx, cy, cz + 1);
 
     for (auto& col : affectedColumns)
-        RebuildColumnMesh(col.x, col.yBand, col.z);
+        RebuildColumnMesh(col.x, col.yBand, col.z, false);  // sync — user interaction, must be immediate
 
     return true;
 }
@@ -373,8 +376,10 @@ void ChunkManager::LinkNeighbors(const ChunkCoord& coord, Chunk* chunk) {
             if (!neighbor->IsInFlight()) {
                 neighbor->SetNeighbor(d.opposite, chunk);
                 if (neighbor->IsMeshBuilt() && !neighbor->NeedsMeshRebuild()
-                    && !m_generator.IsChunkFullySolid(neighbor))
+                    && !m_generator.IsChunkFullySolid(neighbor)) {
                     neighbor->SetNeedsMeshRebuild(true);
+                    m_chunksNeedingRemesh.insert({coord.x + d.dx, coord.y + d.dy, coord.z + d.dz});
+                }
             }
         }
     }
@@ -407,11 +412,8 @@ bool ChunkManager::IsNeighborOfInFlight(const ChunkCoord& coord) const {
     return false;
 }
 
-void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz) {
+void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) {
     ColumnKey key{cx, yBand, cz};
-
-    // Old MeshHandle is released automatically via RefPtr when overwritten
-    m_columns.erase(key);
 
     int bandMinY = yBand * BAND_SIZE;
     int bandMaxY = bandMinY + BAND_SIZE - 1;
@@ -424,8 +426,23 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz) {
         // Skip chunks not ready (in-flight or not yet generated)
         if (!chunk || chunk->IsInFlight() || chunk->NeedsGeneration()) continue;
 
-        // Regenerate mesh from block data if previously released
+        // Mesh data was consumed — regenerate it.
+        // In multithreaded mode with allowDefer=true (background chunk loading),
+        // queue back to a worker to avoid blocking the main thread.
+        // With allowDefer=false (user block interaction) always regenerate synchronously
+        // so the change is visible on the very same frame.
         if (!chunk->HasPendingMesh()) {
+            if (m_multithreaded && allowDefer) {
+                // Queue back to worker; keep old column mesh visible until done
+                chunk->SetInFlight(true);
+                {
+                    std::lock_guard<std::mutex> lock(m_taskMutex);
+                    m_taskQueue.push_back(chunk);
+                }
+                m_taskCV.notify_one();
+                m_dirtyColumns.insert(key);
+                return;
+            }
             chunk->GenerateMeshData();
         }
 
@@ -452,6 +469,9 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz) {
         md.vertices.release();
         md.indices.release();
     }
+
+    // Old MeshHandle released only when we have complete new data to replace it
+    m_columns.erase(key);
 
     if (mergedVerts.GetSize() == 0) return;
 
@@ -600,6 +620,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                             && !neighbor->NeedsMeshRebuild()
                             && !m_generator.IsChunkFullySolid(neighbor)) {
                             neighbor->SetNeedsMeshRebuild(true);
+                            m_chunksNeedingRemesh.insert({coord.x + d.dx, coord.y + d.dy, coord.z + d.dz});
                         }
                     }
                 }
@@ -607,6 +628,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                 int neighborsAfter = chunk->CountNeighbors();
                 if (neighborsAfter > neighborsBefore) {
                     chunk->SetNeedsMeshRebuild(true);
+                    m_chunksNeedingRemesh.insert(coord);
                 }
 
                 if (chunk->HasPendingMesh()) {
@@ -658,17 +680,30 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         m_taskCV.notify_all();
 
         // Phase 3: Dispatch remesh requests to workers
+        // Uses m_chunksNeedingRemesh (O(k)) instead of scanning all chunks (O(n))
         {
             std::vector<Chunk*> remeshBatch;
             int remeshBudget = m_chunksPerFrame;
-            for (auto& [c, ch] : m_chunks) {
-                if (remeshBudget <= 0) break;
-                if (ch->NeedsMeshRebuild() && !ch->IsInFlight()
-                    && !ch->NeedsGeneration()) {
-                    ch->SetNeedsMeshRebuild(false);
-                    remeshBatch.push_back(ch);
-                    --remeshBudget;
+            auto it = m_chunksNeedingRemesh.begin();
+            while (it != m_chunksNeedingRemesh.end() && remeshBudget > 0) {
+                auto chunkIt = m_chunks.find(*it);
+                if (chunkIt == m_chunks.end()) {
+                    it = m_chunksNeedingRemesh.erase(it);
+                    continue;
                 }
+                Chunk* ch = chunkIt->second;
+                if (!ch->NeedsMeshRebuild()) {
+                    it = m_chunksNeedingRemesh.erase(it);
+                    continue;
+                }
+                if (ch->IsInFlight() || ch->NeedsGeneration()) {
+                    ++it;  // still busy, retry next frame
+                    continue;
+                }
+                ch->SetNeedsMeshRebuild(false);
+                remeshBatch.push_back(ch);
+                it = m_chunksNeedingRemesh.erase(it);
+                --remeshBudget;
             }
             if (!remeshBatch.empty()) {
                 std::lock_guard<std::mutex> lock(m_taskMutex);
@@ -838,6 +873,7 @@ void ChunkManager::ForceReload() {
 
     m_columns.clear();
     m_dirtyColumns.clear();
+    m_chunksNeedingRemesh.clear();
 
     // Remove all chunks
     for (auto& [coord, chunk] : m_chunks) {

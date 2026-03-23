@@ -130,10 +130,11 @@ private:
         Sleak::MeshHandle mesh;
         bool visible = true;
     };
-    void RebuildColumnMesh(int cx, int yBand, int cz);
+    void RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer = true);
     static int ChunkYToBand(int cy) { return cy / BAND_SIZE; }
     std::unordered_map<ColumnKey, ColumnMesh, ColumnKeyHash> m_columns;
     std::unordered_set<ColumnKey, ColumnKeyHash> m_dirtyColumns;
+    std::unordered_set<ChunkCoord, ChunkCoordHash> m_chunksNeedingRemesh;
 
     void FrustumCull();
 
