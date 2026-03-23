@@ -2,6 +2,9 @@
 #include "MainMenuScene.hpp"
 #include "MainScene.hpp"
 #include <Core/Application.hpp>
+#include <Core/CommandLine.hpp>
+#include "World/SaveManager.hpp"
+#include <random>
 
 Game::Game() {
   bIsGameRunning = true;
@@ -19,6 +22,29 @@ bool Game::Initialize() {
 }
 
 void Game::Begin() {
+    // If -world <name> was passed on the command line, jump straight into that
+    // world instead of showing the main menu.
+    const std::string worldName = Sleak::CommandLine::GetWorldName();
+    if (worldName.empty()) return;
+
+    const std::string savePath = "saves/" + worldName;
+
+    // Check whether a save already exists for this world name
+    SaveManager probe;
+    probe.SetSavePath(savePath);
+    bool isNew = !probe.HasSave();
+
+    uint32_t seed = 0;
+    if (isNew) {
+        // Generate a random seed for the new world
+        std::random_device rd;
+        seed = rd();
+        SLEAK_INFO("CLI: Creating new world '{}' with seed {}", worldName, seed);
+    } else {
+        SLEAK_INFO("CLI: Loading existing world '{}'", worldName);
+    }
+
+    StartWorld(savePath, worldName, seed, isNew);
 }
 
 void Game::Loop(float DeltaTime) {
