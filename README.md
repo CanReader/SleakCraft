@@ -1,26 +1,68 @@
 # SleakCraft
 
-A voxel-based sandbox game built with [SleakEngine](https://github.com/CanReader/SleakEngine), featuring chunk-based terrain generation and block rendering with a texture atlas system.
+A voxel sandbox game built on [SleakEngine](https://github.com/CanReader/SleakEngine) — a custom C++ engine supporting DirectX 11, DirectX 12, Vulkan, and OpenGL.
 
 ![In-Game Screenshot](screenshots/SleakCraft1.jpg)
 
 ## Features
 
-- **Chunk-based world** — 16x16x16 chunks loaded/unloaded dynamically around the player
-- **Block system** — Multiple block types (Grass, Dirt, Stone) with per-face texturing
-- **Texture atlas** — Efficient single-texture rendering with tile-based UV mapping
-- **Face culling** — Only visible faces between air and solid blocks are meshed
-- **Dynamic render distance** — Configurable chunk loading radius
-- **First-person camera** — Fly-mode exploration with configurable movement
-- **Save/Load system** — Persistent world with F5/F6, auto-save, RLE compression, CRC32 integrity
-- **Skybox** — Atmospheric sky rendering
+### World
+- **Chunk-based terrain** — 16×16×16 chunks dynamically loaded and unloaded around the player
+- **Procedural generation** — Noise-based heightmap with surface biome details (grass, dirt, stone layers, trees)
+- **Multi-threaded chunk loading** — Background worker threads stream and mesh chunks asynchronously; foreground sync on user interaction
+- **Dynamic render distance** — Configurable at runtime via the settings panel or `-rd` CLI flag
+- **Face culling** — Only visible faces (air↔solid boundaries) are meshed, keeping draw calls minimal
+- **Transparent leaf blocks** — Leaves rendered with alpha-masked faces separate from the opaque pass
+
+### Blocks
+14 block types with per-face textures built into a runtime texture atlas:
+
+| Block | Block | Block |
+|-------|-------|-------|
+| Grass | Dirt | Stone |
+| Cobblestone | Sand | Gravel |
+| Oak Log | Dark Oak Log | Spruce Log |
+| Oak Planks | Bricks | Oak Leaves |
+
+### Gameplay
+- **Block breaking** — Left-click with particle break effect
+- **Block placing** — Right-click with placement animation; block appears after the animation completes
+- **Hotbar** — 9 slots, cycle with scroll wheel or 1–9 keys
+- **Physics** — Gravity, jumping, AABB collision resolution against voxel terrain
+- **Fly mode** — Double-tap Space to toggle; Space/Ctrl to ascend/descend, Shift to sprint
+- **Save / Load** — F5 to save, F6 to load; auto-save every 120 seconds when dirty; RLE-compressed binary format with CRC32 integrity
+- **Multiple worlds** — Each world stored in its own `saves/<name>/` directory
+
+### Graphics
+- **Multi-API rendering** — DirectX 11, DirectX 12, Vulkan, OpenGL — switchable via `-r` flag
+- **MSAA** — Up to 8× anti-aliasing (hardware-limited), configurable at runtime
+- **Skybox** — Atmospheric sky with fog that fades at the render distance boundary
+- **Block outline** — Highlights the targeted block
+- **Background image** — Custom background on the main menu
+
+### Performance & Benchmarking
+- **Built-in benchmark recorder** — Toggle with F12 (Debug builds); auto-start with `--bench`
+- **CSV output** — Per-frame: time, frame time (ms), FPS, triangle count, CPU %, RAM (MB)
+- **Summary statistics** — Min/max/avg/stdev, P50/P95/P99 percentiles, spike counts (>16 ms, >33 ms, >50 ms), VSync/MSAA settings, hardware info (GPU, CPU, RAM, OS)
+- **Visualizer** — `tools/benchmark_visualizer.py` — frame time over time with spike highlighting, histogram, system load plot
+
+### HUD & Debug
+- **F3 HUD** — Position, direction, FPS, frame time, triangles, CPU/RAM/GPU %, renderer label
+- **Settings panel** — Live controls for VSync, MSAA, render distance, multithreaded loading, collider overlay
+
+---
 
 ## Tech Stack
 
-- **Engine:** [SleakEngine](https://github.com/CanReader/SleakEngine) (Vulkan-based)
-- **Language:** C++23
-- **Build System:** CMake 3.31+
-- **Shading:** Custom flat shader (GLSL / SPIR-V)
+| Layer | Technology |
+|-------|-----------|
+| Engine | [SleakEngine](https://github.com/CanReader/SleakEngine) |
+| Language | C++23 |
+| Build | CMake 3.31+ |
+| Graphics APIs | DirectX 11 · DirectX 12 · Vulkan · OpenGL |
+| Shader language | HLSL |
+
+---
 
 ## Building
 
@@ -31,59 +73,108 @@ cmake --preset debug
 cmake --build --preset debug
 ```
 
-> **Already cloned without `--recursive`?**
+> **Cloned without `--recursive`?**
 > ```bash
 > git submodule update --init --recursive --remote
 > ```
 
-### Run
+Binaries are output to `bin/`.
+
+---
+
+## Running
 
 ```bash
 cd bin
-./SleakCraft -w 1280 -h 720 -t SleakCraft
+./SleakCraft [OPTIONS]
 ```
+
+### CLI Options
 
 | Flag | Description |
 |------|-------------|
-| `-w` | Window width |
-| `-h` | Window height |
-| `-t` | Window title |
+| `-r <api>` | Renderer: `vulkan` · `d3d11` · `d3d12` · `opengl` |
+| `-w <n>` | Window width (default: 1200) |
+| `-h <n>` | Window height (default: 800) |
+| `-t <name>` | Window title — use `_` for spaces |
+| `--fullscreen` | Start in fullscreen |
+| `-world <name>` | Load world if save exists, create new otherwise |
+| `-seed <n>` | Seed for new world creation (default: random) |
+| `-rd <n>` | Initial render distance in chunks (default: 8) |
+| `-msaa <n>` | MSAA sample count: `1` · `2` · `4` · `8` |
+| `--vsync` | Enable VSync on launch |
+| `--no-vsync` | Disable VSync on launch |
+| `--bench` | Auto-start benchmark recording on launch |
+| `--help` | Show all options |
+
+### Examples
+
+```bash
+# Open or create a world with Vulkan
+SleakCraft -r vulkan -world MyWorld
+
+# DirectX 12, specific seed, 16-chunk render distance, 4× MSAA
+SleakCraft -r d3d12 -world Perf -seed 12345 -rd 16 -msaa 4
+
+# Fullscreen at 1920×1080 with VSync
+SleakCraft -w 1920 -h 1080 --fullscreen --vsync
+
+# Run a benchmark session automatically and exit when done
+SleakCraft -r vulkan -world BenchWorld --bench
+```
+
+---
 
 ## Controls
 
-| Key | Action |
-|-----|--------|
-| WASD | Move |
+| Key / Button | Action |
+|-------------|--------|
+| W A S D | Move |
 | Space | Jump |
+| Space ×2 | Toggle fly mode |
+| Space / Ctrl | Ascend / descend (fly) |
 | Shift | Sprint |
-| 1 / 2 / 3 | Select block (Grass / Dirt / Stone) |
+| Mouse | Look |
+| Scroll / 1–9 | Select hotbar slot |
 | Left Click | Break block |
 | Right Click | Place block |
+| Escape | Return to main menu (saves world, stops benchmark) |
 | F3 | Toggle HUD |
 | F5 | Save world |
 | F6 | Load world |
+| F11 | Toggle fullscreen |
+| F12 | Toggle benchmark recording *(Debug builds)* |
 
-World saves are stored in `saves/Default/` using a custom binary format. Auto-save triggers every 120 seconds when blocks have been modified.
+---
 
 ## Project Structure
 
 ```
 SleakCraft/
-├── Engine/                  # SleakEngine submodule (Vulkan renderer, ECS, physics)
+├── Engine/                  # SleakEngine submodule
+│   └── Engine/
+│       ├── include/public/  # Public engine API (Application, CommandLine, …)
+│       └── src/             # Renderer backends, ECS, physics, audio
 ├── Game/
 │   ├── assets/
-│   │   ├── shaders/         # Flat shader (vert/frag + SPIR-V)
-│   │   └── textures/        # Block texture atlas
+│   │   ├── shaders/         # HLSL flat shader
+│   │   └── textures/        # Block textures + runtime atlas, UI background
 │   ├── include/
-│   │   ├── World/           # Block, Chunk, ChunkManager, TextureAtlas
-│   │   └── MainScene.hpp
+│   │   └── World/           # Block, Chunk, ChunkManager, SaveManager, …
 │   └── src/
-│       ├── World/           # Chunk meshing and world management
-│       └── MainScene.cpp
-├── Client/                  # Application entry point
+│       ├── World/           # Chunk meshing, world gen, save/load, block effects
+│       ├── MainScene.cpp    # In-game scene (player, HUD, settings)
+│       ├── MainMenuScene.cpp
+│       └── Game.cpp         # Scene lifecycle, CLI world launch
+├── Client/
+│   └── src/main.cpp         # Entry point — registers CLI help, boots Application
+├── tools/
+│   └── benchmark_visualizer.py
 └── CMakeLists.txt
 ```
 
+---
+
 ## License
 
-This project is released under the [MIT License](LICENSE).
+Released under the [MIT License](LICENSE).
