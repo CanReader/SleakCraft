@@ -84,17 +84,11 @@ bool MainScene::Initialize() {
                               cam ? cam->GetPosition().GetZ() : 8.0f);
         m_chunkManager.FlushPendingChunks();
         {
-            int cliRD = Sleak::CommandLine::GetRenderDistance();
+            const std::string rdStr = Sleak::CommandLine::GetValue("-rd");
+            int cliRD = rdStr.empty() ? 0 : std::stoi(rdStr);
             m_chunkManager.SetRenderDistance(cliRD > 0 ? cliRD : 32);
         }
         m_chunkManager.SetMultithreaded(m_multithreadedLoading);
-
-        // CLI fly mode
-        if (Sleak::CommandLine::StartFlyMode()) {
-            m_flying = true;
-            auto* rb = cam ? cam->GetComponent<Sleak::RigidbodyComponent>() : nullptr;
-            if (rb) { rb->SetUseGravity(false); rb->SetVelocity({0.f, 0.f, 0.f}); }
-        }
 
         // Save initial world.dat so it appears in world list
         SaveGame();
@@ -556,20 +550,11 @@ void MainScene::LoadGame() {
     m_chunkManager.Update(meta.player.posX, meta.player.posY, meta.player.posZ);
     m_chunkManager.FlushPendingChunks();
     {
-        int cliRD = Sleak::CommandLine::GetRenderDistance();
+        const std::string rdStr = Sleak::CommandLine::GetValue("-rd");
+        int cliRD = rdStr.empty() ? 0 : std::stoi(rdStr);
         m_chunkManager.SetRenderDistance(cliRD > 0 ? cliRD : 8);
     }
     m_chunkManager.SetMultithreaded(m_multithreadedLoading);
-
-    // CLI fly mode
-    {
-        auto* c = GetActiveCamera();
-        if (Sleak::CommandLine::StartFlyMode()) {
-            m_flying = true;
-            auto* rb = c ? c->GetComponent<Sleak::RigidbodyComponent>() : nullptr;
-            if (rb) { rb->SetUseGravity(false); rb->SetVelocity({0.f, 0.f, 0.f}); }
-        }
-    }
 
     m_saveMessage = "World Loaded!";
     m_saveMessageTimer = 2.0f;

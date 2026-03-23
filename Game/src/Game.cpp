@@ -24,7 +24,7 @@ bool Game::Initialize() {
 void Game::Begin() {
     // If -world <name> was passed on the command line, jump straight into that
     // world instead of showing the main menu.
-    const std::string worldName = Sleak::CommandLine::GetWorldName();
+    const std::string worldName = Sleak::CommandLine::GetValue("-world");
     if (worldName.empty()) return;
 
     const std::string savePath = "saves/" + worldName;
@@ -36,9 +36,9 @@ void Game::Begin() {
 
     uint32_t seed = 0;
     if (isNew) {
-        int cliSeed = Sleak::CommandLine::GetSeed();
-        seed = (cliSeed != 0) ? static_cast<uint32_t>(cliSeed)
-                               : std::random_device{}();
+        const std::string seedStr = Sleak::CommandLine::GetValue("-seed");
+        seed = (!seedStr.empty()) ? static_cast<uint32_t>(std::stoul(seedStr))
+                                  : std::random_device{}();
         SLEAK_INFO("CLI: Creating new world '{}' with seed {}", worldName, seed);
     } else {
         SLEAK_INFO("CLI: Loading existing world '{}'", worldName);
