@@ -57,3 +57,6 @@ Desktop.ini
 .prettierrc
 log.txt
 nul
+
+.claude/
+CLAUDE.md
