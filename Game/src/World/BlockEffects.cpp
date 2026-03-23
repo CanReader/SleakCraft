@@ -194,8 +194,8 @@ void BlockEffects::Update(float deltaTime, const Vector3D& cameraPos) {
         auto* tr = effect.obj->GetComponent<TransformComponent>();
         if (tr) {
             tr->SetPosition(Vector3D(effect.x + offset,
-                                      effect.y + offset,
-                                      effect.z + offset));
+                                     effect.y + offset,
+                                     effect.z + offset));
             tr->SetScale(Vector3D(scale, scale, scale));
         }
     }
@@ -227,6 +227,7 @@ void BlockEffects::Update(float deltaTime, const Vector3D& cameraPos) {
             [](const BreakParticle& p) { return p.obj == nullptr; }),
         m_breakParticles.end());
 }
+
 
 std::vector<BlockEffects::CompletedPlace> BlockEffects::PopCompletedPlacements() {
     std::vector<CompletedPlace> result;

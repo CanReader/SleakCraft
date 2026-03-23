@@ -245,13 +245,11 @@ void MainScene::Update(float deltaTime) {
     if (deltaTime > 0.05f) deltaTime = 0.05f;
     m_gameTime += deltaTime;
 
-    // Process block effects before Scene::Update so the mesh exists during rendering
     auto* cam = GetActiveCamera();
     if (cam) {
         m_blockEffects.Update(deltaTime, cam->GetPosition());
-        for (auto& completed : m_blockEffects.PopCompletedPlacements()) {
+        for (auto& completed : m_blockEffects.PopCompletedPlacements())
             m_chunkManager.SetBlockAt(completed.x, completed.y, completed.z, completed.type);
-        }
     }
 
     Scene::Update(deltaTime);

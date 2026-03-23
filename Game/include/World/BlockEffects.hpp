@@ -41,6 +41,7 @@ public:
     struct CompletedPlace { int x, y, z; BlockType type; };
     std::vector<CompletedPlace> PopCompletedPlacements();
 
+
 private:
     Sleak::GameObject* CreatePlaceCube(BlockType type);
     Sleak::GameObject* CreateParticleQuad(uint8_t tileIndex);
@@ -53,7 +54,7 @@ private:
 
     static constexpr float PLACE_DURATION = 0.15f;
     static constexpr float BREAK_LIFETIME = 0.6f;
-    static constexpr float PARTICLE_SIZE = 0.2f;
+    static constexpr float PARTICLE_SIZE = 0.1f;
     static constexpr int PARTICLES_PER_BLOCK = 8;
     static constexpr float PARTICLE_GRAVITY = -12.0f;
 };
