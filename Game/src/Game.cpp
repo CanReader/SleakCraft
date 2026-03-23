@@ -36,9 +36,9 @@ void Game::Begin() {
 
     uint32_t seed = 0;
     if (isNew) {
-        // Generate a random seed for the new world
-        std::random_device rd;
-        seed = rd();
+        int cliSeed = Sleak::CommandLine::GetSeed();
+        seed = (cliSeed != 0) ? static_cast<uint32_t>(cliSeed)
+                               : std::random_device{}();
         SLEAK_INFO("CLI: Creating new world '{}' with seed {}", worldName, seed);
     } else {
         SLEAK_INFO("CLI: Loading existing world '{}'", worldName);
@@ -68,8 +68,13 @@ void Game::StartWorld(const std::string& savePath, const std::string& worldName,
 }
 
 void Game::ReturnToMenu() {
-    // Wait for GPU before destroying scene resources
     auto* app = Sleak::Application::GetInstance();
+
+    // Stop benchmark recording if active
+    if (app && app->GetBenchmark() && app->GetBenchmark()->IsRecording())
+        app->GetBenchmark()->ToggleRecording();
+
+    // Wait for GPU before destroying scene resources
     if (app) app->WaitGPUIdle();
 
     // Save the game before returning

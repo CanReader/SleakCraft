@@ -2,6 +2,7 @@
 #include "Game.hpp"
 #include "World/TextureAtlas.hpp"
 #include <cstring>
+#include <Core/CommandLine.hpp>
 #include <Core/GameObject.hpp>
 #include <Core/Application.hpp>
 #include <Math/Vector.hpp>
@@ -82,8 +83,18 @@ bool MainScene::Initialize() {
                               cam ? cam->GetPosition().GetY() : 70.0f,
                               cam ? cam->GetPosition().GetZ() : 8.0f);
         m_chunkManager.FlushPendingChunks();
-        m_chunkManager.SetRenderDistance(32);
+        {
+            int cliRD = Sleak::CommandLine::GetRenderDistance();
+            m_chunkManager.SetRenderDistance(cliRD > 0 ? cliRD : 32);
+        }
         m_chunkManager.SetMultithreaded(m_multithreadedLoading);
+
+        // CLI fly mode
+        if (Sleak::CommandLine::StartFlyMode()) {
+            m_flying = true;
+            auto* rb = cam ? cam->GetComponent<Sleak::RigidbodyComponent>() : nullptr;
+            if (rb) { rb->SetUseGravity(false); rb->SetVelocity({0.f, 0.f, 0.f}); }
+        }
 
         // Save initial world.dat so it appears in world list
         SaveGame();
@@ -544,8 +555,21 @@ void MainScene::LoadGame() {
     m_chunkManager.SetRenderDistance(3);
     m_chunkManager.Update(meta.player.posX, meta.player.posY, meta.player.posZ);
     m_chunkManager.FlushPendingChunks();
-    m_chunkManager.SetRenderDistance(8);
+    {
+        int cliRD = Sleak::CommandLine::GetRenderDistance();
+        m_chunkManager.SetRenderDistance(cliRD > 0 ? cliRD : 8);
+    }
     m_chunkManager.SetMultithreaded(m_multithreadedLoading);
+
+    // CLI fly mode
+    {
+        auto* c = GetActiveCamera();
+        if (Sleak::CommandLine::StartFlyMode()) {
+            m_flying = true;
+            auto* rb = c ? c->GetComponent<Sleak::RigidbodyComponent>() : nullptr;
+            if (rb) { rb->SetUseGravity(false); rb->SetVelocity({0.f, 0.f, 0.f}); }
+        }
+    }
 
     m_saveMessage = "World Loaded!";
     m_saveMessageTimer = 2.0f;
