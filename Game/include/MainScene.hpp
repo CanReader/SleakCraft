@@ -97,16 +97,16 @@ private:
 
     // Lighting state (live-editable via settings panel)
     Sleak::DirectionalLight* m_sun = nullptr;
-    float m_sunElevation  = 53.0f;   // degrees above horizon (0=sunrise, 90=noon)
-    float m_sunAzimuth    = 38.0f;   // degrees clockwise from north
-    float m_sunIntensity  = 1.4f;
+    float m_sunElevation  = 58.0f;   // degrees above horizon (0=sunrise, 90=noon)
+    float m_sunAzimuth    = 215.0f;  // degrees clockwise from north
+    float m_sunIntensity  = 2.3f;
     float m_sunColorR     = 1.00f;
-    float m_sunColorG     = 0.95f;
-    float m_sunColorB     = 0.85f;
-    float m_ambientIntensity = 0.55f;
-    float m_ambientColorR    = 0.50f;
-    float m_ambientColorG    = 0.58f;
-    float m_ambientColorB    = 0.72f;
+    float m_sunColorG     = 0.93f;
+    float m_sunColorB     = 0.75f;
+    float m_ambientIntensity = 0.885f;
+    float m_ambientColorR    = 0.36f;
+    float m_ambientColorG    = 0.53f;
+    float m_ambientColorB    = 0.82f;
 };
 
 #endif
