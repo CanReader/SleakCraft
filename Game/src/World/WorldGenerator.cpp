@@ -350,6 +350,23 @@ bool WorldGenerator::IsChunkFullySolid(const Chunk* chunk) const {
     return true;
 }
 
+int WorldGenerator::GetMaxFilledChunkY(int cx, int cz) const {
+    int baseX = cx * Chunk::SIZE;
+    int baseZ = cz * Chunk::SIZE;
+    int maxH = 0;
+    int xs[] = {baseX, baseX + Chunk::SIZE - 1, baseX + Chunk::SIZE / 2};
+    int zs[] = {baseZ, baseZ + Chunk::SIZE - 1, baseZ + Chunk::SIZE / 2};
+    for (int x : xs)
+        for (int z : zs) {
+            int h = GetSurfaceHeight(x, z);
+            if (h > maxH) maxH = h;
+        }
+    // +16 margin for trees (same as IsChunkAboveTerrain), convert to chunk Y
+    int maxCy = (maxH + 16) / Chunk::SIZE;
+    if (maxCy > MAX_CHUNK_Y) maxCy = MAX_CHUNK_Y;
+    return maxCy;
+}
+
 bool WorldGenerator::IsChunkAboveTerrain(int cx, int cy, int cz) const {
     int baseY = cy * Chunk::SIZE;
     if (baseY <= 0) return false;

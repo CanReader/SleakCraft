@@ -39,6 +39,7 @@ public:
     bool IsChunkEmpty(const Chunk* chunk) const;
     bool IsChunkFullySolid(const Chunk* chunk) const;
     bool IsChunkAboveTerrain(int cx, int cy, int cz) const;
+    int  GetMaxFilledChunkY(int cx, int cz) const;
 
 private:
     Noise m_continentalness;
