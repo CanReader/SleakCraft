@@ -513,6 +513,37 @@ void MainScene::RenderUI() {
     if (ambColorChanged && lm)
         lm->SetAmbientColor(m_ambientColorR, m_ambientColorG, m_ambientColorB);
 
+    // ---- Texture Quality ----
+    UI::Separator();
+    UI::Text("-- Texture --");
+
+    {
+        const char* filterLabels[] = {
+            "Nearest", "Bilinear", "Trilinear",
+            "Aniso 2x", "Aniso 4x", "Aniso 8x", "Aniso 16x"
+        };
+        const TextureFilter filterValues[] = {
+            TextureFilter::Nearest, TextureFilter::Bilinear, TextureFilter::Trilinear,
+            TextureFilter::Anisotropic2x, TextureFilter::Anisotropic4x,
+            TextureFilter::Anisotropic8x, TextureFilter::Anisotropic16x
+        };
+        constexpr int filterCount = 7;
+        int currentFilter = 0;
+        for (int i = 0; i < filterCount; i++)
+            if (filterValues[i] == m_texFilter) { currentFilter = i; break; }
+
+        if (UI::Combo("Filter", &currentFilter, filterLabels, filterCount)) {
+            m_texFilter = filterValues[currentFilter];
+            auto* tex = m_blockMaterial ? m_blockMaterial->GetDiffuseTexture() : nullptr;
+            if (tex) tex->SetFilter(m_texFilter);
+        }
+    }
+
+    if (UI::DragFloat("LOD Bias", &m_texLodBias, 0.05f, -4.0f, 4.0f)) {
+        auto* tex = m_blockMaterial ? m_blockMaterial->GetDiffuseTexture() : nullptr;
+        if (tex) tex->SetLodBias(m_texLodBias);
+    }
+
     UI::EndPanel();
 }
 
@@ -692,13 +723,13 @@ void MainScene::SetupMaterial() {
     // Build runtime atlas from individual block textures
     auto* atlasTex = TextureAtlas::BuildAtlas();
     if (atlasTex) {
-        atlasTex->SetFilter(TextureFilter::Nearest);
+        atlasTex->SetFilter(m_texFilter);
         atlasTex->SetWrapMode(TextureWrapMode::ClampToEdge);
         mat->SetDiffuseTexture(atlasTex);
     } else {
         // Fallback to old atlas file
         mat->SetDiffuseTexture("assets/textures/block_atlas.png");
-        mat->GetDiffuseTexture()->SetFilter(TextureFilter::Nearest);
+        mat->GetDiffuseTexture()->SetFilter(m_texFilter);
         mat->GetDiffuseTexture()->SetWrapMode(TextureWrapMode::ClampToEdge);
     }
     mat->SetDiffuseColor((uint8_t)255, (uint8_t)255, (uint8_t)255);

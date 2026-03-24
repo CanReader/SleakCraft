@@ -2,6 +2,7 @@
 #define _MAIN_SCENE_HPP_
 
 #include <Core/Scene.hpp>
+#include <Runtime/Texture.hpp>
 #include <Memory/RefPtr.h>
 #include <Events/MouseEvent.h>
 #include <Events/KeyboardEvent.h>
@@ -107,6 +108,10 @@ private:
     float m_ambientColorR    = 0.45f;
     float m_ambientColorG    = 0.62f;
     float m_ambientColorB    = 1.00f;
+
+    // Texture quality state
+    Sleak::TextureFilter m_texFilter = Sleak::TextureFilter::Anisotropic16x;
+    float m_texLodBias = 0.0f;
 };
 
 #endif
