@@ -4,6 +4,7 @@ in vec3 fragWorldPos;
 in vec3 fragWorldNorm;
 in vec4 fragColor;
 in vec2 fragUV;
+in vec4 fragShadowCoord;
 
 out vec4 outColor;
 
@@ -27,7 +28,61 @@ layout(std140, binding = 2) uniform LightUBO {
     LightData Lights[16];
 };
 
+layout(std140, binding = 5) uniform ShadowUBO {
+    mat4  ShadowLightVP;
+    float ShadowBias;
+    float ShadowStrength;
+    float ShadowTexelSize;
+    float ShadowLightSize;
+    uint  PCSSEnabled;
+    uint  ShadowMapEnabled;
+    float _shadowPad0, _shadowPad1;
+};
+
 layout(binding = 0) uniform sampler2D diffuseTexture;
+layout(binding = 3) uniform sampler2DShadow shadowMap;
+
+// 16-sample Poisson Disk
+const vec2 poissonDisk[16] = vec2[](
+    vec2(-0.94201624, -0.39906216), vec2( 0.94558609, -0.76890725),
+    vec2(-0.09418410, -0.92938870), vec2( 0.34495938,  0.29387760),
+    vec2(-0.91588581,  0.45771432), vec2(-0.81544232, -0.87912464),
+    vec2(-0.38277543,  0.27676845), vec2( 0.97484398,  0.75648379),
+    vec2( 0.44323325, -0.97511554), vec2( 0.53742981, -0.47373420),
+    vec2(-0.26496911, -0.41893023), vec2( 0.79197514,  0.19090188),
+    vec2(-0.24188840,  0.99706507), vec2(-0.81409955,  0.91437590),
+    vec2( 0.19984126,  0.78641367), vec2( 0.14383161, -0.14100790)
+);
+
+float CalcShadowPCF(vec4 sc) {
+    if (ShadowMapEnabled == 0u)
+        return 1.0;
+
+    vec3 projCoords = sc.xyz / sc.w;
+    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+
+    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0)
+        return 1.0;
+
+    vec2 fadeCoord = smoothstep(vec2(0.0), vec2(0.05), projCoords.xy)
+                   * smoothstep(vec2(0.0), vec2(0.05), vec2(1.0) - projCoords.xy);
+    float edgeFade = fadeCoord.x * fadeCoord.y;
+
+    float texelSize = ShadowTexelSize;
+    float radius = 1.5;
+    float shadow = 0.0;
+
+    for (int i = 0; i < 16; i++) {
+        shadow += texture(shadowMap,
+            vec3(projCoords.xy + poissonDisk[i] * texelSize * radius,
+                 projCoords.z - ShadowBias));
+    }
+    shadow /= 16.0;
+
+    shadow = mix(1.0, shadow, ShadowStrength * edgeFade);
+    return shadow;
+}
 
 // ACES film tone mapping (Stephen Hill fit)
 vec3 ACESFilm(vec3 x) {
@@ -51,6 +106,9 @@ void main() {
     float hemisphere   = N.y * 0.5 + 0.5;
     vec3 ambient       = mix(groundAmbient, skyAmbient, hemisphere);
 
+    // Shadow
+    float shadow = CalcShadowPCF(fragShadowCoord);
+
     // Wrap diffuse from first directional light
     vec3 diffuse = vec3(0.0);
     for (uint i = 0u; i < NumActiveLights; i++) {
@@ -59,7 +117,7 @@ void main() {
 
         vec3 L      = normalize(-light.Direction);
         float NdotL = clamp(dot(N, L) * 0.85 + 0.15, 0.0, 1.0);
-        diffuse     = light.Color * light.Intensity * NdotL;
+        diffuse     = light.Color * light.Intensity * NdotL * shadow;
         break;
     }
 

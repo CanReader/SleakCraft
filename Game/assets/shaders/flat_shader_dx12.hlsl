@@ -16,13 +16,14 @@ struct VS_INPUT
 
 struct VS_OUTPUT
 {
-    float4 Position  : SV_POSITION;
-    float3 WorldPos  : TEXCOORD0;
-    float3 WorldNorm : TEXCOORD1;
-    float3 WorldTan  : TEXCOORD2;
-    float3 WorldBit  : TEXCOORD3;
-    float4 Color     : COLOR;
-    float2 TexCoord  : TEXCOORD4;
+    float4 Position    : SV_POSITION;
+    float3 WorldPos    : TEXCOORD0;
+    float3 WorldNorm   : TEXCOORD1;
+    float3 WorldTan    : TEXCOORD2;
+    float3 WorldBit    : TEXCOORD3;
+    float4 Color       : COLOR;
+    float2 TexCoord    : TEXCOORD4;
+    float4 ShadowCoord : TEXCOORD5;
 };
 
 // Transform CB — root parameter 0, register(b0)
@@ -51,11 +52,56 @@ cbuffer LightCB : register(b2) {
 Texture2D diffuseTexture : register(t0);
 SamplerState mainSampler : register(s0);
 
+Texture2D shadowMapTex : register(t3);
+SamplerComparisonState shadowSampler : register(s3);
+
 // ============================================================
 // ACES film tone mapping (Stephen Hill fit)
 // ============================================================
 float3 ACESFilm(float3 x) {
     return saturate((x * (2.51f * x + 0.03f)) / (x * (2.43f * x + 0.59f) + 0.14f));
+}
+
+// ============================================================
+// PCF Shadow with 16-sample Poisson Disk
+// ============================================================
+static const float2 poissonDisk[16] = {
+    float2(-0.94201624, -0.39906216), float2( 0.94558609, -0.76890725),
+    float2(-0.09418410, -0.92938870), float2( 0.34495938,  0.29387760),
+    float2(-0.91588581,  0.45771432), float2(-0.81544232, -0.87912464),
+    float2(-0.38277543,  0.27676845), float2( 0.97484398,  0.75648379),
+    float2( 0.44323325, -0.97511554), float2( 0.53742981, -0.47373420),
+    float2(-0.26496911, -0.41893023), float2( 0.79197514,  0.19090188),
+    float2(-0.24188840,  0.99706507), float2(-0.81409955,  0.91437590),
+    float2( 0.19984126,  0.78641367), float2( 0.14383161, -0.14100790)
+};
+
+float CalcShadowPCF(float4 shadowCoord) {
+    float3 projCoords = shadowCoord.xyz / shadowCoord.w;
+    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+    projCoords.y = 1.0 - projCoords.y; // D3D UV flip
+
+    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0)
+        return 1.0;
+
+    float2 fadeCoord = smoothstep(0.0, 0.05, projCoords.xy)
+                     * smoothstep(0.0, 0.05, 1.0 - projCoords.xy);
+    float edgeFade = fadeCoord.x * fadeCoord.y;
+
+    float texelSize = ShadowTexelSize;
+    float radius = 1.5;
+    float shadow = 0.0;
+
+    for (int i = 0; i < 16; i++) {
+        shadow += shadowMapTex.SampleCmpLevelZero(shadowSampler,
+            projCoords.xy + poissonDisk[i] * texelSize * radius,
+            projCoords.z - ShadowBias);
+    }
+    shadow /= 16.0;
+
+    shadow = lerp(1.0, shadow, ShadowStrength * edgeFade);
+    return shadow;
 }
 
 // ============================================================
@@ -76,6 +122,8 @@ VS_OUTPUT VS_Main(VS_INPUT input)
 
     output.Color    = input.COLOR;
     output.TexCoord = input.TEXCOORD;
+
+    output.ShadowCoord = mul(worldPos, LightVP);
 
     return output;
 }
@@ -106,7 +154,8 @@ float4 PS_Main(VS_OUTPUT input) : SV_Target
 
     // ---- Wrap diffuse: softens shadow terminator ----
     float NdotL     = saturate(dot(N, -lightDir) * 0.85 + 0.15);
-    float3 diffuse  = lightColor * lightIntens * NdotL;
+    float shadow    = CalcShadowPCF(input.ShadowCoord);
+    float3 diffuse  = lightColor * lightIntens * NdotL * shadow;
 
     // ---- Compose: AO on ambient only ----
     float3 lit = baseColor * (ao * ambient + diffuse);

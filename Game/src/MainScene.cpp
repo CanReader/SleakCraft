@@ -37,7 +37,7 @@ bool MainScene::Initialize() {
     Scene::Initialize();
 
     // Create the player camera as a regular scene object
-    auto* cam = new Sleak::Camera("PlayerCamera", {8.0f, 70.0f, 8.0f}, 60, 0.01f, 1500.0f);
+    auto* cam = new Sleak::Camera("PlayerCamera", {8.0f, 70.0f, 8.0f}, 60, 0.1f, 1500.0f);
     cam->SetDirection({0.0f, 0.0f, 1.0f});
     cam->AddComponent<FirstPersonController>();
     cam->AddComponent<Sleak::ColliderComponent>(
@@ -768,12 +768,12 @@ void MainScene::SetupLighting() {
     m_sun->SetDirection(Vector3D(dx, dy, dz));
     m_sun->SetColor(m_sunColorR, m_sunColorG, m_sunColorB);
     m_sun->SetIntensity(m_sunIntensity);
-    m_sun->SetCastShadows(false);
-    m_sun->SetShadowBias(0.002f);
-    m_sun->SetShadowNormalBias(0.03f);
-    m_sun->SetLightSize(6.0f);
-    m_sun->SetShadowFrustumSize(80.0f);
-    m_sun->SetShadowDistance(120.0f);
+    m_sun->SetCastShadows(true);
+    m_sun->SetShadowBias(0.005f);
+    m_sun->SetShadowNormalBias(0.05f);
+    m_sun->SetLightSize(4.0f);
+    m_sun->SetShadowFrustumSize(60.0f);
+    m_sun->SetShadowDistance(80.0f);
     m_sun->SetShadowNearPlane(0.1f);
     m_sun->SetShadowFarPlane(200.0f);
     AddObject(m_sun);

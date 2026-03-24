@@ -16,13 +16,14 @@ struct VS_INPUT
 
 struct VS_OUTPUT
 {
-    float4 Position  : SV_POSITION;
-    float3 WorldPos  : TEXCOORD0;
-    float3 WorldNorm : TEXCOORD1;
-    float3 WorldTan  : TEXCOORD2;
-    float3 WorldBit  : TEXCOORD3;
-    float4 Color     : COLOR;
-    float2 TexCoord  : TEXCOORD4;
+    float4 Position    : SV_POSITION;
+    float3 WorldPos    : TEXCOORD0;
+    float3 WorldNorm   : TEXCOORD1;
+    float3 WorldTan    : TEXCOORD2;
+    float3 WorldBit    : TEXCOORD3;
+    float4 Color       : COLOR;
+    float2 TexCoord    : TEXCOORD4;
+    float4 ShadowCoord : TEXCOORD5;
 };
 
 // --- Constant Buffers ---
@@ -52,10 +53,25 @@ cbuffer LightCB : register(b2) {
     LightData Lights[16];
 };
 
+// Shadow CB at slot 5 (matches PCSSShadowGPUData)
+cbuffer ShadowCB : register(b5) {
+    row_major float4x4 ShadowLightVP;
+    float ShadowBias;
+    float ShadowStrength;
+    float ShadowTexelSize;
+    float ShadowLightSize;
+    uint  PCSSEnabled;
+    uint  ShadowMapEnabled;
+    float _shadowPad0, _shadowPad1;
+};
+
 // --- Textures & Samplers ---
 
 Texture2D diffuseTexture : register(t0);
 SamplerState mainSampler : register(s0);
+
+Texture2D shadowMap : register(t3);
+SamplerComparisonState shadowSampler : register(s3);
 
 // ============================================================
 // ACES film tone mapping (Stephen Hill fit)
@@ -77,6 +93,52 @@ float AttenuateUE4(float distance, float range) {
 }
 
 // ============================================================
+// PCF Shadow with 16-sample Poisson Disk
+// ============================================================
+static const float2 poissonDisk[16] = {
+    float2(-0.94201624, -0.39906216), float2( 0.94558609, -0.76890725),
+    float2(-0.09418410, -0.92938870), float2( 0.34495938,  0.29387760),
+    float2(-0.91588581,  0.45771432), float2(-0.81544232, -0.87912464),
+    float2(-0.38277543,  0.27676845), float2( 0.97484398,  0.75648379),
+    float2( 0.44323325, -0.97511554), float2( 0.53742981, -0.47373420),
+    float2(-0.26496911, -0.41893023), float2( 0.79197514,  0.19090188),
+    float2(-0.24188840,  0.99706507), float2(-0.81409955,  0.91437590),
+    float2( 0.19984126,  0.78641367), float2( 0.14383161, -0.14100790)
+};
+
+float CalcShadowPCF(float4 shadowCoord) {
+    if (ShadowMapEnabled == 0)
+        return 1.0;
+
+    float3 projCoords = shadowCoord.xyz / shadowCoord.w;
+    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+    projCoords.y = 1.0 - projCoords.y; // D3D11 UV flip
+
+    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0)
+        return 1.0;
+
+    // Edge fade to avoid hard cutoffs at shadow map borders
+    float2 fadeCoord = smoothstep(0.0, 0.05, projCoords.xy)
+                     * smoothstep(0.0, 0.05, 1.0 - projCoords.xy);
+    float edgeFade = fadeCoord.x * fadeCoord.y;
+
+    float texelSize = ShadowTexelSize;
+    float radius = 1.5;
+    float shadow = 0.0;
+
+    for (int i = 0; i < 16; i++) {
+        shadow += shadowMap.SampleCmpLevelZero(shadowSampler,
+            projCoords.xy + poissonDisk[i] * texelSize * radius,
+            projCoords.z - ShadowBias);
+    }
+    shadow /= 16.0;
+
+    shadow = lerp(1.0, shadow, ShadowStrength * edgeFade);
+    return shadow;
+}
+
+// ============================================================
 // Vertex Shader
 // ============================================================
 VS_OUTPUT VS_Main(VS_INPUT input)
@@ -94,6 +156,8 @@ VS_OUTPUT VS_Main(VS_INPUT input)
 
     output.Color    = input.COLOR;
     output.TexCoord = input.TEXCOORD;
+
+    output.ShadowCoord = mul(worldPos, ShadowLightVP);
 
     return output;
 }
@@ -122,6 +186,8 @@ float4 PS_Main(VS_OUTPUT input) : SV_Target
     // ---- Accumulate Diffuse ----
     float3 diffuse = float3(0.0, 0.0, 0.0);
 
+    float shadow = CalcShadowPCF(input.ShadowCoord);
+
     for (uint i = 0; i < NumActiveLights; i++) {
         LightData light = Lights[i];
 
@@ -132,7 +198,7 @@ float4 PS_Main(VS_OUTPUT input) : SV_Target
             // Directional — wrap diffuse: softens terminator, side faces get ~15% sun
             L = normalize(-light.Direction);
             float NdotL = saturate(dot(N, L) * 0.85 + 0.15);
-            diffuse += light.Color * light.Intensity * NdotL;
+            diffuse += light.Color * light.Intensity * NdotL * shadow;
             continue;
         }
         else if (light.Type == 1) {

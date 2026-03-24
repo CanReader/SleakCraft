@@ -1025,11 +1025,11 @@ void ChunkManager::FrustumCull() {
         float maxY = minY + BAND_SIZE * Chunk::SIZE;
         float maxZ = minZ + Chunk::SIZE;
 
-        // 3D distance check
+        // Horizontal-only distance check (XZ cylinder) so columns stay visible
+        // when the player is high above the terrain
         float dx = (camX < minX) ? (minX - camX) : (camX > maxX) ? (camX - maxX) : 0.0f;
-        float dy = (camY < minY) ? (minY - camY) : (camY > maxY) ? (camY - maxY) : 0.0f;
         float dz = (camZ < minZ) ? (minZ - camZ) : (camZ > maxZ) ? (camZ - maxZ) : 0.0f;
-        float distSq = dx * dx + dy * dy + dz * dz;
+        float distSq = dx * dx + dz * dz;
 
         if (distSq > m_drawDistSq) {
             col.visible = false;
