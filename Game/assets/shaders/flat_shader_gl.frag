@@ -29,44 +29,52 @@ layout(std140, binding = 2) uniform LightUBO {
 
 layout(binding = 0) uniform sampler2D diffuseTexture;
 
+// ACES film tone mapping (Stephen Hill fit)
+vec3 ACESFilm(vec3 x) {
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3(0.0), vec3(1.0));
+}
+
 void main() {
     vec4 texColor = texture(diffuseTexture, fragUV);
     if (texColor.a < 0.5)
         discard;
-    vec4 baseColor = texColor * fragColor;
+
+    // AO is stored in vertex color. Apply only to ambient.
+    float ao       = fragColor.r;
+    vec3 baseColor = texColor.rgb;
 
     vec3 N = normalize(fragWorldNorm);
 
-    // Ambient - hemisphere
-    vec3 ambientColor = AmbientColor * AmbientIntensity;
-    vec3 groundColor = ambientColor * vec3(0.7, 0.65, 0.6);
-    float hemisphere = N.y * 0.5 + 0.5;
-    vec3 ambient = mix(groundColor, ambientColor, hemisphere);
+    // Hemisphere ambient
+    vec3 skyAmbient    = AmbientColor * AmbientIntensity;
+    vec3 groundAmbient = skyAmbient * vec3(0.55, 0.50, 0.45);
+    float hemisphere   = N.y * 0.5 + 0.5;
+    vec3 ambient       = mix(groundAmbient, skyAmbient, hemisphere);
 
-    // Diffuse - first directional light only (matches Vulkan path)
+    // Wrap diffuse from first directional light
     vec3 diffuse = vec3(0.0);
     for (uint i = 0u; i < NumActiveLights; i++) {
         LightData light = Lights[i];
         if (light.Type != 0u) continue;
 
-        vec3 L = normalize(-light.Direction);
-        float NdotL = max(dot(N, L), 0.0);
-        diffuse = light.Color * light.Intensity * NdotL;
+        vec3 L      = normalize(-light.Direction);
+        float NdotL = clamp(dot(N, L) * 0.85 + 0.15, 0.0, 1.0);
+        diffuse     = light.Color * light.Intensity * NdotL;
         break;
     }
 
-    // Compose (no specular, no shadows)
-    vec3 lit = baseColor.rgb * (ambient + diffuse);
+    // Compose: AO only on ambient
+    vec3 lit = baseColor * (ao * ambient + diffuse);
 
-    // Reinhard tone mapping
-    lit = lit / (lit + vec3(1.0));
+    // ACES tone mapping
+    lit = ACESFilm(lit);
 
-    // Distance fog (Minecraft-style linear fog)
+    // Distance fog
     if (FogEnd > 0.0) {
         float dist = length(fragWorldPos - CameraPos);
         float fogFactor = clamp((FogEnd - dist) / (FogEnd - FogStart), 0.0, 1.0);
         lit = mix(FogColor.rgb, lit, fogFactor);
     }
 
-    outColor = vec4(lit, baseColor.a);
+    outColor = vec4(lit, texColor.a);
 }

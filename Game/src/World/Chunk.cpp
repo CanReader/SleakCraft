@@ -125,7 +125,7 @@ void Chunk::GenerateMeshData() {
     };
 
     auto fastFaceAO = [&](BlockFace face, int x, int y, int z, float ao[4]) {
-        static constexpr float AO_TABLE[] = {0.25f, 0.55f, 0.8f, 1.0f};
+        static constexpr float AO_TABLE[] = {0.40f, 0.68f, 0.88f, 1.0f};
 
         auto isSolid = [&](int dx, int dy, int dz) {
             return solid[dy+1][dz+1][dx+1];

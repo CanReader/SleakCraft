@@ -1,6 +1,8 @@
 // ============================================================
 // Flat Material Shader (DirectX 11 HLSL)
-// Hemisphere ambient + Lambert diffuse, no specular
+// Hemisphere ambient + wrap Lambert diffuse
+// AO applied only to ambient (correct: direct light ignores occlusion)
+// ACES film tone mapping
 // ============================================================
 
 struct VS_INPUT
@@ -56,28 +58,10 @@ Texture2D diffuseTexture : register(t0);
 SamplerState mainSampler : register(s0);
 
 // ============================================================
-// Vertex Shader
+// ACES film tone mapping (Stephen Hill fit)
 // ============================================================
-VS_OUTPUT VS_Main(VS_INPUT input)
-{
-    VS_OUTPUT output;
-
-    output.Position = mul(float4(input.POSITION, 1.0), WVP);
-
-    float4 worldPos = mul(float4(input.POSITION, 1.0), World);
-    output.WorldPos = worldPos.xyz;
-
-    output.WorldNorm = normalize(mul(input.NORMAL,
-                                     (float3x3) World));
-    output.WorldTan = normalize(mul(input.TANGENT.xyz,
-                                    (float3x3) World));
-    output.WorldBit = cross(output.WorldNorm, output.WorldTan)
-                      * input.TANGENT.w;
-
-    output.Color    = input.COLOR;
-    output.TexCoord = input.TEXCOORD;
-
-    return output;
+float3 ACESFilm(float3 x) {
+    return saturate((x * (2.51f * x + 0.03f)) / (x * (2.43f * x + 0.59f) + 0.14f));
 }
 
 // ============================================================
@@ -93,25 +77,49 @@ float AttenuateUE4(float distance, float range) {
 }
 
 // ============================================================
+// Vertex Shader
+// ============================================================
+VS_OUTPUT VS_Main(VS_INPUT input)
+{
+    VS_OUTPUT output;
+
+    output.Position = mul(float4(input.POSITION, 1.0), WVP);
+
+    float4 worldPos = mul(float4(input.POSITION, 1.0), World);
+    output.WorldPos = worldPos.xyz;
+
+    output.WorldNorm = normalize(mul(input.NORMAL,   (float3x3)World));
+    output.WorldTan  = normalize(mul(input.TANGENT.xyz, (float3x3)World));
+    output.WorldBit  = cross(output.WorldNorm, output.WorldTan) * input.TANGENT.w;
+
+    output.Color    = input.COLOR;
+    output.TexCoord = input.TEXCOORD;
+
+    return output;
+}
+
+// ============================================================
 // Pixel Shader
 // ============================================================
 float4 PS_Main(VS_OUTPUT input) : SV_Target
 {
-    float4 texColor = diffuseTexture.Sample(mainSampler,
-                                             input.TexCoord);
+    float4 texColor = diffuseTexture.Sample(mainSampler, input.TexCoord);
     if (texColor.a < 0.5)
         discard;
-    float4 baseColor = texColor * input.Color;
+
+    // AO is stored in vertex color (r=g=b=ao). Apply only to ambient.
+    float ao = input.Color.r;
+    float3 baseColor = texColor.rgb;
 
     float3 N = normalize(input.WorldNorm);
 
-    // ---- Hemisphere Ambient ----
-    float3 ambientColor = AmbientColor * AmbientIntensity;
-    float3 groundColor = ambientColor * float3(0.7, 0.65, 0.6);
-    float hemisphere = N.y * 0.5 + 0.5;
-    float3 ambient = lerp(groundColor, ambientColor, hemisphere);
+    // ---- Hemisphere Ambient (sky = top, ground = bottom) ----
+    float3 skyAmbient    = AmbientColor * AmbientIntensity;
+    float3 groundAmbient = skyAmbient * float3(0.55, 0.50, 0.45);
+    float hemisphere     = N.y * 0.5 + 0.5;
+    float3 ambient       = lerp(groundAmbient, skyAmbient, hemisphere);
 
-    // ---- Accumulate Diffuse (Lambert only, no specular) ----
+    // ---- Accumulate Diffuse ----
     float3 diffuse = float3(0.0, 0.0, 0.0);
 
     for (uint i = 0; i < NumActiveLights; i++) {
@@ -121,33 +129,29 @@ float4 PS_Main(VS_OUTPUT input) : SV_Target
         float attenuation = 1.0;
 
         if (light.Type == 0) {
-            // Directional light
+            // Directional — wrap diffuse: softens terminator, side faces get ~15% sun
             L = normalize(-light.Direction);
+            float NdotL = saturate(dot(N, L) * 0.85 + 0.15);
+            diffuse += light.Color * light.Intensity * NdotL;
+            continue;
         }
         else if (light.Type == 1) {
-            // Point light
             float3 toLight = light.Position - input.WorldPos;
             float dist = length(toLight);
             L = toLight / max(dist, 0.0001);
             attenuation = AttenuateUE4(dist, light.Range);
         }
         else if (light.Type == 2) {
-            // Spot light
             float3 toLight = light.Position - input.WorldPos;
             float dist = length(toLight);
             L = toLight / max(dist, 0.0001);
             attenuation = AttenuateUE4(dist, light.Range);
-
-            float theta = dot(L, normalize(-light.Direction));
-            float epsilon = light.SpotInnerCos
-                          - light.SpotOuterCos;
-            float spotFactor = saturate(
-                (theta - light.SpotOuterCos)
-                / max(epsilon, 0.0001));
+            float theta   = dot(L, normalize(-light.Direction));
+            float epsilon = light.SpotInnerCos - light.SpotOuterCos;
+            float spotFactor = saturate((theta - light.SpotOuterCos) / max(epsilon, 0.0001));
             attenuation *= spotFactor;
         }
         else {
-            // Area light (representative point approx)
             float3 toLight = light.Position - input.WorldPos;
             float dist = length(toLight);
             L = toLight / max(dist, 0.0001);
@@ -155,22 +159,21 @@ float4 PS_Main(VS_OUTPUT input) : SV_Target
         }
 
         float NdotL = max(dot(N, L), 0.0);
-        diffuse += light.Color * light.Intensity
-                 * attenuation * NdotL;
+        diffuse += light.Color * light.Intensity * attenuation * NdotL;
     }
 
-    // ---- Compose (no specular) ----
-    float3 lit = baseColor.rgb * (ambient + diffuse);
+    // ---- Compose: AO on ambient only, diffuse unoccluded ----
+    float3 lit = baseColor * (ao * ambient + diffuse);
 
-    // ---- Tone mapping (Reinhard) ----
-    lit = lit / (lit + float3(1.0, 1.0, 1.0));
+    // ---- ACES tone mapping ----
+    lit = ACESFilm(lit);
 
-    // ---- Distance fog (Minecraft-style) ----
+    // ---- Distance fog ----
     if (FogEnd > 0.0) {
         float dist = length(input.WorldPos - CameraPos);
         float fogFactor = saturate((FogEnd - dist) / (FogEnd - FogStart));
         lit = lerp(FogColor.rgb, lit, fogFactor);
     }
 
-    return float4(lit, baseColor.a);
+    return float4(lit, texColor.a);
 }

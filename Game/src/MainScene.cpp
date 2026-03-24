@@ -2,6 +2,7 @@
 #include "Game.hpp"
 #include "World/TextureAtlas.hpp"
 #include <cstring>
+#include <cmath>
 #include <Core/CommandLine.hpp>
 #include <Core/GameObject.hpp>
 #include <Core/Application.hpp>
@@ -361,7 +362,11 @@ void MainScene::RenderUI() {
     if (!cam || !app) return;
 
     // --- HUD panel (top-left) ---
-    UI::BeginPanel("HUD", 0, 0);
+    UI::BeginPanel("HUD", 0, 0, 0.4f,
+                    UI::PanelFlags_NoTitleBar |
+                    UI::PanelFlags_AutoResize |
+                    UI::PanelFlags_NoMove |
+                    UI::PanelFlags_NoFocusOnAppear);
 
     UI::Text("Selected: %s [%d]", GetBlockName(m_selectedBlock),
              static_cast<int>(m_selectedBlock));
@@ -423,7 +428,7 @@ void MainScene::RenderUI() {
     UI::EndPanel();
 
     // --- Settings panel (below HUD) ---
-    UI::BeginPanel("Settings", 0, 120, 0.4f,
+    UI::BeginPanel("Settings", 0, 180, 0.4f,
                     UI::PanelFlags_NoTitleBar |
                     UI::PanelFlags_AutoResize |
                     UI::PanelFlags_NoMove |
@@ -463,9 +468,50 @@ void MainScene::RenderUI() {
         auto* lm = GetLightManager();
         if (lm) {
             float drawDist = m_chunkManager.GetDrawDistance();
-            lm->SetFogDistances(drawDist * 0.8f, drawDist);
+            lm->SetFogDistances(drawDist * 0.75f, drawDist);
         }
     }
+
+    // ---- Lighting ----
+    UI::Separator();
+    UI::Text("-- Sun --");
+
+    bool sunDirChanged = false;
+    sunDirChanged |= UI::DragFloat("Elevation",  &m_sunElevation, 0.5f, -10.0f,  90.0f);
+    sunDirChanged |= UI::DragFloat("Azimuth",    &m_sunAzimuth,   1.0f,   0.0f, 360.0f);
+    if (sunDirChanged && m_sun) {
+        const float deg2rad = 0.01745329f;
+        float eRad = m_sunElevation * deg2rad;
+        float aRad = m_sunAzimuth   * deg2rad;
+        m_sun->SetDirection(Vector3D(
+            -cosf(eRad) * sinf(aRad),
+            -sinf(eRad),
+            -cosf(eRad) * cosf(aRad)));
+    }
+
+    if (UI::DragFloat("Sun Intensity", &m_sunIntensity, 0.01f, 0.0f, 5.0f) && m_sun)
+        m_sun->SetIntensity(m_sunIntensity);
+
+    bool sunColorChanged = false;
+    sunColorChanged |= UI::DragFloat("Sun R", &m_sunColorR, 0.005f, 0.0f, 1.0f);
+    sunColorChanged |= UI::DragFloat("Sun G", &m_sunColorG, 0.005f, 0.0f, 1.0f);
+    sunColorChanged |= UI::DragFloat("Sun B", &m_sunColorB, 0.005f, 0.0f, 1.0f);
+    if (sunColorChanged && m_sun)
+        m_sun->SetColor(m_sunColorR, m_sunColorG, m_sunColorB);
+
+    UI::Separator();
+    UI::Text("-- Ambient --");
+
+    auto* lm = GetLightManager();
+    if (UI::DragFloat("Amb Intensity", &m_ambientIntensity, 0.005f, 0.0f, 2.0f) && lm)
+        lm->SetAmbientIntensity(m_ambientIntensity);
+
+    bool ambColorChanged = false;
+    ambColorChanged |= UI::DragFloat("Amb R", &m_ambientColorR, 0.005f, 0.0f, 1.0f);
+    ambColorChanged |= UI::DragFloat("Amb G", &m_ambientColorG, 0.005f, 0.0f, 1.0f);
+    ambColorChanged |= UI::DragFloat("Amb B", &m_ambientColorB, 0.005f, 0.0f, 1.0f);
+    if (ambColorChanged && lm)
+        lm->SetAmbientColor(m_ambientColorR, m_ambientColorG, m_ambientColorB);
 
     UI::EndPanel();
 }
@@ -671,29 +717,36 @@ void MainScene::SetupSkybox() {
 }
 
 void MainScene::SetupLighting() {
-    auto* sun = new DirectionalLight("Sun");
-    sun->SetDirection(Vector3D(-0.35f, -0.75f, -0.45f));
-    sun->SetColor(1.0f, 0.95f, 0.85f);
-    sun->SetIntensity(0.85f);
-    sun->SetCastShadows(false);
-    sun->SetShadowBias(0.002f);
-    sun->SetShadowNormalBias(0.03f);
-    sun->SetLightSize(6.0f);
-    sun->SetShadowFrustumSize(80.0f);
-    sun->SetShadowDistance(120.0f);
-    sun->SetShadowNearPlane(0.1f);
-    sun->SetShadowFarPlane(200.0f);
-    AddObject(sun);
+    // Convert elevation/azimuth angles to a world-space direction vector
+    const float deg2rad = 0.01745329f;
+    float eRad = m_sunElevation * deg2rad;
+    float aRad = m_sunAzimuth   * deg2rad;
+    float dx = -cosf(eRad) * sinf(aRad);
+    float dy = -sinf(eRad);
+    float dz = -cosf(eRad) * cosf(aRad);
+
+    m_sun = new DirectionalLight("Sun");
+    m_sun->SetDirection(Vector3D(dx, dy, dz));
+    m_sun->SetColor(m_sunColorR, m_sunColorG, m_sunColorB);
+    m_sun->SetIntensity(m_sunIntensity);
+    m_sun->SetCastShadows(false);
+    m_sun->SetShadowBias(0.002f);
+    m_sun->SetShadowNormalBias(0.03f);
+    m_sun->SetLightSize(6.0f);
+    m_sun->SetShadowFrustumSize(80.0f);
+    m_sun->SetShadowDistance(120.0f);
+    m_sun->SetShadowNearPlane(0.1f);
+    m_sun->SetShadowFarPlane(200.0f);
+    AddObject(m_sun);
 
     auto* lm = GetLightManager();
     if (lm) {
-        lm->SetAmbientColor(0.45f, 0.52f, 0.65f);
-        lm->SetAmbientIntensity(0.2f);
+        lm->SetAmbientColor(m_ambientColorR, m_ambientColorG, m_ambientColorB);
+        lm->SetAmbientIntensity(m_ambientIntensity);
 
-        // Fog — matches sky/clear color, fades at render distance edges
-        lm->SetFogColor(0.6f, 0.75f, 1.0f);
+        lm->SetFogColor(0.62f, 0.78f, 1.0f);
         float drawDist = m_chunkManager.GetDrawDistance();
-        lm->SetFogDistances(drawDist * 0.8f, drawDist);
+        lm->SetFogDistances(drawDist * 0.75f, drawDist);
         lm->SetFogEnabled(true);
     }
 }

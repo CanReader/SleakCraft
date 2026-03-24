@@ -12,7 +12,7 @@
 #include "World/SaveManager.hpp"
 #include "World/BlockEffects.hpp"
 
-namespace Sleak { class Material; }
+namespace Sleak { class Material; class DirectionalLight; }
 
 class MainScene : public Sleak::Scene {
 public:
@@ -94,6 +94,19 @@ private:
     std::string m_mouseScrolledHandlerId;
     std::string m_keyPressedHandlerId;
     std::string m_keyReleasedHandlerId;
+
+    // Lighting state (live-editable via settings panel)
+    Sleak::DirectionalLight* m_sun = nullptr;
+    float m_sunElevation  = 53.0f;   // degrees above horizon (0=sunrise, 90=noon)
+    float m_sunAzimuth    = 38.0f;   // degrees clockwise from north
+    float m_sunIntensity  = 1.4f;
+    float m_sunColorR     = 1.00f;
+    float m_sunColorG     = 0.95f;
+    float m_sunColorB     = 0.85f;
+    float m_ambientIntensity = 0.55f;
+    float m_ambientColorR    = 0.50f;
+    float m_ambientColorG    = 0.58f;
+    float m_ambientColorB    = 0.72f;
 };
 
 #endif

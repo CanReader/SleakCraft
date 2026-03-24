@@ -74,37 +74,48 @@ float CalcShadow(vec4 sc) {
     return mix(1.0, shadow, uShadowStrength);
 }
 
+// ACES film tone mapping (Stephen Hill fit)
+vec3 ACESFilm(vec3 x) {
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3(0.0), vec3(1.0));
+}
+
 void main() {
     vec4 texColor = texture(diffuseTexture, fragUV);
     if (texColor.a < 0.5)
         discard;
-    vec4 baseColor = texColor * fragColor;
 
-    vec3 N = normalize(fragWorldNorm);
-    vec3 lightDir = normalize(uLightDir.xyz);
-    vec3 lightColor = uLightColor.rgb;
-    float lightIntensity = uLightColor.a;
+    // AO is stored in vertex color. Apply only to ambient.
+    float ao       = fragColor.r;
+    vec3 baseColor = texColor.rgb;
 
-    vec3 ambientColor = uAmbient.rgb * uAmbient.a;
-    vec3 groundColor = ambientColor * vec3(0.7, 0.65, 0.6);
-    float hemisphere = N.y * 0.5 + 0.5;
-    vec3 ambient = mix(groundColor, ambientColor, hemisphere);
+    vec3  N            = normalize(fragWorldNorm);
+    vec3  lightDir     = normalize(uLightDir.xyz);
+    vec3  lightColor   = uLightColor.rgb;
+    float lightIntens  = uLightColor.a;
 
-    float NdotL = dot(N, -lightDir);
-    float diffuseTerm = max(NdotL, 0.0);
-    vec3 diffuse = lightColor * lightIntensity * diffuseTerm;
+    // Hemisphere ambient
+    vec3 skyAmbient    = uAmbient.rgb * uAmbient.a;
+    vec3 groundAmbient = skyAmbient * vec3(0.55, 0.50, 0.45);
+    float hemisphere   = N.y * 0.5 + 0.5;
+    vec3 ambient       = mix(groundAmbient, skyAmbient, hemisphere);
 
-    float shadow = CalcShadow(fragShadowCoord);
+    // Wrap diffuse: softens shadow terminator
+    float NdotL    = clamp(dot(N, -lightDir) * 0.85 + 0.15, 0.0, 1.0);
+    float shadow   = CalcShadow(fragShadowCoord);
+    vec3  diffuse  = lightColor * lightIntens * NdotL * shadow;
 
-    vec3 lit = baseColor.rgb * (ambient + shadow * diffuse);
-    lit = lit / (lit + vec3(1.0));
+    // Compose: AO only on ambient
+    vec3 lit = baseColor * (ao * ambient + diffuse);
 
-    // Distance fog (Minecraft-style linear fog)
+    // ACES tone mapping
+    lit = ACESFilm(lit);
+
+    // Distance fog
     if (uFogEnd > 0.0) {
         float dist = length(fragWorldPos - uCameraPos.xyz);
         float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
         lit = mix(uFogColor.rgb, lit, fogFactor);
     }
 
-    outColor = vec4(lit, baseColor.a);
+    outColor = vec4(lit, texColor.a);
 }

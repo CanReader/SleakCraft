@@ -1,7 +1,8 @@
 // ============================================================
 // Flat Material Shader (DirectX 12 HLSL)
-// Hemisphere ambient + Lambert diffuse, no specular
-// Distance fog support via LightCB at register(b2)
+// Hemisphere ambient + wrap Lambert diffuse
+// AO applied only to ambient (correct: direct light ignores occlusion)
+// ACES film tone mapping
 // ============================================================
 
 struct VS_INPUT
@@ -31,26 +32,31 @@ cbuffer TransformCB : register(b0) {
 };
 
 // Light/fog CB — root parameter 3, register(b2)
-// Layout matches ShadowLightUBO from ConstantBuffer.hpp
 cbuffer LightCB : register(b2) {
     float4 LightDir;        // xyz = direction, w = shadow normal bias
     float4 LightColor;      // rgb = color, a = intensity
     float4 Ambient;         // rgb = color, a = intensity
-    float4 CameraPos;       // xyz = position
+    float4 CameraPos;
     row_major float4x4 LightVP;
     float ShadowBias;
     float ShadowStrength;
     float ShadowTexelSize;
     float LightSize;
-    float4 FogColor;        // rgb = color
+    float4 FogColor;
     float FogStart;
     float FogEnd;
     float2 _fogPad;
 };
 
-// Texture + sampler — root parameter 2, register(t0/s0)
 Texture2D diffuseTexture : register(t0);
 SamplerState mainSampler : register(s0);
+
+// ============================================================
+// ACES film tone mapping (Stephen Hill fit)
+// ============================================================
+float3 ACESFilm(float3 x) {
+    return saturate((x * (2.51f * x + 0.03f)) / (x * (2.43f * x + 0.59f) + 0.14f));
+}
 
 // ============================================================
 // Vertex Shader
@@ -64,12 +70,9 @@ VS_OUTPUT VS_Main(VS_INPUT input)
     float4 worldPos = mul(float4(input.POSITION, 1.0), World);
     output.WorldPos = worldPos.xyz;
 
-    output.WorldNorm = normalize(mul(input.NORMAL,
-                                     (float3x3) World));
-    output.WorldTan = normalize(mul(input.TANGENT.xyz,
-                                    (float3x3) World));
-    output.WorldBit = cross(output.WorldNorm, output.WorldTan)
-                      * input.TANGENT.w;
+    output.WorldNorm = normalize(mul(input.NORMAL,      (float3x3)World));
+    output.WorldTan  = normalize(mul(input.TANGENT.xyz, (float3x3)World));
+    output.WorldBit  = cross(output.WorldNorm, output.WorldTan) * input.TANGENT.w;
 
     output.Color    = input.COLOR;
     output.TexCoord = input.TEXCOORD;
@@ -82,39 +85,41 @@ VS_OUTPUT VS_Main(VS_INPUT input)
 // ============================================================
 float4 PS_Main(VS_OUTPUT input) : SV_Target
 {
-    float4 texColor = diffuseTexture.Sample(mainSampler,
-                                             input.TexCoord);
+    float4 texColor = diffuseTexture.Sample(mainSampler, input.TexCoord);
     if (texColor.a < 0.5)
         discard;
-    float4 baseColor = texColor * input.Color;
 
-    float3 N = normalize(input.WorldNorm);
-    float3 lightDir = normalize(LightDir.xyz);
-    float3 lightColor = LightColor.rgb;
-    float lightIntensity = LightColor.a;
+    // AO is stored in vertex color (r=g=b=ao). Apply only to ambient.
+    float ao        = input.Color.r;
+    float3 baseColor = texColor.rgb;
+
+    float3 N            = normalize(input.WorldNorm);
+    float3 lightDir     = normalize(LightDir.xyz);
+    float3 lightColor   = LightColor.rgb;
+    float  lightIntens  = LightColor.a;
 
     // ---- Hemisphere Ambient ----
-    float3 ambientColor = Ambient.rgb * Ambient.a;
-    float3 groundColor = ambientColor * float3(0.7, 0.65, 0.6);
-    float hemisphere = N.y * 0.5 + 0.5;
-    float3 ambient = lerp(groundColor, ambientColor, hemisphere);
+    float3 skyAmbient    = Ambient.rgb * Ambient.a;
+    float3 groundAmbient = skyAmbient * float3(0.55, 0.50, 0.45);
+    float  hemisphere    = N.y * 0.5 + 0.5;
+    float3 ambient       = lerp(groundAmbient, skyAmbient, hemisphere);
 
-    // ---- Diffuse (Lambert, no specular) ----
-    float NdotL = max(dot(N, -lightDir), 0.0);
-    float3 diffuse = lightColor * lightIntensity * NdotL;
+    // ---- Wrap diffuse: softens shadow terminator ----
+    float NdotL     = saturate(dot(N, -lightDir) * 0.85 + 0.15);
+    float3 diffuse  = lightColor * lightIntens * NdotL;
 
-    // ---- Compose (no specular) ----
-    float3 lit = baseColor.rgb * (ambient + diffuse);
+    // ---- Compose: AO on ambient only ----
+    float3 lit = baseColor * (ao * ambient + diffuse);
 
-    // ---- Tone mapping (Reinhard) ----
-    lit = lit / (lit + float3(1.0, 1.0, 1.0));
+    // ---- ACES tone mapping ----
+    lit = ACESFilm(lit);
 
-    // ---- Distance fog (Minecraft-style linear fog) ----
+    // ---- Distance fog ----
     if (FogEnd > 0.0) {
         float dist = length(input.WorldPos - CameraPos.xyz);
         float fogFactor = saturate((FogEnd - dist) / (FogEnd - FogStart));
         lit = lerp(FogColor.rgb, lit, fogFactor);
     }
 
-    return float4(lit, baseColor.a);
+    return float4(lit, texColor.a);
 }
