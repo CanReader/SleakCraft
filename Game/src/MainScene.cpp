@@ -149,6 +149,10 @@ void MainScene::OnMousePressed(const Events::Input::MouseButtonPressedEvent& e) 
     auto* cam = GetActiveCamera();
     if (!cam) return;
 
+    // Only interact with the world when the mouse is captured (FPC active)
+    auto* fpc = cam->GetComponent<FirstPersonController>();
+    if (!fpc || !fpc->IsEnabled()) return;
+
     auto pos = cam->GetPosition();
     auto dir = cam->GetDirection();
     auto hit = m_chunkManager.VoxelRaycast(pos, dir, 6.0f);
@@ -361,6 +365,9 @@ void MainScene::RenderUI() {
     auto* app = Application::GetInstance();
     if (!cam || !app) return;
 
+    auto* fpc = cam->GetComponent<FirstPersonController>();
+    bool inGameMode = fpc && fpc->IsEnabled();
+
     // --- HUD panel (top-left) ---
     UI::BeginPanel("HUD", 0, 0, 0.4f,
                     UI::PanelFlags_NoTitleBar |
@@ -428,11 +435,12 @@ void MainScene::RenderUI() {
     UI::EndPanel();
 
     // --- Settings panel (below HUD) ---
-    UI::BeginPanel("Settings", 0, 180, 0.4f,
-                    UI::PanelFlags_NoTitleBar |
-                    UI::PanelFlags_AutoResize |
-                    UI::PanelFlags_NoMove |
-                    UI::PanelFlags_NoFocusOnAppear);
+    int settingsFlags = UI::PanelFlags_NoTitleBar |
+                        UI::PanelFlags_AutoResize |
+                        UI::PanelFlags_NoMove |
+                        UI::PanelFlags_NoFocusOnAppear;
+    if (inGameMode) settingsFlags |= UI::PanelFlags_NoInput;
+    UI::BeginPanel("Settings", 0, 180, 0.4f, settingsFlags);
 
     UI::Checkbox("Show Crosshair", &m_showCrosshair);
 
