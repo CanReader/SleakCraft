@@ -67,6 +67,10 @@ public:
     void SetNeedsMeshRebuild(bool v) { m_needsRebuild = v; }
     bool NeedsGeneration() const { return m_needsGeneration; }
     void SetNeedsGeneration(bool v) { m_needsGeneration = v; }
+
+    int GetActiveIndex() const { return m_activeIndex; }
+    void SetActiveIndex(int idx) { m_activeIndex = idx; }
+
     ChunkMeshData& GetPendingMeshData() { return m_pendingMesh; }
 
 private:
@@ -76,9 +80,6 @@ private:
 
     bool IsBlockSolidAt(int x, int y, int z) const;
     bool IsBlockOpaqueAt(int x, int y, int z) const;
-    void ComputeFaceAO(BlockFace face, int x, int y, int z, float ao[4]) const;
-    void AddFace(BlockFace face, int x, int y, int z, BlockType type,
-                 Sleak::VertexGroup& vertices, Sleak::IndexGroup& indices);
 
     uint8_t m_blocks[VOLUME];
     Chunk* m_neighbors[6] = {};
@@ -92,6 +93,7 @@ private:
     bool m_dirty = false;
     bool m_needsRebuild = false;
     bool m_needsGeneration = true;
+    int m_activeIndex = -1;
 };
 
 #endif

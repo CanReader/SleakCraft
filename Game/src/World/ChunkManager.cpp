@@ -13,9 +13,11 @@ ChunkManager::~ChunkManager() {
     StopWorkers();
     // MeshHandle GPU buffers are released automatically via RefPtr
     m_columns.clear();
-    for (auto& [coord, chunk] : m_chunks)
-        delete chunk;
-    m_chunks.clear();
+    for (Chunk* chunk : m_activeChunks) {
+        if (chunk) delete chunk;
+    }
+    m_activeChunks.clear();
+    m_chunkGrid.clear();
 }
 
 void ChunkManager::SetMultithreaded(bool enabled) {
@@ -61,23 +63,35 @@ void ChunkManager::StopWorkers() {
 }
 
 void ChunkManager::WorkerThread() {
+    std::vector<Chunk*> localBatch;
+    localBatch.reserve(8);
     while (true) {
-        Chunk* chunk = nullptr;
+        localBatch.clear();
         {
             std::unique_lock<std::mutex> lock(m_taskMutex);
             m_taskCV.wait(lock, [this] { return m_shutdown.load() || !m_taskQueue.empty(); });
             if (m_shutdown.load() && m_taskQueue.empty()) return;
-            chunk = m_taskQueue.back();
-            m_taskQueue.pop_back();
+
+            // Steal up to 8 chunks at once
+            for (int i = 0; i < 8 && !m_taskQueue.empty(); ++i) {
+                localBatch.push_back(m_taskQueue.back());
+                m_taskQueue.pop_back();
+            }
         }
-        if (chunk->NeedsGeneration()) {
-            m_generator.Generate(chunk);
-            chunk->SetNeedsGeneration(false);
+
+        for (Chunk* chunk : localBatch) {
+            if (chunk->NeedsGeneration()) {
+                m_generator.Generate(chunk);
+                chunk->SetNeedsGeneration(false);
+            }
+            chunk->GenerateMeshData();
         }
-        chunk->GenerateMeshData();
+
         {
             std::lock_guard<std::mutex> lock(m_readyMutex);
-            m_readyQueue.push_back(chunk);
+            for (Chunk* chunk : localBatch) {
+                m_readyQueue.push_back(chunk);
+            }
         }
     }
 }
@@ -87,18 +101,65 @@ void ChunkManager::Initialize(Sleak::SceneBase* scene, const Sleak::RefPtr<Sleak
     m_material = material;
     m_drawDistance = static_cast<float>(m_renderDistance * Chunk::SIZE);
     m_drawDistSq = m_drawDistance * m_drawDistance;
+    BuildLoadSpiral();
+}
+
+int ChunkManager::GetGridIndex(int cx, int cy, int cz) const {
+    if (cy < WorldGenerator::MIN_CHUNK_Y || cy > WorldGenerator::MAX_CHUNK_Y) return -1;
+    int px = (cx % m_gridWidth); if (px < 0) px += m_gridWidth;
+    int py = cy - WorldGenerator::MIN_CHUNK_Y;
+    int pz = (cz % m_gridWidth); if (pz < 0) pz += m_gridWidth;
+    return px + pz * m_gridWidth + py * m_gridWidth * m_gridWidth;
+}
+
+void ChunkManager::BuildLoadSpiral() {
+    m_gridWidth = (m_renderDistance + 2) * 2;
+    int totalSize = m_gridWidth * m_gridWidth * m_gridHeight;
+    m_chunkGrid.assign(totalSize, nullptr);
+
+    for (Chunk* chunk : m_activeChunks) {
+        if (!chunk) continue;
+        int idx = GetGridIndex(chunk->GetChunkX(), chunk->GetChunkY(), chunk->GetChunkZ());
+        if (idx >= 0) m_chunkGrid[idx] = chunk;
+    }
+
+    m_loadSpiral.clear();
+    for (int x = -m_renderDistance; x <= m_renderDistance; ++x) {
+        for (int z = -m_renderDistance; z <= m_renderDistance; ++z) {
+            // Include corners for squared render distance, or make it circular:
+            // if (x*x + z*z <= m_renderDistance * m_renderDistance)
+            m_loadSpiral.push_back({x, z});
+        }
+    }
+
+    std::sort(m_loadSpiral.begin(), m_loadSpiral.end(), [](const std::pair<int, int>& a, const std::pair<int, int>& b) {
+        return (a.first * a.first + a.second * a.second) < (b.first * b.first + b.second * b.second);
+    });
+}
+
+int ChunkManager::GetCachedColumnMaxCy(int cx, int cz) {
+    uint64_t key = PackColumnXZ(cx, cz);
+    auto it = m_columnMaxCyCache.find(key);
+    if (it != m_columnMaxCyCache.end()) return it->second;
+    int maxCy = m_generator.GetMaxFilledChunkY(cx, cz);
+    m_columnMaxCyCache.emplace(key, maxCy);
+    return maxCy;
 }
 
 Chunk* ChunkManager::GetChunk(int cx, int cy, int cz) {
-    ChunkCoord coord{cx, cy, cz};
-    auto it = m_chunks.find(coord);
-    return it != m_chunks.end() ? it->second : nullptr;
+    int idx = GetGridIndex(cx, cy, cz);
+    if (idx < 0) return nullptr;
+    Chunk* ch = m_chunkGrid[idx];
+    if (ch && ch->GetChunkX() == cx && ch->GetChunkY() == cy && ch->GetChunkZ() == cz) return ch;
+    return nullptr;
 }
 
 const Chunk* ChunkManager::GetChunk(int cx, int cy, int cz) const {
-    ChunkCoord coord{cx, cy, cz};
-    auto it = m_chunks.find(coord);
-    return it != m_chunks.end() ? it->second : nullptr;
+    int idx = GetGridIndex(cx, cy, cz);
+    if (idx < 0) return nullptr;
+    Chunk* ch = m_chunkGrid[idx];
+    if (ch && ch->GetChunkX() == cx && ch->GetChunkY() == cy && ch->GetChunkZ() == cz) return ch;
+    return nullptr;
 }
 
 static int floorDiv(int a, int b) {
@@ -136,7 +197,12 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
         if (cy < WorldGenerator::MIN_CHUNK_Y || cy > WorldGenerator::MAX_CHUNK_Y)
             return false;
         chunk = new Chunk(cx, cy, cz);
-        m_chunks[{cx, cy, cz}] = chunk;
+        int idx = GetGridIndex(cx, cy, cz);
+        if (idx >= 0) {
+            m_chunkGrid[idx] = chunk;
+            chunk->SetActiveIndex(static_cast<int>(m_activeChunks.size()));
+            m_activeChunks.push_back(chunk);
+        }
         chunk->SetNeedsGeneration(false);
         LinkNeighbors({cx, cy, cz}, chunk);
     }
@@ -480,6 +546,23 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
     m_columns[key] = {std::move(mesh), true};
 }
 
+void ChunkManager::ForceUnloadChunk(Chunk* chunk) {
+    if (!chunk) return;
+    int idx = GetGridIndex(chunk->GetChunkX(), chunk->GetChunkY(), chunk->GetChunkZ());
+    if (idx >= 0 && m_chunkGrid[idx] == chunk) {
+        m_chunkGrid[idx] = nullptr;
+    }
+    
+    int activeIdx = chunk->GetActiveIndex();
+    if (activeIdx >= 0 && activeIdx < static_cast<int>(m_activeChunks.size())) {
+        Chunk* last = m_activeChunks.back();
+        m_activeChunks[activeIdx] = last;
+        if (last) last->SetActiveIndex(activeIdx);
+        m_activeChunks.pop_back();
+    }
+    chunk->SetActiveIndex(-1);
+}
+
 void ChunkManager::Update(float playerX, float playerY, float playerZ) {
     int centerX = static_cast<int>(std::floor(playerX / Chunk::SIZE));
     int centerY = static_cast<int>(std::floor(playerY / Chunk::SIZE));
@@ -487,58 +570,67 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
     m_lastCenterY = centerY;
 
     if (centerX != m_lastCenterX || centerZ != m_lastCenterZ) {
+        // Save previous center before updating, so we can compute exiting slabs.
+        int prevCX = (m_lastCenterX == INT_MAX) ? centerX : m_lastCenterX;
+        int prevCZ = (m_lastCenterZ == INT_MAX) ? centerZ : m_lastCenterZ;
         m_lastCenterX = centerX;
         m_lastCenterZ = centerZ;
 
-        // Queue out-of-range chunks for gradual unloading
-        for (auto& [coord, chunk] : m_chunks) {
-            if (std::abs(coord.x - centerX) > m_renderDistance ||
-                std::abs(coord.z - centerZ) > m_renderDistance ||
-                coord.y < WorldGenerator::MIN_CHUNK_Y || coord.y > WorldGenerator::MAX_CHUNK_Y) {
-                m_pendingUnload.push_back(coord);
+        // Queue out-of-range chunks for gradual unloading.
+        // When the player moves by a small delta we only need to check the slabs
+        // that just left the render range — O(rd * height) instead of O(N).
+        // Fall back to a full scan on large teleports.
+        int dX = std::abs(centerX - prevCX);
+        int dZ = std::abs(centerZ - prevCZ);
+        bool largeTeleport = (dX > m_renderDistance * 2 || dZ > m_renderDistance * 2);
+        if (largeTeleport) {
+            for (Chunk* chunk : m_activeChunks) {
+                if (!chunk) continue;
+                int cx = chunk->GetChunkX(), cy = chunk->GetChunkY(), cz = chunk->GetChunkZ();
+                if (std::abs(cx - centerX) > m_renderDistance ||
+                    std::abs(cz - centerZ) > m_renderDistance)
+                    m_pendingUnload.push_back({cx, cy, cz});
             }
-        }
-
-        m_pendingLoad.erase(
-            std::remove_if(m_pendingLoad.begin(), m_pendingLoad.end(),
-                [&](const ChunkCoord& c) {
-                    bool out = std::abs(c.x - centerX) > m_renderDistance ||
-                               std::abs(c.z - centerZ) > m_renderDistance;
-                    if (out) m_pendingSet.erase(c);
-                    return out;
-                }),
-            m_pendingLoad.end());
-
-        // Queue new chunks — iterate XZ then Y column
-        for (int cx = centerX - m_renderDistance; cx <= centerX + m_renderDistance; ++cx) {
-            for (int cz = centerZ - m_renderDistance; cz <= centerZ + m_renderDistance; ++cz) {
-                for (int cy = WorldGenerator::MIN_CHUNK_Y; cy <= WorldGenerator::MAX_CHUNK_Y; ++cy) {
-                    ChunkCoord coord{cx, cy, cz};
-                    if (m_chunks.count(coord) || m_pendingSet.count(coord)) continue;
-                    m_pendingLoad.push_back(coord);
-                    m_pendingSet.insert(coord);
-                }
-            }
-        }
-
-        // Partial sort: only guarantee the nearest chunks are at the back
-        // (where pop_back reads from). Uses O(n) nth_element instead of
-        // O(n log n) full sort to avoid frame-time spikes on boundary crossings.
-        auto farFirst = [&](const ChunkCoord& a, const ChunkCoord& b) {
-            int daXZ = (a.x - centerX) * (a.x - centerX) + (a.z - centerZ) * (a.z - centerZ);
-            int dbXZ = (b.x - centerX) * (b.x - centerX) + (b.z - centerZ) * (b.z - centerZ);
-            if (daXZ != dbXZ) return daXZ > dbXZ;
-            int daY = std::abs(a.y - centerY);
-            int dbY = std::abs(b.y - centerY);
-            return daY > dbY;
-        };
-        int k = std::min(m_chunksPerFrame * 4, static_cast<int>(m_pendingLoad.size()));
-        if (k > 0 && k < static_cast<int>(m_pendingLoad.size())) {
-            auto pivot = m_pendingLoad.end() - k;
-            std::nth_element(m_pendingLoad.begin(), pivot, m_pendingLoad.end(), farFirst);
-            std::sort(pivot, m_pendingLoad.end(), farFirst);
         } else {
-            std::sort(m_pendingLoad.begin(), m_pendingLoad.end(), farFirst);
+            // Unload X-axis slabs that just left view
+            auto unloadSlabX = [&](int cx) {
+                for (int cz2 = prevCZ - m_renderDistance; cz2 <= prevCZ + m_renderDistance; ++cz2)
+                    for (int cy = WorldGenerator::MIN_CHUNK_Y; cy <= WorldGenerator::MAX_CHUNK_Y; ++cy)
+                        if (GetChunk(cx, cy, cz2)) m_pendingUnload.push_back({cx, cy, cz2});
+            };
+            if (centerX > prevCX)
+                for (int x = prevCX - m_renderDistance; x < centerX - m_renderDistance; ++x) unloadSlabX(x);
+            else if (centerX < prevCX)
+                for (int x = centerX + m_renderDistance + 1; x <= prevCX + m_renderDistance; ++x) unloadSlabX(x);
+
+            // Unload Z-axis slabs that just left view
+            auto unloadSlabZ = [&](int cz2) {
+                for (int cx = centerX - m_renderDistance; cx <= centerX + m_renderDistance; ++cx)
+                    for (int cy = WorldGenerator::MIN_CHUNK_Y; cy <= WorldGenerator::MAX_CHUNK_Y; ++cy)
+                        if (GetChunk(cx, cy, cz2)) m_pendingUnload.push_back({cx, cy, cz2});
+            };
+            if (centerZ > prevCZ)
+                for (int z = prevCZ - m_renderDistance; z < centerZ - m_renderDistance; ++z) unloadSlabZ(z);
+            else if (centerZ < prevCZ)
+                for (int z = centerZ + m_renderDistance + 1; z <= prevCZ + m_renderDistance; ++z) unloadSlabZ(z);
+        }
+
+        m_pendingLoad.clear();
+        m_pendingLoad.reserve(m_loadSpiral.size() * (WorldGenerator::MAX_CHUNK_Y - WorldGenerator::MIN_CHUNK_Y + 1));
+
+        // Spiral generates coordinates from closest to furthest.
+        // We push them in reverse so the pop_back() takes the closest chunks first!
+        // GetCachedColumnMaxCy() computes GetMaxFilledChunkY once per XZ column and caches
+        // the result permanently (terrain is deterministic), replacing O(8) IsChunkAboveTerrain
+        // calls (each with 9×6 FBM evaluations) with a single cached lookup per column.
+        for (auto it = m_loadSpiral.rbegin(); it != m_loadSpiral.rend(); ++it) {
+            int cx = centerX + it->first;
+            int cz = centerZ + it->second;
+            int maxCy = GetCachedColumnMaxCy(cx, cz);
+            for (int cy = WorldGenerator::MIN_CHUNK_Y; cy <= maxCy; ++cy) {
+                if (!GetChunk(cx, cy, cz))
+                    m_pendingLoad.push_back({cx, cy, cz});
+            }
         }
     }
 
@@ -550,17 +642,16 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             ChunkCoord coord = m_pendingUnload.back();
             m_pendingUnload.pop_back();
 
-            auto it = m_chunks.find(coord);
-            if (it == m_chunks.end()) continue;
+            Chunk* chunk = GetChunk(coord.x, coord.y, coord.z);
+            if (!chunk) continue;
 
-            Chunk* chunk = it->second;
             if (chunk->IsInFlight() || IsNeighborOfInFlight(coord))
                 continue;
 
             columnsToCheck.insert({coord.x, ChunkYToBand(coord.y), coord.z});
             UnlinkNeighbors(coord, chunk);
+            ForceUnloadChunk(chunk);
             delete chunk;
-            m_chunks.erase(it);
             ++unloaded;
         }
 
@@ -647,17 +738,22 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         while (dispatched < dispatchBudget && !m_pendingLoad.empty()) {
             ChunkCoord coord = m_pendingLoad.back();
             m_pendingLoad.pop_back();
-            m_pendingSet.erase(coord);
 
-            if (m_chunks.count(coord)) continue;
-
-            // Skip chunks guaranteed to be entirely above terrain
-            // (don't count against budget — this is a cheap check)
-            if (m_generator.IsChunkAboveTerrain(coord.x, coord.y, coord.z))
-                continue;
+            if (GetChunk(coord.x, coord.y, coord.z)) continue;
 
             auto* chunk = new Chunk(coord.x, coord.y, coord.z);
-            m_chunks[coord] = chunk;
+            int idx = GetGridIndex(coord.x, coord.y, coord.z);
+            if (idx >= 0) {
+                if (m_chunkGrid[idx] != nullptr) {
+                    Chunk* stale = m_chunkGrid[idx];
+                    UnlinkNeighbors({stale->GetChunkX(), stale->GetChunkY(), stale->GetChunkZ()}, stale);
+                    ForceUnloadChunk(stale);
+                    delete stale;
+                }
+                m_chunkGrid[idx] = chunk;
+                chunk->SetActiveIndex(static_cast<int>(m_activeChunks.size()));
+                m_activeChunks.push_back(chunk);
+            }
             int64_t key = PackCoord(coord.x, coord.y, coord.z);
             auto savedIt = m_savedBlockData.find(key);
             if (savedIt != m_savedBlockData.end()) {
@@ -671,13 +767,15 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         }
 
         if (!batch.empty()) {
-            std::lock_guard<std::mutex> lock(m_taskMutex);
-            for (auto* chunk : batch) {
-                chunk->SetInFlight(true);
-                m_taskQueue.push_back(chunk);
+            {
+                std::lock_guard<std::mutex> lock(m_taskMutex);
+                for (auto* chunk : batch) {
+                    chunk->SetInFlight(true);
+                    m_taskQueue.push_back(chunk);
+                }
             }
+            m_taskCV.notify_all();
         }
-        m_taskCV.notify_all();
 
         // Phase 3: Dispatch remesh requests to workers
         // Uses m_chunksNeedingRemesh (O(k)) instead of scanning all chunks (O(n))
@@ -686,12 +784,11 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             int remeshBudget = m_chunksPerFrame;
             auto it = m_chunksNeedingRemesh.begin();
             while (it != m_chunksNeedingRemesh.end() && remeshBudget > 0) {
-                auto chunkIt = m_chunks.find(*it);
-                if (chunkIt == m_chunks.end()) {
+                Chunk* ch = GetChunk(it->x, it->y, it->z);
+                if (!ch) {
                     it = m_chunksNeedingRemesh.erase(it);
                     continue;
                 }
-                Chunk* ch = chunkIt->second;
                 if (!ch->NeedsMeshRebuild()) {
                     it = m_chunksNeedingRemesh.erase(it);
                     continue;
@@ -756,15 +853,22 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         while (built < m_chunksPerFrame && !m_pendingLoad.empty()) {
             ChunkCoord coord = m_pendingLoad.back();
             m_pendingLoad.pop_back();
-            m_pendingSet.erase(coord);
 
-            if (m_chunks.count(coord)) continue;
-
-            if (m_generator.IsChunkAboveTerrain(coord.x, coord.y, coord.z))
-                continue;
+            if (GetChunk(coord.x, coord.y, coord.z)) continue;
 
             auto* chunk = new Chunk(coord.x, coord.y, coord.z);
-            m_chunks[coord] = chunk;
+            int idx = GetGridIndex(coord.x, coord.y, coord.z);
+            if (idx >= 0) {
+                if (m_chunkGrid[idx] != nullptr) {
+                    Chunk* stale = m_chunkGrid[idx];
+                    UnlinkNeighbors({stale->GetChunkX(), stale->GetChunkY(), stale->GetChunkZ()}, stale);
+                    ForceUnloadChunk(stale);
+                    delete stale;
+                }
+                m_chunkGrid[idx] = chunk;
+                chunk->SetActiveIndex(static_cast<int>(m_activeChunks.size()));
+                m_activeChunks.push_back(chunk);
+            }
             int64_t key = PackCoord(coord.x, coord.y, coord.z);
             auto savedIt = m_savedBlockData.find(key);
             if (savedIt != m_savedBlockData.end()) {
@@ -781,12 +885,18 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         }
 
         int rebuilt = 0;
-        for (auto& [c, ch] : m_chunks) {
-            if (rebuilt >= m_chunksPerFrame) break;
-            if (ch->NeedsMeshRebuild() && !ch->NeedsGeneration()) {
+        {
+            auto it = m_chunksNeedingRemesh.begin();
+            while (it != m_chunksNeedingRemesh.end() && rebuilt < m_chunksPerFrame) {
+                Chunk* ch = GetChunk(it->x, it->y, it->z);
+                if (!ch || !ch->NeedsMeshRebuild() || ch->NeedsGeneration()) {
+                    it = m_chunksNeedingRemesh.erase(it);
+                    continue;
+                }
                 ch->SetNeedsMeshRebuild(false);
                 ch->GenerateMeshData();
-                syncDirtyColumns.insert({c.x, ChunkYToBand(c.y), c.z});
+                syncDirtyColumns.insert({ch->GetChunkX(), ChunkYToBand(ch->GetChunkY()), ch->GetChunkZ()});
+                it = m_chunksNeedingRemesh.erase(it);
                 ++rebuilt;
             }
         }
@@ -806,13 +916,21 @@ void ChunkManager::FlushPendingChunks() {
         m_pendingLoad.pop_back();
         m_pendingSet.erase(coord);
 
-        if (m_chunks.count(coord)) continue;
-
-        if (m_generator.IsChunkAboveTerrain(coord.x, coord.y, coord.z))
-            continue;
+        if (GetChunk(coord.x, coord.y, coord.z)) continue;
 
         auto* chunk = new Chunk(coord.x, coord.y, coord.z);
-        m_chunks[coord] = chunk;
+        int idx = GetGridIndex(coord.x, coord.y, coord.z);
+        if (idx >= 0) {
+            if (m_chunkGrid[idx] != nullptr) {
+                Chunk* stale = m_chunkGrid[idx];
+                UnlinkNeighbors({stale->GetChunkX(), stale->GetChunkY(), stale->GetChunkZ()}, stale);
+                ForceUnloadChunk(stale);
+                delete stale;
+            }
+            m_chunkGrid[idx] = chunk;
+            chunk->SetActiveIndex(static_cast<int>(m_activeChunks.size()));
+            m_activeChunks.push_back(chunk);
+        }
         int64_t key = PackCoord(coord.x, coord.y, coord.z);
         auto savedIt = m_savedBlockData.find(key);
         if (savedIt != m_savedBlockData.end()) {
@@ -850,17 +968,17 @@ int64_t ChunkManager::PackCoord(int32_t cx, int32_t cy, int32_t cz) {
 
 std::vector<ChunkManager::DirtyChunkInfo> ChunkManager::GetDirtyChunks() const {
     std::vector<DirtyChunkInfo> result;
-    for (const auto& [coord, chunk] : m_chunks) {
-        if (chunk->IsDirty()) {
-            result.push_back({coord.x, coord.y, coord.z, chunk->GetBlockData()});
+    for (Chunk* chunk : m_activeChunks) {
+        if (chunk && chunk->IsDirty()) {
+            result.push_back({chunk->GetChunkX(), chunk->GetChunkY(), chunk->GetChunkZ(), chunk->GetBlockData()});
         }
     }
     return result;
 }
 
 void ChunkManager::ClearDirtyFlags() {
-    for (auto& [coord, chunk] : m_chunks)
-        chunk->SetDirty(false);
+    for (Chunk* chunk : m_activeChunks)
+        if (chunk) chunk->SetDirty(false);
 }
 
 void ChunkManager::LoadChunkData(const std::unordered_map<int64_t, std::array<uint8_t, 4096>>& data) {
@@ -876,10 +994,11 @@ void ChunkManager::ForceReload() {
     m_chunksNeedingRemesh.clear();
 
     // Remove all chunks
-    for (auto& [coord, chunk] : m_chunks) {
-        delete chunk;
+    for (Chunk* chunk : m_activeChunks) {
+        if (chunk) delete chunk;
     }
-    m_chunks.clear();
+    m_activeChunks.clear();
+    m_chunkGrid.assign(m_chunkGrid.size(), nullptr);
     m_pendingLoad.clear();
     m_pendingSet.clear();
     m_lastCenterX = INT_MAX;

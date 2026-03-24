@@ -66,6 +66,7 @@ public:
         m_drawDistance = static_cast<float>(chunks * Chunk::SIZE);
         m_drawDistSq = m_drawDistance * m_drawDistance;
         m_lastCenterX = INT_MAX;
+        BuildLoadSpiral();
     }
     int GetRenderDistance() const { return m_renderDistance; }
 
@@ -137,8 +138,17 @@ private:
     std::unordered_set<ChunkCoord, ChunkCoordHash> m_chunksNeedingRemesh;
 
     void FrustumCull();
+    void BuildLoadSpiral();
+    void ForceUnloadChunk(Chunk* chunk);
 
-    std::unordered_map<ChunkCoord, Chunk*, ChunkCoordHash> m_chunks;
+    std::vector<Chunk*> m_chunkGrid;
+    int m_gridWidth = 1;
+    int m_gridHeight = 8;
+    int GetGridIndex(int cx, int cy, int cz) const;
+
+    std::vector<Chunk*> m_activeChunks;
+    std::vector<std::pair<int, int>> m_loadSpiral;
+
     std::vector<ChunkCoord> m_pendingLoad;
     std::unordered_set<ChunkCoord, ChunkCoordHash> m_pendingSet;
     std::vector<ChunkCoord> m_pendingUnload;
@@ -167,6 +177,15 @@ private:
     // Saved block data for chunk restoration
     std::unordered_map<int64_t, std::array<uint8_t, 4096>> m_savedBlockData;
     static int64_t PackCoord(int32_t cx, int32_t cy, int32_t cz);
+
+    // Per-column max filled chunk-Y cache. Terrain is deterministic so entries
+    // never go stale. Eliminates repeated noise evaluation for the same column.
+    std::unordered_map<uint64_t, int> m_columnMaxCyCache;
+    int GetCachedColumnMaxCy(int cx, int cz);
+    static uint64_t PackColumnXZ(int cx, int cz) {
+        return (static_cast<uint64_t>(static_cast<uint32_t>(cx)) << 32)
+             |  static_cast<uint64_t>(static_cast<uint32_t>(cz));
+    }
 };
 
 #endif
