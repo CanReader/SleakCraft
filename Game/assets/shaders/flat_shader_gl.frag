@@ -60,6 +60,11 @@ float CalcShadowPCF(vec4 sc) {
 
     vec3 projCoords = sc.xyz / sc.w;
     projCoords.xy = projCoords.xy * 0.5 + 0.5;
+    // LightVP uses [0,1] depth range (D3D/Vulkan convention).
+    // OpenGL viewport transform maps NDC Z from [-1,1] to [0,1] depth,
+    // so the shadow map stores depth = (z_clip/w)*0.5 + 0.5.
+    // Match by applying the same remap to our comparison reference.
+    projCoords.z = projCoords.z * 0.5 + 0.5;
 
     if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
         projCoords.y < 0.0 || projCoords.y > 1.0)
@@ -115,9 +120,12 @@ void main() {
         LightData light = Lights[i];
         if (light.Type != 0u) continue;
 
-        vec3 L      = normalize(-light.Direction);
-        float NdotL = clamp(dot(N, L) * 0.85 + 0.15, 0.0, 1.0);
-        diffuse     = light.Color * light.Intensity * NdotL * shadow;
+        vec3 L         = normalize(-light.Direction);
+        float rawNdotL = dot(N, L);
+        float NdotL    = clamp(rawNdotL * 0.85 + 0.15, 0.0, 1.0);
+        // Fade shadow to 0 for surfaces facing away from light
+        float fadedShadow = shadow * smoothstep(0.0, 0.15, rawNdotL);
+        diffuse     = light.Color * light.Intensity * NdotL * fadedShadow;
         break;
     }
 

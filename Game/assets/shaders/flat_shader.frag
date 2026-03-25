@@ -100,8 +100,12 @@ void main() {
     vec3 ambient       = mix(groundAmbient, skyAmbient, hemisphere);
 
     // Wrap diffuse: softens shadow terminator
-    float NdotL    = clamp(dot(N, -lightDir) * 0.85 + 0.15, 0.0, 1.0);
+    float rawNdotL = dot(N, -lightDir);
+    float NdotL    = clamp(rawNdotL * 0.85 + 0.15, 0.0, 1.0);
     float shadow   = CalcShadow(fragShadowCoord);
+    // Fade shadow to 0 for surfaces facing away from light — prevents
+    // light leaking through thin geometry in caves/enclosed spaces
+    shadow *= smoothstep(0.0, 0.15, rawNdotL);
     vec3  diffuse  = lightColor * lightIntens * NdotL * shadow;
 
     // Compose: AO only on ambient

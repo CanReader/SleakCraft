@@ -153,8 +153,11 @@ float4 PS_Main(VS_OUTPUT input) : SV_Target
     float3 ambient       = lerp(groundAmbient, skyAmbient, hemisphere);
 
     // ---- Wrap diffuse: softens shadow terminator ----
-    float NdotL     = saturate(dot(N, -lightDir) * 0.85 + 0.15);
+    float rawNdotL  = dot(N, -lightDir);
+    float NdotL     = saturate(rawNdotL * 0.85 + 0.15);
     float shadow    = CalcShadowPCF(input.ShadowCoord);
+    // Fade shadow to 0 for surfaces facing away from light
+    shadow *= smoothstep(0.0, 0.15, rawNdotL);
     float3 diffuse  = lightColor * lightIntens * NdotL * shadow;
 
     // ---- Compose: AO on ambient only ----

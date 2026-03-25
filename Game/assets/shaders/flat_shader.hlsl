@@ -197,8 +197,11 @@ float4 PS_Main(VS_OUTPUT input) : SV_Target
         if (light.Type == 0) {
             // Directional — wrap diffuse: softens terminator, side faces get ~15% sun
             L = normalize(-light.Direction);
-            float NdotL = saturate(dot(N, L) * 0.85 + 0.15);
-            diffuse += light.Color * light.Intensity * NdotL * shadow;
+            float rawNdotL = dot(N, L);
+            float NdotL = saturate(rawNdotL * 0.85 + 0.15);
+            // Fade shadow to 0 for surfaces facing away from light
+            float fadedShadow = shadow * smoothstep(0.0, 0.15, rawNdotL);
+            diffuse += light.Color * light.Intensity * NdotL * fadedShadow;
             continue;
         }
         else if (light.Type == 1) {

@@ -769,7 +769,7 @@ void MainScene::SetupLighting() {
     m_sun->SetColor(m_sunColorR, m_sunColorG, m_sunColorB);
     m_sun->SetIntensity(m_sunIntensity);
     m_sun->SetCastShadows(true);
-    m_sun->SetShadowBias(0.005f);
+    m_sun->SetShadowBias(0.0005f);
     m_sun->SetShadowNormalBias(0.05f);
     m_sun->SetLightSize(4.0f);
     m_sun->SetShadowFrustumSize(60.0f);

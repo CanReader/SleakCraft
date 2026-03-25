@@ -1036,6 +1036,15 @@ void ChunkManager::FrustumCull() {
             continue;
         }
 
+        // Force-render columns near the player regardless of camera frustum.
+        // This ensures terrain above caves/enclosed spaces is always in the
+        // shadow map, preventing sunlight from leaking through terrain.
+        constexpr float SHADOW_FORCE_DIST = 48.0f;
+        if (distSq <= SHADOW_FORCE_DIST * SHADOW_FORCE_DIST) {
+            col.visible = true;
+            continue;
+        }
+
         col.visible = frustum.IsAABBVisible(
             Sleak::Math::Vector3D(minX, minY, minZ),
             Sleak::Math::Vector3D(maxX, maxY, maxZ));
