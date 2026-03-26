@@ -4,18 +4,24 @@ A voxel sandbox game built on [SleakEngine](https://github.com/CanReader/SleakEn
 
 ![In-Game Screenshot](screenshots/SleakCraft1.jpg)
 
+![Panoramic View](screenshots/SleakCraft2.png)
+
+![Gameplay](screenshots/SleakCraft3.png)
+
 ## Features
 
 ### World
 - **Chunk-based terrain** — 16×16×16 chunks dynamically loaded and unloaded around the player
-- **Procedural generation** — Noise-based heightmap with surface biome details (grass, dirt, stone layers, trees)
+- **Procedural generation** — Continental noise with oceans, coasts, rivers, lakes, beaches, and mountains
+- **Biomes** — Plains, Forest, Desert, Mountains, Beach, Ocean — each with distinct terrain and vegetation
+- **Water system** — Oceans, rivers, and lakes with realistic water rendering (Gerstner waves, Fresnel reflections, volumetric scattering)
 - **Multi-threaded chunk loading** — Background worker threads stream and mesh chunks asynchronously; foreground sync on user interaction
 - **Dynamic render distance** — Configurable at runtime via the settings panel or `-rd` CLI flag
 - **Face culling** — Only visible faces (air↔solid boundaries) are meshed, keeping draw calls minimal
-- **Transparent leaf blocks** — Leaves rendered with alpha-masked faces separate from the opaque pass
+- **Transparent rendering** — Leaves and water rendered in separate alpha-blended passes
 
 ### Blocks
-14 block types with per-face textures built into a runtime texture atlas:
+15 block types with per-face textures built into a runtime texture atlas:
 
 | Block | Block | Block |
 |-------|-------|-------|
@@ -23,6 +29,7 @@ A voxel sandbox game built on [SleakEngine](https://github.com/CanReader/SleakEn
 | Cobblestone | Sand | Gravel |
 | Oak Log | Dark Oak Log | Spruce Log |
 | Oak Planks | Bricks | Oak Leaves |
+| Water | | |
 
 ### Gameplay
 - **Block breaking** — Left-click with particle break effect
@@ -35,10 +42,13 @@ A voxel sandbox game built on [SleakEngine](https://github.com/CanReader/SleakEn
 
 ### Graphics
 - **Multi-API rendering** — DirectX 11, DirectX 12, Vulkan, OpenGL — switchable via `-r` flag
+- **Shadows** — PCF shadow mapping with Poisson disk sampling, cave/interior shadow fix
+- **Water rendering** — Gerstner wave displacement, Fresnel reflections, Beer-Lambert absorption, GGX specular highlights, subsurface scattering, caustics, foam
 - **MSAA** — Up to 8× anti-aliasing (hardware-limited), configurable at runtime
+- **Texture filtering** — Anisotropic (2×–16×), bilinear, trilinear with LOD bias control
+- **Alpha blending** — Proper transparency for water and foliage across all backends
 - **Skybox** — Atmospheric sky with fog that fades at the render distance boundary
 - **Block outline** — Highlights the targeted block
-- **Background image** — Custom background on the main menu
 
 ### Performance & Benchmarking
 - **Built-in benchmark recorder** — Toggle with F12 (Debug builds); auto-start with `--bench`
@@ -48,7 +58,7 @@ A voxel sandbox game built on [SleakEngine](https://github.com/CanReader/SleakEn
 
 ### HUD & Debug
 - **F3 HUD** — Position, direction, FPS, frame time, triangles, CPU/RAM/GPU %, renderer label
-- **Settings panel** — Live controls for VSync, MSAA, render distance, multithreaded loading, collider overlay
+- **Settings panel** — Live controls for VSync, MSAA, render distance, multithreaded loading, texture filtering, collider overlay
 
 ---
 
@@ -60,7 +70,7 @@ A voxel sandbox game built on [SleakEngine](https://github.com/CanReader/SleakEn
 | Language | C++23 |
 | Build | CMake 3.31+ |
 | Graphics APIs | DirectX 11 · DirectX 12 · Vulkan · OpenGL |
-| Shader language | HLSL |
+| Shader languages | HLSL · GLSL · SPIR-V |
 
 ---
 
@@ -157,7 +167,7 @@ SleakCraft/
 │       └── src/             # Renderer backends, ECS, physics, audio
 ├── Game/
 │   ├── assets/
-│   │   ├── shaders/         # HLSL flat shader
+│   │   ├── shaders/         # HLSL/GLSL/SPIR-V shaders (flat, water)
 │   │   └── textures/        # Block textures + runtime atlas, UI background
 │   ├── include/
 │   │   └── World/           # Block, Chunk, ChunkManager, SaveManager, …
