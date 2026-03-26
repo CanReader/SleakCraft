@@ -82,6 +82,9 @@ public:
 
     // Render all visible column meshes via MeshBatch (call from scene Update)
     void RenderColumns();
+    void RenderWater();
+
+    void SetWaterMaterial(const Sleak::RefPtr<Sleak::Material>& material) { m_waterMaterial = material; }
 
     BlockType GetBlockAt(int worldX, int worldY, int worldZ) const;
     bool SetBlockAt(int worldX, int worldY, int worldZ, BlockType type);
@@ -129,6 +132,7 @@ private:
     };
     struct ColumnMesh {
         Sleak::MeshHandle mesh;
+        Sleak::MeshHandle waterMesh;
         bool visible = true;
     };
     void RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer = true);
@@ -154,6 +158,7 @@ private:
     std::vector<ChunkCoord> m_pendingUnload;
     Sleak::SceneBase* m_scene = nullptr;
     Sleak::RefPtr<Sleak::Material> m_material;
+    Sleak::RefPtr<Sleak::Material> m_waterMaterial;
     int m_renderDistance = 8;
     int m_chunksPerFrame = 32;
     int m_uploadsPerFrame = 4;

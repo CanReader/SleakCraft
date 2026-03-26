@@ -72,6 +72,9 @@ public:
     void SetActiveIndex(int idx) { m_activeIndex = idx; }
 
     ChunkMeshData& GetPendingMeshData() { return m_pendingMesh; }
+    ChunkMeshData& GetPendingWaterMeshData() { return m_pendingWaterMesh; }
+    bool HasPendingWaterMesh() const { return m_hasPendingWaterMesh; }
+    void ClearPendingWaterMesh() { m_hasPendingWaterMesh = false; }
 
 private:
     static int BlockIndex(int x, int y, int z) {
@@ -88,7 +91,9 @@ private:
     bool m_meshBuilt = false;
     bool m_addedToScene = false;
     ChunkMeshData m_pendingMesh;
+    ChunkMeshData m_pendingWaterMesh;
     bool m_hasPendingMesh = false;
+    bool m_hasPendingWaterMesh = false;
     bool m_inFlight = false;
     bool m_dirty = false;
     bool m_needsRebuild = false;

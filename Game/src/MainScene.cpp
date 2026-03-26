@@ -322,6 +322,12 @@ void MainScene::Update(float deltaTime) {
         m_chunkManager.Update(pos.GetX(), pos.GetY(), pos.GetZ());
         m_chunkManager.RenderColumns();
 
+        // Animate water — pass game time through material tiling.x
+        if (m_waterMaterial) {
+            m_waterMaterial->SetTiling(m_gameTime, 1.0f);
+        }
+        m_chunkManager.RenderWater();
+
         // Block outline always visible
         auto dir = cam->GetDirection();
         auto rayHit = m_chunkManager.VoxelRaycast(cam->GetPosition(), dir, 6.0f);
@@ -748,6 +754,21 @@ void MainScene::SetupMaterial() {
     mat->SetAO(1.0f);
     mat->SetOpacity(1.0f);
     m_blockMaterial = RefPtr<Material>(mat);
+
+    // Water material — uses same shader as blocks but with transparency
+    auto* waterMat = new Material();
+    waterMat->SetShader("assets/shaders/water_shader.hlsl");
+    if (atlasTex) {
+        waterMat->SetDiffuseTexture(atlasTex);
+    }
+    waterMat->SetDiffuseColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
+    waterMat->SetOpacity(0.7f);
+    waterMat->SetRenderMode(MaterialRenderMode::Transparent);
+    waterMat->SetTwoSided(true);
+    waterMat->SetShininess(64.0f);
+    waterMat->SetSpecularColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
+    m_waterMaterial = RefPtr<Material>(waterMat);
+    m_chunkManager.SetWaterMaterial(m_waterMaterial);
 }
 
 void MainScene::SetupSkybox() {

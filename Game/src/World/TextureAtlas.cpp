@@ -28,6 +28,7 @@ static const char* s_tilePaths[] = {
     "assets/textures/blocks/sand.png",              // TILE_SAND
     "assets/textures/blocks/gravel.png",            // TILE_GRAVEL
     "assets/textures/blocks/oak_leaves.png",        // TILE_OAK_LEAVES
+    "assets/textures/blocks/water.png",              // TILE_WATER
 };
 
 static_assert(sizeof(s_tilePaths) / sizeof(s_tilePaths[0]) == TILE_COUNT,

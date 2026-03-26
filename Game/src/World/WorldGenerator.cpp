@@ -28,6 +28,8 @@ void WorldGenerator::InitNoises() {
     m_caveY.SetSeed(m_seed + 9);
     // seed +10 reserved for tree hash
     m_gravelNoise.SetSeed(m_seed + 11);
+    m_riverNoise.SetSeed(m_seed + 12);
+    m_lakeNoise.SetSeed(m_seed + 13);
 }
 
 uint32_t WorldGenerator::HashPosition(int x, int z, uint32_t seed) {
@@ -45,7 +47,7 @@ ColumnInfo WorldGenerator::GetColumnInfo(int worldX, int worldZ) const {
     float fz = static_cast<float>(worldZ);
 
     // Shared between height and biome
-    float continent = m_continentalness.FBM2D(fx * 0.0015f, fz * 0.0015f, 5, 2.0f, 0.5f);
+    float continent = m_continentalness.FBM2D(fx * 0.003f, fz * 0.003f, 5, 2.0f, 0.5f);
     float erosion   = m_erosion.FBM2D(fx * 0.004f, fz * 0.004f, 4, 2.0f, 0.5f);
 
     // Biome-only noises
@@ -56,9 +58,33 @@ ColumnInfo WorldGenerator::GetColumnInfo(int worldX, int worldZ) const {
     float pv     = m_peaksValleys.FBM2D(fx * 0.008f, fz * 0.008f, 5, 2.0f, 0.5f);
     float detail = m_detail.FBM2D(fx * 0.025f, fz * 0.025f, 3, 2.0f, 0.5f);
 
+    // --- River carving ---
+    // Two overlapping ridged noise channels create winding river valleys
+    float river1 = m_riverNoise.FBM2D(fx * 0.004f, fz * 0.004f, 3, 2.0f, 0.5f);
+    float river2 = m_riverNoise.FBM2D(fx * 0.006f + 500.0f, fz * 0.006f + 500.0f, 3, 2.0f, 0.5f);
+    float riverVal = std::abs(river1) + std::abs(river2) * 0.5f;
+    // riverVal close to 0 = river center
+    float riverCarve = 0.0f;
+    if (riverVal < 0.08f && continent > -0.1f) {
+        // Carve river bed: deeper at center
+        float t = 1.0f - riverVal / 0.08f;
+        riverCarve = t * t * 12.0f; // up to 12 blocks deep
+    }
+
+    // --- Lake depressions ---
+    float lakeVal = m_lakeNoise.FBM2D(fx * 0.01f, fz * 0.01f, 3, 2.0f, 0.5f);
+    float lakeCarve = 0.0f;
+    if (lakeVal > 0.45f && continent > -0.1f) {
+        float t = (lakeVal - 0.45f) / 0.25f;
+        if (t > 1.0f) t = 1.0f;
+        lakeCarve = t * t * 10.0f;
+    }
+
     // --- Biome ---
     Biome biome;
-    if (erosion > 0.2f && continent > 0.3f)
+    if (continent < -0.15f)
+        biome = Biome::Ocean;
+    else if (erosion > 0.2f && continent > 0.3f)
         biome = Biome::Mountains;
     else if (temp > 0.3f && humid < -0.1f)
         biome = Biome::Desert;
@@ -68,12 +94,23 @@ ColumnInfo WorldGenerator::GetColumnInfo(int worldX, int worldZ) const {
         biome = Biome::Plains;
 
     // --- Height ---
+    // Continentalness drives large-scale land vs ocean:
+    //   < -0.3  : deep ocean  (base 32-42)
+    //   -0.3~0.0: shallow sea / coast (base 42-64, crosses sea level)
+    //   0.0~0.3 : inland plains / hills (base 64-72)
+    //   > 0.3   : mountains / highlands (base 72-90)
     float base;
-    if (continent < -0.2f) {
-        float t = (continent + 1.0f) / 0.8f;
-        base = 52.0f + t * 12.0f;
+    if (continent < -0.3f) {
+        // Deep ocean floor
+        float t = (continent + 1.0f) / 0.7f;
+        if (t < 0.0f) t = 0.0f;
+        base = 32.0f + t * 10.0f;
+    } else if (continent < 0.0f) {
+        // Coastal zone — smooth transition through sea level
+        float t = (continent + 0.3f) / 0.3f;
+        base = 42.0f + t * 22.0f;
     } else if (continent <= 0.3f) {
-        float t = (continent + 0.2f) / 0.5f;
+        float t = continent / 0.3f;
         base = 64.0f + t * 8.0f;
     } else {
         float t = (continent - 0.3f) / 0.7f;
@@ -91,10 +128,29 @@ ColumnInfo WorldGenerator::GetColumnInfo(int worldX, int worldZ) const {
     float gentleContrib = pv * (1.0f - roughness) * 4.0f;
     float detailContrib = detail * 3.0f;
 
+    // Reduce terrain noise underwater for smoother ocean floors
+    if (base < static_cast<float>(SEA_LEVEL)) {
+        float submersion = (static_cast<float>(SEA_LEVEL) - base) / 32.0f;
+        if (submersion > 1.0f) submersion = 1.0f;
+        float dampen = 1.0f - submersion * 0.7f;
+        peakContrib *= dampen;
+        gentleContrib *= dampen;
+        detailContrib *= dampen;
+    }
+
     float height = base + peakContrib + gentleContrib + detailContrib;
+
+    // Apply river and lake carving
+    height -= riverCarve;
+    height -= lakeCarve;
+
     int h = static_cast<int>(std::round(height));
     if (h < 1) h = 1;
     if (h > 126) h = 126;
+
+    // Assign Beach biome for land near sea level
+    if (biome != Biome::Ocean && biome != Biome::Desert && h >= SEA_LEVEL - 2 && h <= SEA_LEVEL + 2)
+        biome = Biome::Beach;
 
     return {h, biome};
 }
@@ -174,12 +230,15 @@ void WorldGenerator::PlaceTrees(Chunk* chunk) const {
                 case Biome::Plains:    density = 0.15f; break;
                 case Biome::Mountains: density = 0.25f; break;
                 case Biome::Desert:    density = 0.0f;  break;
+                case Biome::Beach:     density = 0.0f;  break;
+                case Biome::Ocean:     density = 0.0f;  break;
             }
 
             float roll = static_cast<float>(h >> 16) / 65535.0f;
             if (roll >= density) continue;
 
-            // Mountains: no trees above Y=90
+            // No trees below sea level (underwater) or above Y=90 on mountains
+            if (col.surfaceHeight <= SEA_LEVEL) continue;
             if (col.biome == Biome::Mountains && col.surfaceHeight > 90) continue;
 
             int trunkHeight = 4 + static_cast<int>((h >> 4) % 3);
@@ -249,6 +308,7 @@ void WorldGenerator::Generate(Chunk* chunk) const {
         int h = GetSurfaceHeight(s[0], s[1]);
         if (h > maxH) maxH = h;
     }
+    if (maxH < SEA_LEVEL) maxH = SEA_LEVEL;
     maxH += 16;
     if (chunkBaseY > maxH) return;
 
@@ -289,6 +349,23 @@ void WorldGenerator::Generate(Chunk* chunk) const {
                             }
                             break;
 
+                        case Biome::Ocean:
+                            // Ocean floor: sand on top, gravel/stone below
+                            if (depth <= 3)
+                                type = BlockType::Sand;
+                            else if (depth <= 6)
+                                type = BlockType::Gravel;
+                            else
+                                type = BlockType::Stone;
+                            break;
+
+                        case Biome::Beach:
+                            if (depth <= 5)
+                                type = BlockType::Sand;
+                            else
+                                type = BlockType::Stone;
+                            break;
+
                         case Biome::Plains:
                         case Biome::Forest:
                         default:
@@ -323,6 +400,10 @@ void WorldGenerator::Generate(Chunk* chunk) const {
                     if (depth >= 1 && IsCave(worldX, worldY, worldZ))
                         type = BlockType::Air;
                 }
+
+                // Fill water at and below sea level where there's air
+                if (type == BlockType::Air && worldY <= SEA_LEVEL)
+                    type = BlockType::Water;
 
                 chunk->SetBlock(lx, ly, lz, type);
             }
@@ -361,6 +442,8 @@ int WorldGenerator::GetMaxFilledChunkY(int cx, int cz) const {
             int h = GetSurfaceHeight(x, z);
             if (h > maxH) maxH = h;
         }
+    // Ensure we at least reach sea level (water fills above terrain)
+    if (maxH < SEA_LEVEL) maxH = SEA_LEVEL;
     // +16 margin for trees (same as IsChunkAboveTerrain), convert to chunk Y
     int maxCy = (maxH + 16) / Chunk::SIZE;
     if (maxCy > MAX_CHUNK_Y) maxCy = MAX_CHUNK_Y;
@@ -382,5 +465,6 @@ bool WorldGenerator::IsChunkAboveTerrain(int cx, int cy, int cz) const {
             int h = GetSurfaceHeight(x, z);
             if (h > maxH) maxH = h;
         }
+    if (maxH < SEA_LEVEL) maxH = SEA_LEVEL;
     return baseY > maxH + 16;
 }

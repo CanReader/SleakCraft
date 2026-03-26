@@ -17,6 +17,7 @@ enum class BlockType : uint8_t {
     Sand,
     Gravel,
     OakLeaves,
+    Water,
     COUNT
 };
 
@@ -47,6 +48,7 @@ enum BlockTile : uint8_t {
     TILE_SAND,
     TILE_GRAVEL,
     TILE_OAK_LEAVES,
+    TILE_WATER,
     TILE_COUNT
 };
 
@@ -81,21 +83,27 @@ inline uint8_t GetBlockTextureTile(BlockType type, BlockFace face) {
             return TILE_GRAVEL;
         case BlockType::OakLeaves:
             return TILE_OAK_LEAVES;
+        case BlockType::Water:
+            return TILE_WATER;
         default:
             return TILE_GRASS_TOP;
     }
 }
 
 inline bool IsBlockSolid(BlockType type) {
-    return type != BlockType::Air;
+    return type != BlockType::Air && type != BlockType::Water;
 }
 
 inline bool IsBlockOpaque(BlockType type) {
-    return type != BlockType::Air && type != BlockType::OakLeaves;
+    return type != BlockType::Air && type != BlockType::OakLeaves && type != BlockType::Water;
 }
 
 inline bool IsBlockRenderable(BlockType type) {
     return type != BlockType::Air;
+}
+
+inline bool IsBlockWater(BlockType type) {
+    return type == BlockType::Water;
 }
 
 inline const char* GetBlockName(BlockType type) {
@@ -112,6 +120,7 @@ inline const char* GetBlockName(BlockType type) {
         case BlockType::Sand:        return "Sand";
         case BlockType::Gravel:      return "Gravel";
         case BlockType::OakLeaves:   return "Oak Leaves";
+        case BlockType::Water:       return "Water";
         case BlockType::Air:         return "Air";
         default:                     return "Unknown";
     }

@@ -49,6 +49,7 @@ private:
     bool m_isNewWorld;
 
     Sleak::RefPtr<Sleak::Material> m_blockMaterial;
+    Sleak::RefPtr<Sleak::Material> m_waterMaterial;
     ChunkManager m_chunkManager;
     BlockEffects m_blockEffects;
     SaveManager m_saveManager;

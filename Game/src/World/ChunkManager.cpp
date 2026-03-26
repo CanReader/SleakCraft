@@ -486,6 +486,8 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
 
     Sleak::VertexGroup mergedVerts;
     Sleak::IndexGroup mergedIndices;
+    Sleak::VertexGroup mergedWaterVerts;
+    Sleak::IndexGroup mergedWaterIndices;
 
     for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
         Chunk* chunk = GetChunk(cx, cy, cz);
@@ -493,13 +495,8 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
         if (!chunk || chunk->IsInFlight() || chunk->NeedsGeneration()) continue;
 
         // Mesh data was consumed — regenerate it.
-        // In multithreaded mode with allowDefer=true (background chunk loading),
-        // queue back to a worker to avoid blocking the main thread.
-        // With allowDefer=false (user block interaction) always regenerate synchronously
-        // so the change is visible on the very same frame.
         if (!chunk->HasPendingMesh()) {
             if (m_multithreaded && allowDefer) {
-                // Queue back to worker; keep old column mesh visible until done
                 chunk->SetInFlight(true);
                 {
                     std::lock_guard<std::mutex> lock(m_taskMutex);
@@ -512,38 +509,54 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
             chunk->GenerateMeshData();
         }
 
-        auto& md = chunk->GetPendingMeshData();
-        chunk->ClearPendingMesh();
+        // Merge opaque mesh
+        {
+            auto& md = chunk->GetPendingMeshData();
+            chunk->ClearPendingMesh();
 
-        if (md.vertices.GetSize() == 0) {
+            if (md.vertices.GetSize() > 0) {
+                uint32_t baseVertex = static_cast<uint32_t>(mergedVerts.GetSize());
+                const Sleak::Vertex* vdata = md.vertices.GetData();
+                for (size_t i = 0; i < md.vertices.GetSize(); ++i)
+                    mergedVerts.AddVertex(vdata[i]);
+                const uint32_t* idata = md.indices.GetData();
+                for (size_t i = 0; i < md.indices.GetSize(); ++i)
+                    mergedIndices.add(idata[i] + baseVertex);
+            }
             md.vertices.release();
             md.indices.release();
-            continue;
         }
 
-        uint32_t baseVertex = static_cast<uint32_t>(mergedVerts.GetSize());
+        // Merge water mesh
+        {
+            auto& wd = chunk->GetPendingWaterMeshData();
+            chunk->ClearPendingWaterMesh();
 
-        const Sleak::Vertex* vdata = md.vertices.GetData();
-        for (size_t i = 0; i < md.vertices.GetSize(); ++i)
-            mergedVerts.AddVertex(vdata[i]);
-
-        const uint32_t* idata = md.indices.GetData();
-        for (size_t i = 0; i < md.indices.GetSize(); ++i)
-            mergedIndices.add(idata[i] + baseVertex);
-
-        // Free CPU-side mesh data — it's now merged into the column
-        md.vertices.release();
-        md.indices.release();
+            if (wd.vertices.GetSize() > 0) {
+                uint32_t baseVertex = static_cast<uint32_t>(mergedWaterVerts.GetSize());
+                const Sleak::Vertex* vdata = wd.vertices.GetData();
+                for (size_t i = 0; i < wd.vertices.GetSize(); ++i)
+                    mergedWaterVerts.AddVertex(vdata[i]);
+                const uint32_t* idata = wd.indices.GetData();
+                for (size_t i = 0; i < wd.indices.GetSize(); ++i)
+                    mergedWaterIndices.add(idata[i] + baseVertex);
+            }
+            wd.vertices.release();
+            wd.indices.release();
+        }
     }
 
-    // Old MeshHandle released only when we have complete new data to replace it
     m_columns.erase(key);
 
-    if (mergedVerts.GetSize() == 0) return;
+    if (mergedVerts.GetSize() == 0 && mergedWaterVerts.GetSize() == 0) return;
 
-    // Create lightweight GPU mesh handle — no GameObject overhead
-    Sleak::MeshHandle mesh = Sleak::MeshBatch::CreateMesh(mergedVerts, mergedIndices);
-    m_columns[key] = {std::move(mesh), true};
+    ColumnMesh col;
+    if (mergedVerts.GetSize() > 0)
+        col.mesh = Sleak::MeshBatch::CreateMesh(mergedVerts, mergedIndices);
+    if (mergedWaterVerts.GetSize() > 0)
+        col.waterMesh = Sleak::MeshBatch::CreateMesh(mergedWaterVerts, mergedWaterIndices);
+    col.visible = true;
+    m_columns[key] = std::move(col);
 }
 
 void ChunkManager::ForceUnloadChunk(Chunk* chunk) {
@@ -1056,6 +1069,16 @@ void ChunkManager::RenderColumns() {
     for (auto& [key, col] : m_columns) {
         if (col.visible && col.mesh.IsValid())
             Sleak::MeshBatch::Draw(col.mesh);
+    }
+    Sleak::MeshBatch::EndBatch();
+}
+
+void ChunkManager::RenderWater() {
+    if (!m_waterMaterial) return;
+    Sleak::MeshBatch::BeginBatch(m_waterMaterial.get());
+    for (auto& [key, col] : m_columns) {
+        if (col.visible && col.waterMesh.IsValid())
+            Sleak::MeshBatch::Draw(col.waterMesh);
     }
     Sleak::MeshBatch::EndBatch();
 }

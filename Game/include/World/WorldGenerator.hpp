@@ -10,7 +10,9 @@ enum class Biome : uint8_t {
     Plains,
     Forest,
     Mountains,
-    Desert
+    Desert,
+    Beach,
+    Ocean
 };
 
 struct ColumnInfo {
@@ -53,6 +55,8 @@ private:
     Noise m_cheese;
     Noise m_caveY;
     Noise m_gravelNoise;
+    Noise m_riverNoise;
+    Noise m_lakeNoise;
     uint32_t m_seed = 0;
 
     void InitNoises();

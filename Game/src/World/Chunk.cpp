@@ -247,18 +247,119 @@ void Chunk::GenerateMeshData() {
         }
     };
 
+    // Water mesh gets separate buffers
+    VertexGroup waterVertices;
+    IndexGroup waterIndices;
+
+    // Helper to check if neighbor is water
+    auto isWater = [&](int x, int y, int z) -> bool {
+        if (x >= 0 && x < SIZE && y >= 0 && y < SIZE && z >= 0 && z < SIZE)
+            return IsBlockWater(static_cast<BlockType>(m_blocks[BlockIndex(x, y, z)]));
+        // Check neighbors
+        BlockFace face;
+        int nx = x, ny = y, nz = z;
+        if (y >= SIZE)     { face = BlockFace::Top;    ny = y - SIZE; }
+        else if (y < 0)    { face = BlockFace::Bottom; ny = y + SIZE; }
+        else if (z >= SIZE) { face = BlockFace::North; nz = z - SIZE; }
+        else if (z < 0)    { face = BlockFace::South;  nz = z + SIZE; }
+        else if (x >= SIZE) { face = BlockFace::East;  nx = x - SIZE; }
+        else               { face = BlockFace::West;   nx = x + SIZE; }
+        auto* nb = m_neighbors[static_cast<uint8_t>(face)];
+        if (nb) return IsBlockWater(nb->GetBlock(nx, ny, nz));
+        return false;
+    };
+
+    // Water face emitter — lowered top, no AO, blue tint vertex color
+    auto addWaterFace = [&](BlockFace face, int x, int y, int z) {
+        AtlasUV uv = TextureAtlas::GetTileUV(GetBlockTextureTile(BlockType::Water, face));
+        uint32_t base = static_cast<uint32_t>(waterVertices.GetSize());
+        float bx = static_cast<float>(x + m_cx * SIZE);
+        float by = static_cast<float>(y + m_cy * SIZE);
+        float bz = static_cast<float>(z + m_cz * SIZE);
+
+        // Water surface is slightly lowered (0.875 of a block)
+        float topY = (face == BlockFace::Top || face == BlockFace::Bottom)
+                     ? by + 0.875f : by + 1.0f;
+
+        Vertex v[4];
+        switch (face) {
+            case BlockFace::Top:
+                v[0] = Vertex(bx,     topY, bz,     0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v1);
+                v[1] = Vertex(bx,     topY, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v0);
+                v[2] = Vertex(bx + 1, topY, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v0);
+                v[3] = Vertex(bx + 1, topY, bz,     0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v1);
+                break;
+            case BlockFace::Bottom:
+                v[0] = Vertex(bx,     by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v1);
+                v[1] = Vertex(bx,     by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v0);
+                v[2] = Vertex(bx + 1, by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v0);
+                v[3] = Vertex(bx + 1, by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v1);
+                break;
+            case BlockFace::North:
+                v[0] = Vertex(bx + 1, by,         bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v1);
+                v[1] = Vertex(bx + 1, by + 0.875f, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v0);
+                v[2] = Vertex(bx,     by + 0.875f, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v0);
+                v[3] = Vertex(bx,     by,         bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v1);
+                break;
+            case BlockFace::South:
+                v[0] = Vertex(bx,     by,         bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v1);
+                v[1] = Vertex(bx,     by + 0.875f, bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v0);
+                v[2] = Vertex(bx + 1, by + 0.875f, bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v0);
+                v[3] = Vertex(bx + 1, by,         bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v1);
+                break;
+            case BlockFace::East:
+                v[0] = Vertex(bx + 1, by,         bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v1);
+                v[1] = Vertex(bx + 1, by + 0.875f, bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v0);
+                v[2] = Vertex(bx + 1, by + 0.875f, bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v0);
+                v[3] = Vertex(bx + 1, by,         bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v1);
+                break;
+            case BlockFace::West:
+                v[0] = Vertex(bx, by,         bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v1);
+                v[1] = Vertex(bx, by + 0.875f, bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v0);
+                v[2] = Vertex(bx, by + 0.875f, bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v0);
+                v[3] = Vertex(bx, by,         bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v1);
+                break;
+        }
+
+        // Store world position in vertex color for water shader (use full white = no AO)
+        for (int i = 0; i < 4; ++i) {
+            v[i].SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+            waterVertices.AddVertex(v[i]);
+        }
+
+        waterIndices.add(base); waterIndices.add(base + 2); waterIndices.add(base + 1);
+        waterIndices.add(base); waterIndices.add(base + 3); waterIndices.add(base + 2);
+    };
+
     for (int y = 0; y < SIZE; ++y) {
         for (int z = 0; z < SIZE; ++z) {
             for (int x = 0; x < SIZE; ++x) {
                 BlockType type = GetBlock(x, y, z);
                 if (!IsBlockRenderable(type)) continue;
 
-                if (!opaque[y + 1 + 1][z + 1][x + 1]) fastAddFace(BlockFace::Top,    x, y, z, type);
-                if (!opaque[y - 1 + 1][z + 1][x + 1]) fastAddFace(BlockFace::Bottom, x, y, z, type);
-                if (!opaque[y + 1][z + 1 + 1][x + 1]) fastAddFace(BlockFace::North,  x, y, z, type);
-                if (!opaque[y + 1][z - 1 + 1][x + 1]) fastAddFace(BlockFace::South,  x, y, z, type);
-                if (!opaque[y + 1][z + 1][x + 1 + 1]) fastAddFace(BlockFace::East,   x, y, z, type);
-                if (!opaque[y + 1][z + 1][x - 1 + 1]) fastAddFace(BlockFace::West,   x, y, z, type);
+                if (IsBlockWater(type)) {
+                    // Water: only emit faces adjacent to non-water, non-solid blocks (air)
+                    // Top face: only if block above is not water and not opaque
+                    if (!isWater(x, y+1, z) && !opaque[y+1+1][z+1][x+1])
+                        addWaterFace(BlockFace::Top, x, y, z);
+                    if (!isWater(x, y-1, z) && !opaque[y-1+1][z+1][x+1])
+                        addWaterFace(BlockFace::Bottom, x, y, z);
+                    if (!isWater(x, y, z+1) && !opaque[y+1][z+1+1][x+1])
+                        addWaterFace(BlockFace::North, x, y, z);
+                    if (!isWater(x, y, z-1) && !opaque[y+1][z-1+1][x+1])
+                        addWaterFace(BlockFace::South, x, y, z);
+                    if (!isWater(x+1, y, z) && !opaque[y+1][z+1][x+1+1])
+                        addWaterFace(BlockFace::East, x, y, z);
+                    if (!isWater(x-1, y, z) && !opaque[y+1][z+1][x-1+1])
+                        addWaterFace(BlockFace::West, x, y, z);
+                } else {
+                    if (!opaque[y + 1 + 1][z + 1][x + 1]) fastAddFace(BlockFace::Top,    x, y, z, type);
+                    if (!opaque[y - 1 + 1][z + 1][x + 1]) fastAddFace(BlockFace::Bottom, x, y, z, type);
+                    if (!opaque[y + 1][z + 1 + 1][x + 1]) fastAddFace(BlockFace::North,  x, y, z, type);
+                    if (!opaque[y + 1][z - 1 + 1][x + 1]) fastAddFace(BlockFace::South,  x, y, z, type);
+                    if (!opaque[y + 1][z + 1][x + 1 + 1]) fastAddFace(BlockFace::East,   x, y, z, type);
+                    if (!opaque[y + 1][z + 1][x - 1 + 1]) fastAddFace(BlockFace::West,   x, y, z, type);
+                }
             }
         }
     }
@@ -266,6 +367,11 @@ void Chunk::GenerateMeshData() {
     m_pendingMesh.vertices = std::move(vertices);
     m_pendingMesh.indices = std::move(indices);
     m_hasPendingMesh = true;
+
+    m_pendingWaterMesh.vertices = std::move(waterVertices);
+    m_pendingWaterMesh.indices = std::move(waterIndices);
+    m_hasPendingWaterMesh = true;
+
     m_meshBuilt = true;
 }
 
