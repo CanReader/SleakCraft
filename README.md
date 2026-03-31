@@ -4,9 +4,9 @@ A voxel sandbox game built on [SleakEngine](https://github.com/CanReader/SleakEn
 
 ![In-Game Screenshot](screenshots/SleakCraft1.jpg)
 
-![Panoramic View](screenshots/SleakCraft2.png)
+![Panoramic View](screenshots/SleakCraft2.jpg)
 
-![Gameplay](screenshots/SleakCraft3.png)
+![Gameplay](screenshots/SleakCraft3.jpg)
 
 ## Features
 
