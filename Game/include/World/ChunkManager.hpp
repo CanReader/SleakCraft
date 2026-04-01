@@ -105,6 +105,11 @@ public:
     void LoadChunkData(const std::unordered_map<int64_t, std::array<uint8_t, 4096>>& data);
     void ForceReload();
 
+    // Heightmap cache — persists m_columnMaxCyCache across sessions so
+    // GetMaxFilledChunkY() noise evaluations are skipped on reload.
+    void SaveHeightmapCache(const std::string& path) const;
+    void LoadHeightmapCache(const std::string& path);
+
 private:
     void LinkNeighbors(const ChunkCoord& coord, Chunk* chunk);
     void UnlinkNeighbors(const ChunkCoord& coord, Chunk* chunk);
