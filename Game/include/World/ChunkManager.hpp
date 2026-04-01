@@ -169,7 +169,7 @@ private:
     Sleak::RefPtr<Sleak::Material> m_waterMaterial;
     int m_renderDistance = 8;
     int m_chunksPerFrame = 32;
-    int m_uploadsPerFrame = 16;  // Increased from 4 — low value caused backlog at high render distances
+    int m_uploadsPerFrame = 8;   // Base uploads/frame; adaptive logic in Update() can double this
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
     int m_lastCenterX = INT_MAX;
