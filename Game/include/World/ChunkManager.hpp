@@ -136,7 +136,10 @@ private:
         bool visible = true;
     };
     void RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer = true);
-    static int ChunkYToBand(int cy) { return cy / BAND_SIZE; }
+    // Floor-division: negative cy must map downward (e.g. cy=-1 → band -1, not 0)
+    static int ChunkYToBand(int cy) {
+        return (cy >= 0) ? cy / BAND_SIZE : (cy - BAND_SIZE + 1) / BAND_SIZE;
+    }
     std::unordered_map<ColumnKey, ColumnMesh, ColumnKeyHash> m_columns;
     std::unordered_set<ColumnKey, ColumnKeyHash> m_dirtyColumns;
     std::unordered_set<ChunkCoord, ChunkCoordHash> m_chunksNeedingRemesh;
@@ -161,7 +164,7 @@ private:
     Sleak::RefPtr<Sleak::Material> m_waterMaterial;
     int m_renderDistance = 8;
     int m_chunksPerFrame = 32;
-    int m_uploadsPerFrame = 4;
+    int m_uploadsPerFrame = 16;  // Increased from 4 — low value caused backlog at high render distances
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
     int m_lastCenterX = INT_MAX;

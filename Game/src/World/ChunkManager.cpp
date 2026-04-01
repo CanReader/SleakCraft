@@ -678,6 +678,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             }
             if (!hasChunks) {
                 m_columns.erase(colKey);
+                m_dirtyColumns.erase(colKey);  // Don't rebuild a column with no chunks
             }
         }
     }
@@ -830,7 +831,10 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         // flickering (the old column mesh stays visible until remesh is done).
         // Adaptive budget: process more when backlog is large.
         {
-            int uploadBudget = m_uploadsPerFrame;
+            // Adaptive budget: process more columns when backlog is large
+            // (caps at 64 to avoid single-frame GPU upload spikes)
+            int uploadBudget = std::min(64, std::max(m_uploadsPerFrame,
+                                                     (int)m_dirtyColumns.size() / 4));
 
             std::vector<ColumnKey> toRebuild;
             {
@@ -1029,7 +1033,7 @@ void ChunkManager::FrustumCull() {
     float camZ = camPos.GetZ();
 
     for (auto& [key, col] : m_columns) {
-        if (!col.mesh.IsValid()) { col.visible = false; continue; }
+        if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) { col.visible = false; continue; }
 
         float minX = static_cast<float>(key.x * Chunk::SIZE);
         float minY = static_cast<float>(key.yBand * BAND_SIZE * Chunk::SIZE);
