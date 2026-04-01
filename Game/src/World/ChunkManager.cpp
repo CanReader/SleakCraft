@@ -833,10 +833,13 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         // flickering (the old column mesh stays visible until remesh is done).
         // Adaptive budget: process more when backlog is large.
         {
-            // Adaptive budget: process more columns when backlog is large
-            // (caps at 64 to avoid single-frame GPU upload spikes)
-            int uploadBudget = std::min(64, std::max(m_uploadsPerFrame,
-                                                     (int)m_dirtyColumns.size() / 4));
+            // Adaptive budget: grow modestly when backlog is large.
+            // Cap at 2× base to avoid bursting VRAM — deferred deletion
+            // needs at least MAX_FRAMES_IN_FLIGHT frames to free old buffers,
+            // so uploading too many at once exhausts memory before recycling runs.
+            int uploadBudget = std::min(m_uploadsPerFrame * 2,
+                                        std::max(m_uploadsPerFrame,
+                                                 (int)m_dirtyColumns.size() / 8));
 
             std::vector<ColumnKey> toRebuild;
             {
