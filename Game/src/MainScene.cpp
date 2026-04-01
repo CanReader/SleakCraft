@@ -597,6 +597,7 @@ void MainScene::SaveGame() {
 
     if (m_saveManager.SaveWorld(meta, dirtyChunks)) {
         m_chunkManager.ClearDirtyFlags();
+        m_chunkManager.SaveHeightmapCache(m_savePath + "/heightmap.cache");
         m_saveMessage = "World Saved!";
         m_saveMessageTimer = 2.0f;
     } else {
@@ -634,6 +635,7 @@ void MainScene::LoadGame() {
     // Restore seed and reload all chunks
     m_chunkManager.SetSeed(meta.seed);
     m_chunkManager.LoadChunkData(chunkData);
+    m_chunkManager.LoadHeightmapCache(m_savePath + "/heightmap.cache");
     m_chunkManager.ForceReload();
 
     // Load a small area synchronously, let the rest stream in
