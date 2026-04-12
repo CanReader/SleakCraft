@@ -479,11 +479,12 @@ void MainScene::RenderUI() {
     float rd = static_cast<float>(m_chunkManager.GetRenderDistance());
     if (UI::DragFloat("Render Distance", &rd, 1.0f, 2.0f, 256.0f)) {
         m_chunkManager.SetRenderDistance(static_cast<int>(rd));
+        float drawDist = m_chunkManager.GetDrawDistance();
         auto* lm = GetLightManager();
-        if (lm) {
-            float drawDist = m_chunkManager.GetDrawDistance();
+        if (lm)
             lm->SetFogDistances(drawDist * 0.75f, drawDist);
-        }
+        // Shadow frustum stays fixed — not tied to draw distance
+        // (scaling it causes low-res shadows and disappearing issues)
     }
 
     // ---- Lighting ----
@@ -755,6 +756,7 @@ void MainScene::SetupMaterial() {
     mat->SetRoughness(0.0f);
     mat->SetAO(1.0f);
     mat->SetOpacity(1.0f);
+    mat->Initialize();
     m_blockMaterial = RefPtr<Material>(mat);
 
     // Water material — uses same shader as blocks but with transparency
@@ -769,6 +771,7 @@ void MainScene::SetupMaterial() {
     waterMat->SetTwoSided(true);
     waterMat->SetShininess(64.0f);
     waterMat->SetSpecularColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
+    waterMat->Initialize();
     m_waterMaterial = RefPtr<Material>(waterMat);
     m_chunkManager.SetWaterMaterial(m_waterMaterial);
 }
@@ -795,10 +798,10 @@ void MainScene::SetupLighting() {
     m_sun->SetShadowBias(0.0005f);
     m_sun->SetShadowNormalBias(0.05f);
     m_sun->SetLightSize(4.0f);
-    m_sun->SetShadowFrustumSize(60.0f);
-    m_sun->SetShadowDistance(80.0f);
+    m_sun->SetShadowFrustumSize(120.0f);
+    m_sun->SetShadowDistance(120.0f);
     m_sun->SetShadowNearPlane(0.1f);
-    m_sun->SetShadowFarPlane(200.0f);
+    m_sun->SetShadowFarPlane(500.0f);
     AddObject(m_sun);
 
     auto* lm = GetLightManager();
@@ -807,8 +810,8 @@ void MainScene::SetupLighting() {
         lm->SetAmbientIntensity(m_ambientIntensity);
 
         lm->SetFogColor(0.62f, 0.78f, 1.0f);
-        float drawDist = m_chunkManager.GetDrawDistance();
-        lm->SetFogDistances(drawDist * 0.75f, drawDist);
+        float fogDist = m_chunkManager.GetDrawDistance();
+        lm->SetFogDistances(fogDist * 0.75f, fogDist);
         lm->SetFogEnabled(true);
     }
 }

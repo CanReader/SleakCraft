@@ -58,5 +58,12 @@ Desktop.ini
 log.txt
 nul
 
+# Temporary workbench — not part of the repo
+BSL/
+
+# Screenshots dumped in repo root — tracked textures under assets/ are unaffected
+/*.png
+/*.jpg
+
 .claude/
 CLAUDE.md

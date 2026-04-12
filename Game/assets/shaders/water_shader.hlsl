@@ -1,34 +1,17 @@
-// ============================================================
-// Water Shader (DirectX 11 HLSL)
-// Gerstner waves, Fresnel, GGX specular, volumetric scattering
-// Analytical sky reflection, caustics, foam
-// ============================================================
+// Water Shader — DirectX 11 HLSL
+// BSL-style: no vertex displacement, procedural fragment normals, BSL water color.
 
-struct VS_INPUT
-{
-    float3 POSITION : POSITION;
-    float3 NORMAL   : NORMAL;
-    float4 TANGENT  : TANGENT;
-    float4 COLOR    : COLOR;
-    float2 TEXCOORD : TEXCOORD;
-};
-
-struct VS_OUTPUT
-{
+struct VS_INPUT  { float3 POSITION:POSITION; float3 NORMAL:NORMAL; float4 TANGENT:TANGENT; float4 COLOR:COLOR; float2 TEXCOORD:TEXCOORD; };
+struct VS_OUTPUT {
     float4 Position    : SV_POSITION;
     float3 WorldPos    : TEXCOORD0;
-    float3 WorldNorm   : TEXCOORD1;
-    float3 WorldTan    : TEXCOORD2;
-    float3 WorldBit    : TEXCOORD3;
+    float3 Normal      : TEXCOORD1;
     float4 Color       : COLOR;
-    float2 TexCoord    : TEXCOORD4;
-    float4 ShadowCoord : TEXCOORD5;
+    float4 ShadowCoord : TEXCOORD2;
+    float  Time        : TEXCOORD3;
 };
 
-cbuffer TransformCB : register(b0) {
-    row_major float4x4 WVP;
-    row_major float4x4 World;
-};
+cbuffer TransformCB : register(b0) { row_major float4x4 WVP; row_major float4x4 World; };
 
 cbuffer MaterialCB : register(b1) {
     uint   HasDiffuseMap, HasNormalMap, HasSpecularMap, HasRoughnessMap;
@@ -41,287 +24,140 @@ cbuffer MaterialCB : register(b1) {
     float  MatOpacity; float MatAlphaCutoff; float _matPad1, _matPad2;
 };
 
-struct LightData {
-    float3 Position;  uint Type;
-    float3 Direction; float Intensity;
-    float3 Color;     float Range;
-    float SpotInnerCos; float SpotOuterCos;
-    float AreaWidth; float AreaHeight;
-};
-
+struct LightData { float3 Position; uint Type; float3 Direction; float Intensity; float3 Color; float Range; float SpotInnerCos; float SpotOuterCos; float AreaWidth; float AreaHeight; };
 cbuffer LightCB : register(b2) {
-    float3 CameraPos;
-    uint NumActiveLights;
-    float3 AmbientColor;
-    float AmbientIntensity;
-    float4 FogColor;
-    float FogStart;
-    float FogEnd;
-    float2 _reserved;
+    float3    CameraPos; uint NumActiveLights;
+    float3    AmbientColor; float AmbientIntensity;
+    float4    FogColor; float FogStart; float FogEnd; float2 _reserved;
     LightData Lights[16];
 };
 
 cbuffer ShadowCB : register(b5) {
     row_major float4x4 ShadowLightVP;
-    float ShadowBias;
-    float ShadowStrength;
-    float ShadowTexelSize;
-    float ShadowLightSize;
-    uint  PCSSEnabled;
-    uint  ShadowMapEnabled;
-    float _shadowPad0, _shadowPad1;
+    float ShadowBias; float ShadowStrength; float ShadowTexelSize; float ShadowLightSize;
+    uint  PCSSEnabled; uint ShadowMapEnabled; float _sp0, _sp1;
 };
 
-Texture2D diffuseTexture : register(t0);
-SamplerState mainSampler : register(s0);
-Texture2D shadowMap : register(t3);
-SamplerComparisonState shadowSampler : register(s3);
+Texture2D diffuseTexture : register(t0); SamplerState mainSampler : register(s0);
+Texture2D shadowMap      : register(t3); SamplerComparisonState shadowSampler : register(s3);
 
-static const float SEA_LEVEL = 64.875;
-static const float F0_WATER = 0.02;
-static const float PI = 3.14159265;
-
-// ============================================================
-// Gerstner Wave
-// ============================================================
-struct GerstnerWave {
-    float2 direction;
-    float amplitude;
-    float frequency;
-    float speed;
-    float steepness;
+// ---- Shadow ----
+static const float2 disk[16] = {
+    float2(-0.9465,-0.1484), float2(-0.7431, 0.5353), float2(-0.5863,-0.5879), float2(-0.3935, 0.1025),
+    float2(-0.2428, 0.7722), float2(-0.1074,-0.3075), float2( 0.0542,-0.8645), float2( 0.1267, 0.4300),
+    float2( 0.2787,-0.1353), float2( 0.3842, 0.6501), float2( 0.4714,-0.5537), float2( 0.5765, 0.1675),
+    float2( 0.6712,-0.3340), float2( 0.7527, 0.4813), float2( 0.8745,-0.0910), float2( 0.9601, 0.2637)
 };
-
-void GerstnerDisplacement(float3 pos, float time, out float3 displacement, out float3 normal) {
-    GerstnerWave waves[6];
-    waves[0].direction = normalize(float2(1.0, 0.3));  waves[0].amplitude = 0.08; waves[0].frequency = 0.8;  waves[0].speed = 1.2; waves[0].steepness = 0.4;
-    waves[1].direction = normalize(float2(0.5, 1.0));  waves[1].amplitude = 0.05; waves[1].frequency = 1.5;  waves[1].speed = 1.8; waves[1].steepness = 0.35;
-    waves[2].direction = normalize(float2(-0.3, 0.7)); waves[2].amplitude = 0.03; waves[2].frequency = 2.5;  waves[2].speed = 2.5; waves[2].steepness = 0.3;
-    waves[3].direction = normalize(float2(0.8, -0.6)); waves[3].amplitude = 0.06; waves[3].frequency = 0.6;  waves[3].speed = 0.9; waves[3].steepness = 0.45;
-    waves[4].direction = normalize(float2(-0.5, -0.8));waves[4].amplitude = 0.02; waves[4].frequency = 3.5;  waves[4].speed = 3.2; waves[4].steepness = 0.25;
-    waves[5].direction = normalize(float2(0.2, -1.0)); waves[5].amplitude = 0.04; waves[5].frequency = 1.2;  waves[5].speed = 1.5; waves[5].steepness = 0.35;
-
-    displacement = float3(0, 0, 0);
-    normal = float3(0, 1, 0);
-
-    for (int i = 0; i < 6; i++) {
-        float A = waves[i].amplitude;
-        float w = waves[i].frequency;
-        float phi = waves[i].speed * w;
-        float Q = waves[i].steepness / (w * A * 6.0);
-        float2 D = waves[i].direction;
-        float dotDP = dot(D, pos.xz);
-        float phase = w * dotDP + phi * time;
-        float S = sin(phase);
-        float C = cos(phase);
-        displacement.x += Q * A * D.x * C;
-        displacement.z += Q * A * D.y * C;
-        displacement.y += A * S;
-        float WA = w * A;
-        normal.x -= D.x * WA * C;
-        normal.z -= D.y * WA * C;
-        normal.y -= Q * WA * S;
-    }
-    normal = normalize(normal);
-}
-
-// ============================================================
-// Shadow
-// ============================================================
-static const float2 poissonDisk[16] = {
-    float2(-0.94201624, -0.39906216), float2( 0.94558609, -0.76890725),
-    float2(-0.09418410, -0.92938870), float2( 0.34495938,  0.29387760),
-    float2(-0.91588581,  0.45771432), float2(-0.81544232, -0.87912464),
-    float2(-0.38277543,  0.27676845), float2( 0.97484398,  0.75648379),
-    float2( 0.44323325, -0.97511554), float2( 0.53742981, -0.47373420),
-    float2(-0.26496911, -0.41893023), float2( 0.79197514,  0.19090188),
-    float2(-0.24188840,  0.99706507), float2(-0.81409955,  0.91437590),
-    float2( 0.19984126,  0.78641367), float2( 0.14383161, -0.14100790)
-};
-
-float CalcShadowPCF(float4 shadowCoord) {
+float IGN(float2 p) { float3 m=float3(0.06711056,0.00583715,52.9829189); return frac(m.z*frac(dot(p,m.xy))); }
+float CalcShadow(float4 sc, float2 sp) {
     if (ShadowMapEnabled == 0) return 1.0;
-    float3 projCoords = shadowCoord.xyz / shadowCoord.w;
-    projCoords.xy = projCoords.xy * 0.5 + 0.5;
-    projCoords.y = 1.0 - projCoords.y;
-    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
-        projCoords.y < 0.0 || projCoords.y > 1.0) return 1.0;
-    float2 fadeCoord = smoothstep(0.0, 0.05, projCoords.xy) * smoothstep(0.0, 0.05, 1.0 - projCoords.xy);
-    float edgeFade = fadeCoord.x * fadeCoord.y;
-    float shadow = 0.0;
-    for (int i = 0; i < 16; i++)
-        shadow += shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy + poissonDisk[i] * ShadowTexelSize * 1.5, projCoords.z - ShadowBias);
-    shadow /= 16.0;
-    return lerp(1.0, shadow, ShadowStrength * edgeFade);
+    float3 p = sc.xyz / sc.w;
+    p.xy = p.xy * 0.5 + 0.5; p.y = 1.0 - p.y;
+    if (p.z > 1.0 || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return 1.0;
+    float2 fc = smoothstep(0.0, 0.05, p.xy) * smoothstep(0.0, 0.05, 1.0 - p.xy);
+    float angle = IGN(sp) * 6.28318530;
+    float sa = sin(angle), ca = cos(angle);
+    float2x2 rot = float2x2(ca, sa, -sa, ca);
+    float rad = ShadowTexelSize * ShadowLightSize * 6.0, s = 0.0;
+    for (int i = 0; i < 16; i++) s += shadowMap.SampleCmpLevelZero(shadowSampler, p.xy + mul(rot, disk[i])*rad, p.z - ShadowBias);
+    return lerp(1.0, s/16.0, ShadowStrength * fc.x * fc.y);
 }
 
-float3 ACESFilm(float3 x) {
-    return saturate((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14));
+// ---- Wave height field ----
+float WaterHeight(float2 xz, float time) {
+    float2 w1 = float2( time*0.45,  time*0.30);
+    float2 w2 = float2(-time*0.35,  time*0.50);
+    float h = 0.0;
+    h += sin(xz.x*0.24+w1.x) * sin(xz.y*0.19+w1.y);
+    h += sin(xz.x*0.33+w2.x-xz.y*0.11) * 0.65;
+    h += sin(xz.x*0.80+w1.x*1.9+xz.y*0.58) * 0.40;
+    h += sin(xz.x*1.10-w2.x*2.1) * sin(xz.y*0.88+w2.y*1.4) * 0.35;
+    h += sin(xz.x*2.20+w1.x*3.3) * sin(xz.y*1.85-w1.y*2.7) * 0.15;
+    h += sin(xz.x*3.00-w2.x*4.2+xz.y*2.30) * 0.10;
+    return h;
+}
+float3 WaveNormal(float3 wp, float3 origNorm, float time) {
+    if (origNorm.y < 0.5) return origNorm;
+    float d = 0.15;
+    float xd = (WaterHeight(wp.xz - float2(d,0),time) - WaterHeight(wp.xz + float2(d,0),time)) / (2.0*d);
+    float zd = (WaterHeight(wp.xz - float2(0,d),time) - WaterHeight(wp.xz + float2(0,d),time)) / (2.0*d);
+    return normalize(float3(xd*0.30, 1.0, zd*0.30));
 }
 
-float FresnelSchlick(float cosTheta) {
-    return F0_WATER + (1.0 - F0_WATER) * pow(saturate(1.0 - cosTheta), 5.0);
-}
-
-float DistributionGGX(float NdotH, float roughness) {
-    float a = roughness * roughness;
-    float a2 = a * a;
-    float denom = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    return a2 / (PI * denom * denom);
-}
-
-float3 SampleSky(float3 dir, float3 sunDir, float3 sunColor) {
+// ---- Sky ----
+float3 SampleSky(float3 dir, float3 sunDir, float3 sunCol, float3 amb) {
     float y = max(dir.y, 0.0);
-    float3 sky = lerp(float3(0.7, 0.82, 0.95), float3(0.25, 0.45, 0.85), pow(y, 0.5));
-    float sunDot = max(dot(dir, sunDir), 0.0);
-    sky += sunColor * pow(sunDot, 512.0) * 3.0;
-    sky += sunColor * pow(sunDot, 64.0) * 0.3;
-    if (dir.y < 0.0) {
-        float t = saturate(-dir.y * 3.0);
-        sky = lerp(float3(0.35, 0.41, 0.47), float3(0.02, 0.05, 0.1), t);
-    }
+    float3 horiz  = lerp(float3(0.70,0.82,0.95), amb, 0.30);
+    float3 zenith = lerp(float3(0.22,0.42,0.82), amb*0.65, 0.25);
+    float3 sky = lerp(horiz, zenith, pow(y, 0.45));
+    float sd = max(dot(dir,sunDir), 0.0);
+    sky += sunCol*pow(sd,500.0)*5.0 + sunCol*pow(sd,60.0)*0.5;
+    if (dir.y < 0.0) sky = lerp(horiz*0.5, float3(0.02,0.04,0.08), saturate(-dir.y*4.0));
     return sky;
 }
+float3 ACESFilm(float3 x) { return saturate((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14)); }
+float  Fresnel(float c)   { return 0.02 + 0.98*pow(saturate(1.0-c),5.0); }
+float  GGX(float NdotH, float r) { float a=r*r*r*r; float d=NdotH*NdotH*(a-1.0)+1.0; return a/(3.14159265*d*d); }
 
-float3 WaterAbsorption(float depth) {
-    return exp(-float3(0.45, 0.09, 0.04) * max(depth, 0.0));
+// ---- VS ----
+VS_OUTPUT VS_Main(VS_INPUT i) {
+    VS_OUTPUT o;
+    float4 wp = mul(float4(i.POSITION, 1.0), World);
+    o.Position    = mul(float4(i.POSITION, 1.0), WVP);
+    o.WorldPos    = wp.xyz;
+    o.Normal      = i.NORMAL;
+    o.Color       = i.COLOR;
+    o.ShadowCoord = mul(float4(wp.xyz, 1.0), ShadowLightVP);
+    o.Time        = MatTiling.x;
+    return o;
 }
 
-float CausticPattern(float3 pos, float time) {
-    float2 p = pos.xz * 0.8;
-    float c = 0.0;
-    for (int i = 0; i < 2; i++) {
-        float t = time * (0.8 + float(i) * 0.4);
-        float2 uv = p * (1.0 + float(i) * 0.5);
-        c += sin(uv.x * 3.0 + t) * sin(uv.y * 3.0 - t * 0.7) * 0.5 + 0.5;
-        c += sin(uv.x * 2.1 - t * 0.5 + uv.y * 1.7) * sin(uv.y * 2.8 + t * 0.3) * 0.5 + 0.5;
-    }
-    return saturate(c * 0.25);
-}
+// ---- PS ----
+float4 PS_Main(VS_OUTPUT i) : SV_Target {
+    float time = i.Time;
+    float3 N = WaveNormal(i.WorldPos, i.Normal, time);
+    float3 V = normalize(CameraPos - i.WorldPos);
 
-float3 DetailNormal(float3 worldPos, float time) {
-    float dx = cos(worldPos.x * 2.5 + worldPos.z * 0.7 + time * 1.3) * 0.15
-             + cos(worldPos.x * 4.0 - worldPos.z * 1.2 + time * 2.1) * 0.08
-             + cos(worldPos.x * 7.0 + worldPos.z * 2.3 + time * 3.5) * 0.04;
-    float dz = cos(worldPos.z * 2.5 + worldPos.x * 0.5 + time * 1.1) * 0.15
-             + cos(worldPos.z * 4.0 - worldPos.x * 0.9 + time * 1.7) * 0.08
-             + cos(worldPos.z * 7.0 + worldPos.x * 1.8 + time * 2.9) * 0.04;
-    return normalize(float3(-dx, 1.0, -dz));
-}
-
-// ============================================================
-// Vertex Shader
-// ============================================================
-VS_OUTPUT VS_Main(VS_INPUT input) {
-    VS_OUTPUT output;
-    float time = World[0][3];
-    float4 worldPos = mul(float4(input.POSITION, 1.0), World);
-
-    float3 waveNormal = float3(0, 1, 0);
-    float3 displaced = worldPos.xyz;
-    if (input.NORMAL.y > 0.5) {
-        float3 disp;
-        GerstnerDisplacement(worldPos.xyz, time, disp, waveNormal);
-        displaced += disp;
-    }
-
-    float3 offset = displaced - worldPos.xyz;
-    output.Position = mul(float4(input.POSITION + offset, 1.0), WVP);
-    output.WorldPos = displaced;
-    output.WorldNorm = waveNormal;
-
-    float3 up = abs(waveNormal.y) < 0.99 ? float3(0, 1, 0) : float3(1, 0, 0);
-    output.WorldTan = normalize(cross(up, waveNormal));
-    output.WorldBit = cross(waveNormal, output.WorldTan);
-    output.Color = input.COLOR;
-    output.TexCoord = input.TEXCOORD;
-    output.ShadowCoord = mul(float4(displaced, 1.0), ShadowLightVP);
-    return output;
-}
-
-// ============================================================
-// Pixel Shader
-// ============================================================
-float4 PS_Main(VS_OUTPUT input) : SV_Target
-{
-    float time = World[0][3];
-    float3 N = normalize(input.WorldNorm);
-    float3 V = normalize(CameraPos - input.WorldPos);
-
-    if (N.y > 0.3) {
-        float3 detail = DetailNormal(input.WorldPos, time);
-        N = normalize(N + (detail - float3(0, 1, 0)) * 0.6);
-    }
-
-    // Find first directional light
-    float3 sunDir = float3(0, -1, 0);
-    float3 sunColor = float3(1, 1, 1);
+    float3 sunDir = float3(0,1,0), sunCol = float3(1,1,1);
     for (uint li = 0; li < NumActiveLights; li++) {
-        if (Lights[li].Type == 0) {
-            sunDir = normalize(-Lights[li].Direction);
-            sunColor = Lights[li].Color * Lights[li].Intensity;
-            break;
-        }
+        if (Lights[li].Type == 0) { sunDir = normalize(-Lights[li].Direction); sunCol = Lights[li].Color * Lights[li].Intensity; break; }
+    }
+    float3 amb = AmbientColor * AmbientIntensity;
+
+    float NdotV = max(dot(N,V), 0.001);
+    float fresnel = Fresnel(NdotV);
+
+    float shadow = CalcShadow(i.ShadowCoord, i.Position.xy);
+    shadow *= smoothstep(-0.1, 0.2, dot(N,sunDir));
+    float NdotL = saturate(dot(N,sunDir)*0.65+0.35);
+    float3 diffuse = sunCol * NdotL * shadow;
+
+    float3 wcSqrt = float3(64.0,160.0,255.0)/255.0 * 0.35;
+    float3 wColor = wcSqrt * wcSqrt * 3.0;
+    float3 waterBody = wColor * (amb*1.8 + diffuse*0.9);
+    float sss = pow(max(dot(V,-sunDir),0.0),4.0) * (1.0-NdotV) * 0.35;
+    waterBody += float3(0.0,0.08,0.14) * sunCol * sss;
+
+    float3 R    = reflect(-V,N);
+    float3 refl = SampleSky(R, sunDir, sunCol, amb);
+
+    float NdotH = max(dot(N,normalize(V+sunDir)),0.0);
+    float spec  = GGX(NdotH,0.07)*fresnel*shadow;
+    float3 specC = sunCol * min(spec, 40.0);
+
+    float3 final = lerp(waterBody, refl, fresnel) + specC;
+
+    if (i.Normal.y > 0.5) {
+        float2 cp = i.WorldPos.xz * 0.65; float t = time*0.9;
+        float c = sin(cp.x*2.7+t)*sin(cp.y*2.7-t*0.75)*0.5+0.5;
+        c += sin(cp.x*1.9-t*0.55+cp.y*1.6)*sin(cp.y*2.4+t*0.35)*0.5+0.5;
+        c = saturate(pow(c*0.5,1.6)*1.5);
+        final += sunCol * c * 0.05 * shadow;
     }
 
-    float NdotV = max(dot(N, V), 0.001);
-    float fresnel = FresnelSchlick(NdotV);
+    final = ACESFilm(final);
+    if (FogEnd > 0.0) { float dist=length(i.WorldPos-CameraPos); final=lerp(FogColor.rgb,final,saturate((FogEnd-dist)/(FogEnd-FogStart))); }
 
-    float3 R = reflect(-V, N);
-    float3 reflectionColor = SampleSky(R, sunDir, sunColor);
-
-    float terrainDepth = max(SEA_LEVEL - input.WorldPos.y + 8.0, 0.0);
-    float3 absorption = WaterAbsorption(terrainDepth);
-    float depthFactor = saturate(terrainDepth / 20.0);
-    float3 refractionColor = lerp(float3(0.05, 0.35, 0.4), float3(0.01, 0.05, 0.12), depthFactor) * absorption;
-
-    float sssDot = max(dot(V, -sunDir), 0.0);
-    float sss = pow(sssDot, 4.0) * (1.0 - NdotV) * 0.4;
-    float3 sssColor = float3(0.1, 0.5, 0.4) * sunColor * sss;
-
-    float caustic = CausticPattern(input.WorldPos, time);
-    float3 causticColor = sunColor * caustic * 0.15 * (1.0 - depthFactor);
-
-    float shadow = CalcShadowPCF(input.ShadowCoord);
-    float rawNdotL = dot(N, sunDir);
-    shadow *= smoothstep(-0.1, 0.2, rawNdotL);
-
-    float NdotL = saturate(rawNdotL * 0.7 + 0.3);
-    float3 ambient = AmbientColor * AmbientIntensity * 0.4;
-    float3 diffuse = sunColor * NdotL * shadow;
-
-    float3 H = normalize(V + sunDir);
-    float NdotH = max(dot(N, H), 0.0);
-    float D = DistributionGGX(NdotH, 0.05);
-    float spec = D * fresnel * shadow;
-    float3 specColor = sunColor * min(spec, 50.0);
-
-    float3 waterBody = refractionColor * (ambient + diffuse) + causticColor * shadow + sssColor;
-    float3 finalColor = lerp(waterBody, reflectionColor, fresnel);
-    finalColor += specColor;
-
-    float shoreDepth = saturate(terrainDepth / 3.0);
-    float foam = 0.0;
-    if (shoreDepth < 0.5) {
-        float foamLine = sin(input.WorldPos.x * 3.0 + input.WorldPos.z * 2.0 + time * 2.0) * 0.5 + 0.5;
-        foam = (1.0 - shoreDepth * 2.0) * foamLine * 0.6;
-    }
-    float crestFoam = saturate((input.WorldPos.y - SEA_LEVEL + 0.05) * 8.0);
-    crestFoam *= crestFoam;
-    foam = max(foam, crestFoam * 0.3);
-    finalColor = lerp(finalColor, float3(0.9, 0.95, 1.0) * (ambient + diffuse), foam);
-
-    finalColor = ACESFilm(finalColor);
-
-    if (FogEnd > 0.0) {
-        float dist = length(input.WorldPos - CameraPos);
-        float fogFactor = saturate((FogEnd - dist) / (FogEnd - FogStart));
-        finalColor = lerp(FogColor.rgb, finalColor, fogFactor);
-    }
-
-    float alpha = lerp(0.6, 0.95, fresnel);
-    alpha = lerp(alpha, 0.85, depthFactor);
-    alpha = max(alpha, foam * 0.8 + 0.2);
-
-    return float4(finalColor, alpha);
+    float alpha = lerp(0.72, 0.97, pow(saturate(1.0-NdotV), 2.0));
+    return float4(final, alpha);
 }
