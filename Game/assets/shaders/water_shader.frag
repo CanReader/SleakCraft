@@ -1,13 +1,10 @@
 #version 450
 
-layout(location = 0) in vec3 fragWorldPos;
-layout(location = 1) in vec3 fragWorldNorm;
-layout(location = 2) in vec3 fragWorldTan;
-layout(location = 3) in vec3 fragWorldBit;
-layout(location = 4) in vec4 fragColor;
-layout(location = 5) in vec2 fragUV;
-layout(location = 6) in vec4 fragShadowCoord;
-layout(location = 7) in float fragTime;
+layout(location = 0) in vec3  fragWorldPos;
+layout(location = 1) in vec3  fragNormal;
+layout(location = 2) in vec4  fragColor;
+layout(location = 3) in vec4  fragShadowCoord;
+layout(location = 4) in float fragTime;
 
 layout(location = 0) out vec4 outColor;
 
@@ -43,258 +40,149 @@ layout(set = 2, binding = 0) uniform ShadowLightUBO {
 layout(set = 3, binding = 0) uniform sampler2DShadow shadowMap;
 
 // ============================================================
-// Constants
+// Shadow — 16-sample PCF with IGN rotation
 // ============================================================
-const float SEA_LEVEL = 64.875;  // Water surface Y (64 + 0.875 lowered top)
-const float WATER_IOR = 1.33;
-const float F0_WATER = 0.02;     // Fresnel reflectance at normal incidence
-
-// ============================================================
-// Shadow (same as flat shader)
-// ============================================================
-float InterleavedGradientNoise(vec2 screenPos) {
-    vec3 magic = vec3(0.06711056, 0.00583715, 52.9829189);
-    return fract(magic.z * fract(dot(screenPos, magic.xy)));
+float InterleavedGradientNoise(vec2 p) {
+    vec3 m = vec3(0.06711056, 0.00583715, 52.9829189);
+    return fract(m.z * fract(dot(p, m.xy)));
 }
-
 const vec2 disk[16] = vec2[](
-    vec2(-0.9465, -0.1484), vec2(-0.7431,  0.5353),
-    vec2(-0.5863, -0.5879), vec2(-0.3935,  0.1025),
-    vec2(-0.2428,  0.7722), vec2(-0.1074, -0.3075),
-    vec2( 0.0542, -0.8645), vec2( 0.1267,  0.4300),
-    vec2( 0.2787, -0.1353), vec2( 0.3842,  0.6501),
-    vec2( 0.4714, -0.5537), vec2( 0.5765,  0.1675),
-    vec2( 0.6712, -0.3340), vec2( 0.7527,  0.4813),
-    vec2( 0.8745, -0.0910), vec2( 0.9601,  0.2637)
+    vec2(-0.9465,-0.1484), vec2(-0.7431, 0.5353), vec2(-0.5863,-0.5879), vec2(-0.3935, 0.1025),
+    vec2(-0.2428, 0.7722), vec2(-0.1074,-0.3075), vec2( 0.0542,-0.8645), vec2( 0.1267, 0.4300),
+    vec2( 0.2787,-0.1353), vec2( 0.3842, 0.6501), vec2( 0.4714,-0.5537), vec2( 0.5765, 0.1675),
+    vec2( 0.6712,-0.3340), vec2( 0.7527, 0.4813), vec2( 0.8745,-0.0910), vec2( 0.9601, 0.2637)
 );
-
 float CalcShadow(vec4 sc) {
-    vec3 projCoords = sc.xyz / sc.w;
-    projCoords.xy = projCoords.xy * 0.5 + 0.5;
-    if (projCoords.x < 0.0 || projCoords.x > 1.0 ||
-        projCoords.y < 0.0 || projCoords.y > 1.0 ||
-        projCoords.z < 0.0 || projCoords.z > 1.0)
-        return 1.0;
-    float biasedDepth = projCoords.z - uShadowBias;
-    float angle = InterleavedGradientNoise(gl_FragCoord.xy) * 6.283185;
+    vec3 p = sc.xyz / sc.w;
+    p.xy = p.xy * 0.5 + 0.5;
+    if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0 || p.z < 0.0 || p.z > 1.0) return 1.0;
+    float angle = InterleavedGradientNoise(gl_FragCoord.xy) * 6.28318530;
     float sa = sin(angle), ca = cos(angle);
-    mat2 rotation = mat2(ca, sa, -sa, ca);
-    float radius = uShadowTexelSize * uLightSize * 6.0;
-    float shadow = 0.0;
-    for (int i = 0; i < 16; i++) {
-        vec2 offset = rotation * disk[i] * radius;
-        shadow += texture(shadowMap, vec3(projCoords.xy + offset, biasedDepth));
-    }
-    shadow /= 16.0;
-    return mix(1.0, shadow, uShadowStrength);
+    mat2  rot = mat2(ca, sa, -sa, ca);
+    float rad = uShadowTexelSize * uLightSize * 6.0;
+    float s = 0.0;
+    for (int i = 0; i < 16; i++) s += texture(shadowMap, vec3(p.xy + rot * disk[i] * rad, p.z - uShadowBias));
+    return mix(1.0, s / 16.0, uShadowStrength);
 }
 
 // ============================================================
-// ACES tone mapping
+// Procedural wave height field (BSL-style: 2 wind layers, finite-diff normals)
 // ============================================================
-vec3 ACESFilm(vec3 x) {
-    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3(0.0), vec3(1.0));
+float WaterHeight(vec2 xz, float time) {
+    vec2 w1 = vec2( time * 0.45,  time * 0.30);
+    vec2 w2 = vec2(-time * 0.35,  time * 0.50);
+
+    float h = 0.0;
+    // Large lazy waves
+    h += sin(xz.x * 0.24 + w1.x)          * sin(xz.y * 0.19 + w1.y);
+    h += sin(xz.x * 0.33 + w2.x - xz.y * 0.11) * 0.65;
+    // Medium chop
+    h += sin(xz.x * 0.80 + w1.x * 1.9 + xz.y * 0.58) * 0.40;
+    h += sin(xz.x * 1.10 - w2.x * 2.1) * sin(xz.y * 0.88 + w2.y * 1.4) * 0.35;
+    // Fine ripples
+    h += sin(xz.x * 2.20 + w1.x * 3.3) * sin(xz.y * 1.85 - w1.y * 2.7) * 0.15;
+    h += sin(xz.x * 3.00 - w2.x * 4.2 + xz.y * 2.30) * 0.10;
+    return h;
+}
+
+// Finite-difference normal — purely fragment-shader, no vertex displacement
+vec3 WaveNormal(vec3 wp, float time) {
+    if (fragNormal.y < 0.5) return fragNormal;   // side faces keep flat normal
+
+    const float d = 0.15;
+    float h1 = WaterHeight(wp.xz + vec2( d, 0.0), time);
+    float h2 = WaterHeight(wp.xz - vec2( d, 0.0), time);
+    float h3 = WaterHeight(wp.xz + vec2(0.0,  d), time);
+    float h4 = WaterHeight(wp.xz - vec2(0.0,  d), time);
+
+    float xd = (h2 - h1) / (2.0 * d);
+    float zd = (h4 - h3) / (2.0 * d);
+    return normalize(vec3(xd * 0.30, 1.0, zd * 0.30));
 }
 
 // ============================================================
-// Fresnel — full Schlick with roughness
+// Sky reflection — matches game sky gradient, tinted by ambient
 // ============================================================
-float FresnelSchlick(float cosTheta) {
-    return F0_WATER + (1.0 - F0_WATER) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
-}
-
-// ============================================================
-// GGX specular distribution
-// ============================================================
-float DistributionGGX(float NdotH, float roughness) {
-    float a = roughness * roughness;
-    float a2 = a * a;
-    float denom = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    return a2 / (3.14159265 * denom * denom);
-}
-
-// ============================================================
-// Analytical sky reflection — procedural sky gradient
-// ============================================================
-vec3 SampleSky(vec3 dir) {
-    // Sky gradient from horizon to zenith
+vec3 SampleSky(vec3 dir, vec3 sunDir, vec3 sunColor, vec3 amb) {
     float y = max(dir.y, 0.0);
-    vec3 horizonColor = vec3(0.7, 0.82, 0.95);
-    vec3 zenithColor  = vec3(0.25, 0.45, 0.85);
-    vec3 sky = mix(horizonColor, zenithColor, pow(y, 0.5));
-
-    // Sun contribution in reflection
-    vec3 sunDir = normalize(-uLightDir.xyz);
-    float sunDot = max(dot(dir, sunDir), 0.0);
-    vec3 sunColor = uLightColor.rgb * uLightColor.a;
-    // Sun disk
-    sky += sunColor * pow(sunDot, 512.0) * 3.0;
-    // Sun glow
-    sky += sunColor * pow(sunDot, 64.0) * 0.3;
-
-    // Below horizon: dark water-ish color
-    if (dir.y < 0.0) {
-        float t = clamp(-dir.y * 3.0, 0.0, 1.0);
-        sky = mix(horizonColor * 0.5, vec3(0.02, 0.05, 0.1), t);
-    }
-
+    vec3 horiz  = mix(vec3(0.70, 0.82, 0.95), amb, 0.30);
+    vec3 zenith = mix(vec3(0.22, 0.42, 0.82), amb * 0.65, 0.25);
+    vec3 sky = mix(horiz, zenith, pow(y, 0.45));
+    float sd = max(dot(dir, sunDir), 0.0);
+    sky += sunColor * pow(sd, 500.0) * 5.0 + sunColor * pow(sd, 60.0) * 0.5;
+    if (dir.y < 0.0) sky = mix(horiz * 0.5, vec3(0.02, 0.04, 0.08), clamp(-dir.y * 4.0, 0.0, 1.0));
     return sky;
 }
 
 // ============================================================
-// Volumetric absorption / scattering
+// Helpers
 // ============================================================
-vec3 WaterAbsorption(float depth) {
-    // Beer-Lambert absorption: different rates per channel
-    // Red absorbs fastest, blue slowest — creates natural blue-green tint
-    vec3 absorptionCoeff = vec3(0.45, 0.09, 0.04);
-    return exp(-absorptionCoeff * max(depth, 0.0));
-}
+vec3  ACESFilm(vec3 x) { return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), vec3(0), vec3(1)); }
+float FresnelSchlick(float c) { return 0.02 + 0.98 * pow(clamp(1.0 - c, 0.0, 1.0), 5.0); }
+float GGX(float NdotH, float r) { float a=r*r*r*r; float d=NdotH*NdotH*(a-1.0)+1.0; return a/(3.14159265*d*d); }
 
 // ============================================================
-// Caustics pattern (animated voronoi-like)
+// Main
 // ============================================================
-float CausticPattern(vec3 pos, float time) {
-    vec2 p = pos.xz * 0.8;
-    float c = 0.0;
-    // Two layers of animated caustics
-    for (int i = 0; i < 2; i++) {
-        float t = time * (0.8 + float(i) * 0.4);
-        vec2 uv = p * (1.0 + float(i) * 0.5);
-        // Simple animated caustic using sine interference
-        c += sin(uv.x * 3.0 + t) * sin(uv.y * 3.0 - t * 0.7) * 0.5 + 0.5;
-        c += sin(uv.x * 2.1 - t * 0.5 + uv.y * 1.7) * sin(uv.y * 2.8 + t * 0.3) * 0.5 + 0.5;
-    }
-    return clamp(c * 0.25, 0.0, 1.0);
-}
-
-// ============================================================
-// Detail wave normal (high-frequency ripples on top of Gerstner)
-// ============================================================
-vec3 DetailNormal(vec3 worldPos, float time) {
-    float scale1 = 2.5, scale2 = 4.0, scale3 = 7.0;
-    float dx = 0.0, dz = 0.0;
-
-    // Layer 1: medium ripples
-    dx += cos(worldPos.x * scale1 + worldPos.z * 0.7 + time * 1.3) * 0.15;
-    dz += cos(worldPos.z * scale1 + worldPos.x * 0.5 + time * 1.1) * 0.15;
-
-    // Layer 2: fine ripples
-    dx += cos(worldPos.x * scale2 - worldPos.z * 1.2 + time * 2.1) * 0.08;
-    dz += cos(worldPos.z * scale2 - worldPos.x * 0.9 + time * 1.7) * 0.08;
-
-    // Layer 3: micro detail
-    dx += cos(worldPos.x * scale3 + worldPos.z * 2.3 + time * 3.5) * 0.04;
-    dz += cos(worldPos.z * scale3 + worldPos.x * 1.8 + time * 2.9) * 0.04;
-
-    return normalize(vec3(-dx, 1.0, -dz));
-}
-
 void main() {
-    float time = fragTime;
-    vec3 N = normalize(fragWorldNorm);
-    vec3 V = normalize(uCameraPos.xyz - fragWorldPos);
+    float time   = fragTime;
+    vec3  N      = WaveNormal(fragWorldPos, time);
+    vec3  V      = normalize(uCameraPos.xyz - fragWorldPos);
+    vec3  sunDir = normalize(-uLightDir.xyz);
+    vec3  sunCol = uLightColor.rgb * uLightColor.a;
+    vec3  amb    = uAmbient.rgb * uAmbient.a;
 
-    // Blend Gerstner macro normal with detail micro ripples
-    if (N.y > 0.3) {
-        vec3 detail = DetailNormal(fragWorldPos, time);
-        // Blend: keep Gerstner as base, perturb with detail
-        N = normalize(N + (detail - vec3(0.0, 1.0, 0.0)) * 0.6);
-    }
-
-    vec3 lightDir = normalize(uLightDir.xyz);
-    vec3 sunDir = -lightDir;
-    vec3 lightColor = uLightColor.rgb * uLightColor.a;
-
-    // ---- Fresnel ----
-    float NdotV = max(dot(N, V), 0.001);
+    float NdotV  = max(dot(N, V), 0.001);
     float fresnel = FresnelSchlick(NdotV);
 
-    // ---- Reflection ----
-    vec3 R = reflect(-V, N);
-    vec3 reflectionColor = SampleSky(R);
-
-    // ---- Water depth & absorption ----
-    // Approximate depth from water surface Y
-    float waterSurfaceY = fragWorldPos.y;
-    float terrainDepth = max(SEA_LEVEL - fragWorldPos.y + 8.0, 0.0);
-    vec3 absorption = WaterAbsorption(terrainDepth);
-
-    // ---- Refraction color ----
-    // Deep water base color with absorption
-    vec3 shallowColor = vec3(0.05, 0.35, 0.4);
-    vec3 deepColor    = vec3(0.01, 0.05, 0.12);
-    float depthFactor = clamp(terrainDepth / 20.0, 0.0, 1.0);
-    vec3 refractionColor = mix(shallowColor, deepColor, depthFactor) * absorption;
-
-    // ---- Subsurface scattering ----
-    // Light passing through water at shallow viewing angles
-    float sssDot = max(dot(V, lightDir), 0.0);
-    float sss = pow(sssDot, 4.0) * (1.0 - NdotV) * 0.4;
-    vec3 sssColor = vec3(0.1, 0.5, 0.4) * lightColor * sss;
-
-    // ---- Caustics ----
-    float caustic = CausticPattern(fragWorldPos, time);
-    vec3 causticColor = lightColor * caustic * 0.15 * (1.0 - depthFactor);
-
-    // ---- Shadow ----
+    // ---- Shadow & diffuse ----
     float shadow = CalcShadow(fragShadowCoord);
-    float rawNdotL = dot(N, sunDir);
-    shadow *= smoothstep(-0.1, 0.2, rawNdotL);
+    shadow *= smoothstep(-0.1, 0.2, dot(N, sunDir));
+    float NdotL  = clamp(dot(N, sunDir) * 0.65 + 0.35, 0.0, 1.0);
+    vec3  diffuse = sunCol * NdotL * shadow;
 
-    // ---- Diffuse lighting ----
-    float NdotL = clamp(rawNdotL * 0.7 + 0.3, 0.0, 1.0);
-    vec3 ambient = uAmbient.rgb * uAmbient.a * 0.4;
-    vec3 diffuse = lightColor * NdotL * shadow;
+    // ---- BSL water color: R=64 G=160 B=255 I=0.35, then squared ----
+    // waterColorSqrt = vec3(64,160,255)/255 * 0.35  →  squared  →  *3 to lift brightness
+    vec3 wcSqrt  = vec3(64.0, 160.0, 255.0) / 255.0 * 0.35;
+    vec3 wColor  = wcSqrt * wcSqrt * 3.0;          // ≈ (0.023, 0.145, 0.368)
+    vec3 waterBody = wColor * (amb * 1.8 + diffuse * 0.9);
 
-    // ---- Specular (GGX) ----
-    vec3 H = normalize(V + sunDir);
+    // Subsurface forward scatter (light passing through shallow water)
+    float sss = pow(max(dot(V, -sunDir), 0.0), 4.0) * (1.0 - NdotV) * 0.35;
+    waterBody += vec3(0.0, 0.08, 0.14) * sunCol * sss;
+
+    // ---- Sky reflection ----
+    vec3 R    = reflect(-V, N);
+    vec3 refl = SampleSky(R, sunDir, sunCol, amb);
+
+    // ---- GGX specular ----
+    vec3  H     = normalize(V + sunDir);
     float NdotH = max(dot(N, H), 0.0);
-    float D = DistributionGGX(NdotH, 0.05); // Very smooth water
-    float specular = D * fresnel * shadow;
-    vec3 specColor = lightColor * min(specular, 50.0);
+    float spec  = GGX(NdotH, 0.07) * fresnel * shadow;
+    vec3  specC = sunCol * min(spec, 40.0);
 
-    // ---- Compose ----
-    // Refraction: what you see through the water
-    vec3 waterBody = refractionColor * (ambient + diffuse) + causticColor * shadow + sssColor;
+    // ---- Compose: water body at normal incidence, sky at grazing ----
+    vec3 finalColor = mix(waterBody, refl, fresnel) + specC;
 
-    // Mix reflection and refraction via Fresnel
-    // Fresnel determines how much you see reflection vs what's below
-    vec3 finalColor = mix(waterBody, reflectionColor, fresnel);
-
-    // Add specular on top
-    finalColor += specColor;
-
-    // ---- Foam at shoreline and wave crests ----
-    float shoreDepth = clamp(terrainDepth / 3.0, 0.0, 1.0);
-    float foam = 0.0;
-    if (shoreDepth < 0.5) {
-        // Shore foam: animated edge line
-        float foamLine = sin(fragWorldPos.x * 3.0 + fragWorldPos.z * 2.0 + time * 2.0) * 0.5 + 0.5;
-        foam = (1.0 - shoreDepth * 2.0) * foamLine * 0.6;
+    // ---- Caustic shimmer (very subtle, projected down from wave normals) ----
+    if (fragNormal.y > 0.5) {
+        vec2  cp = fragWorldPos.xz * 0.65;
+        float t  = time * 0.9;
+        float c  = sin(cp.x*2.7+t) * sin(cp.y*2.7-t*0.75) * 0.5 + 0.5;
+        c += sin(cp.x*1.9-t*0.55+cp.y*1.6) * sin(cp.y*2.4+t*0.35) * 0.5 + 0.5;
+        c  = clamp(pow(c * 0.5, 1.6) * 1.5, 0.0, 1.0);
+        finalColor += sunCol * c * 0.05 * shadow;
     }
-    // Wave crest foam
-    float crestFoam = clamp((fragWorldPos.y - SEA_LEVEL + 0.05) * 8.0, 0.0, 1.0);
-    crestFoam *= crestFoam;
-    foam = max(foam, crestFoam * 0.3);
-    finalColor = mix(finalColor, vec3(0.9, 0.95, 1.0) * (ambient + diffuse), foam);
 
-    // ---- ACES tone mapping ----
+    // ---- ACES + fog ----
     finalColor = ACESFilm(finalColor);
-
-    // ---- Distance fog ----
     if (uFogEnd > 0.0) {
         float dist = length(fragWorldPos - uCameraPos.xyz);
-        float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
-        finalColor = mix(uFogColor.rgb, finalColor, fogFactor);
+        finalColor = mix(uFogColor.rgb, finalColor, clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0));
     }
 
-    // ---- Alpha ----
-    // More opaque at glancing angles (Fresnel), less at normal incidence
-    // Deep water is more opaque than shallow
-    float alpha = mix(0.6, 0.95, fresnel);
-    alpha = mix(alpha, 0.85, depthFactor);
-    alpha = max(alpha, foam * 0.8 + 0.2);
+    // ---- Alpha: BSL waterAlpha=0.70 base, Fresnel boosts edges to ~0.95 ----
+    float alpha = mix(0.72, 0.97, pow(clamp(1.0 - NdotV, 0.0, 1.0), 2.0));
 
     outColor = vec4(finalColor, alpha);
 }
