@@ -124,6 +124,15 @@ bool MainScene::Initialize() {
             auto vel = rb->GetVelocity();
             return (vel.Magnitude() > 0.01f) ? 1.0f : 0.0f;
         });
+        app->GetBenchmark()->RegisterMetric("VRAM_MB", [app]() {
+            return static_cast<float>(app->GetGPUMemoryUsed()) / (1024.0f * 1024.0f);
+        });
+        app->GetBenchmark()->RegisterMetric("VRAM_Pct", [app]() {
+            size_t budget = app->GetGPUMemoryBudget();
+            if (budget == 0) return 0.0f;
+            return (static_cast<float>(app->GetGPUMemoryUsed()) /
+                    static_cast<float>(budget)) * 100.0f;
+        });
     }
 
     m_mousePressedHandlerId  = EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
