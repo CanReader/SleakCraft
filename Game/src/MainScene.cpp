@@ -45,18 +45,19 @@ bool MainScene::Initialize() {
     cam->AddComponent<Sleak::RigidbodyComponent>(Sleak::BodyType::Dynamic);
     auto* rb = cam->GetComponent<Sleak::RigidbodyComponent>();
     rb->SetUseGravity(true);
-    rb->SetGravity(Vector3D(0, -9.81f, 0));
+    rb->SetGravity(Vector3D(0, -29.0f, 0));
     AddObject(cam);
     cam->Initialize();
     SetActiveCamera(cam);
 
     auto* fpc = cam->GetComponent<FirstPersonController>();
     if (fpc) {
-        fpc->SetMaxWalkSpeed(4.3f);
-        fpc->SetMaxAcceleration(1000.0f);
-        fpc->SetBrakingDeceleration(1000.0f);
-        fpc->SetGroundFriction(1.0f);
-        fpc->SetJumpZVelocity(fpc->GetJumpZVelocity()*1.8);
+        fpc->SetMaxWalkSpeed(4.317f);
+        fpc->SetSprintSpeedMultiplier(2.3f);
+        fpc->SetMaxAcceleration(50.0f);
+        fpc->SetBrakingDeceleration(50.0f);
+        fpc->SetGroundFriction(4.0f);
+        fpc->SetJumpZVelocity(8.8f);
         fpc->SetPitch(0.0f);
         fpc->SetYaw(0.0f);
         fpc->SetEnabled(true);
@@ -87,7 +88,9 @@ bool MainScene::Initialize() {
         {
             const std::string rdStr = Sleak::CommandLine::GetValue("-rd");
             int cliRD = rdStr.empty() ? 0 : std::stoi(rdStr);
-            m_chunkManager.SetRenderDistance(cliRD > 0 ? cliRD : 32);
+            int rd = cliRD > 0 ? cliRD : 12;
+            if (rd > 16) rd = 16;
+            m_chunkManager.SetRenderDistance(rd);
         }
         m_chunkManager.SetMultithreaded(m_multithreadedLoading);
 
@@ -95,6 +98,11 @@ bool MainScene::Initialize() {
         SaveGame();
     } else {
         LoadGame();
+    }
+
+    if (auto* lm = GetLightManager()) {
+        float fogDist = m_chunkManager.GetDrawDistance();
+        lm->SetFogDistances(fogDist * 0.9f, fogDist);
     }
 
     // Register game-specific benchmark metrics
@@ -438,6 +446,15 @@ void MainScene::RenderUI() {
     else
         UI::TextDisabled("GPU: N/A");
 
+    size_t vramUsed = app->GetGPUMemoryUsed();
+    size_t vramBudget = app->GetGPUMemoryBudget();
+    if (vramBudget > 0) {
+        float usedMB = static_cast<float>(vramUsed) / (1024.0f * 1024.0f);
+        float budgetMB = static_cast<float>(vramBudget) / (1024.0f * 1024.0f);
+        float pct = (static_cast<float>(vramUsed) / static_cast<float>(vramBudget)) * 100.0f;
+        UI::Text("VRAM: %.0f / %.0f MB (%.0f%%)", usedMB, budgetMB, pct);
+    }
+
     UI::EndPanel();
 
     // --- Settings panel (below HUD) ---
@@ -477,12 +494,12 @@ void MainScene::RenderUI() {
 
     UI::Separator();
     float rd = static_cast<float>(m_chunkManager.GetRenderDistance());
-    if (UI::DragFloat("Render Distance", &rd, 1.0f, 2.0f, 256.0f)) {
+    if (UI::DragFloat("Render Distance", &rd, 1.0f, 2.0f, 16.0f)) {
         m_chunkManager.SetRenderDistance(static_cast<int>(rd));
         float drawDist = m_chunkManager.GetDrawDistance();
         auto* lm = GetLightManager();
         if (lm)
-            lm->SetFogDistances(drawDist * 0.75f, drawDist);
+            lm->SetFogDistances(drawDist * 0.9f, drawDist);
         // Shadow frustum stays fixed — not tied to draw distance
         // (scaling it causes low-res shadows and disappearing issues)
     }
@@ -646,7 +663,10 @@ void MainScene::LoadGame() {
     {
         const std::string rdStr = Sleak::CommandLine::GetValue("-rd");
         int cliRD = rdStr.empty() ? 0 : std::stoi(rdStr);
-        m_chunkManager.SetRenderDistance(cliRD > 0 ? cliRD : 8);
+        int rd = cliRD > 0 ? cliRD : static_cast<int>(meta.player.renderDistance);
+        if (rd < 4) rd = 4;
+        if (rd > 16) rd = 16;
+        m_chunkManager.SetRenderDistance(rd);
     }
     m_chunkManager.SetMultithreaded(m_multithreadedLoading);
 
@@ -811,7 +831,7 @@ void MainScene::SetupLighting() {
 
         lm->SetFogColor(0.62f, 0.78f, 1.0f);
         float fogDist = m_chunkManager.GetDrawDistance();
-        lm->SetFogDistances(fogDist * 0.75f, fogDist);
+        lm->SetFogDistances(fogDist * 0.9f, fogDist);
         lm->SetFogEnabled(true);
     }
 }

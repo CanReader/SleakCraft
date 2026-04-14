@@ -2,26 +2,17 @@
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec4 inTangent;
-layout(location = 3) in vec4 inColor;
-layout(location = 4) in vec2 inUV;
+layout(location = 2) in vec4 inColor;
+layout(location = 3) in vec2 inUV;
 
 layout(push_constant) uniform TransformPC {
     mat4 WVP;
     mat4 World;
 };
 
-layout(set = 1, binding = 0) uniform MaterialUBO {
-    uint  hasDiffuseMap, hasNormalMap, hasSpecularMap, hasRoughnessMap;
-    uint  hasMetallicMap, hasAOMap, hasEmissiveMap, _matPad0;
-    vec4  matDiffuseColor;
-    vec3  matSpecularColor; float matShininess;
-    vec3  matEmissiveColor; float matEmissiveIntensity;
-    float matMetallic, matRoughness, matAO, matNormalIntensity;
-    vec2  matTiling; vec2 matOffset;
-    float matOpacity; float matAlphaCutoff; float _matPad1, _matPad2;
-};
-
+// NOTE: The engine's Vulkan pipeline layout has no MaterialUBO slot (set 1 is
+// the bone UBO, used only by skinned shaders). Time is transported via
+// uCameraPos.w, which LightManager populates with a monotonic scene clock.
 layout(set = 2, binding = 0) uniform ShadowLightUBO {
     vec4  uLightDir;
     vec4  uLightColor;
@@ -53,7 +44,7 @@ void main() {
     fragWorldPos   = inPosition;
     fragNormal     = inNormal;
     fragColor      = inColor;
-    fragTime       = matTiling.x;     // game time packed here by SetTiling()
+    fragTime       = uCameraPos.w;    // scene clock stashed in cam.w by LightManager
 
     float normalBias = uLightDir.w;
     fragShadowCoord  = uLightVP * (vec4(inPosition, 1.0) + vec4(inNormal * normalBias, 0.0));

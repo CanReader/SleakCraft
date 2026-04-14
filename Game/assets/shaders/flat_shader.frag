@@ -2,11 +2,9 @@
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragWorldNorm;
-layout(location = 2) in vec3 fragWorldTan;
-layout(location = 3) in vec3 fragWorldBit;
-layout(location = 4) in vec4 fragColor;
-layout(location = 5) in vec2 fragUV;
-layout(location = 6) in vec4 fragShadowCoord;
+layout(location = 2) in vec4 fragColor;
+layout(location = 3) in vec2 fragUV;
+layout(location = 4) in vec4 fragShadowCoord;
 
 layout(location = 0) out vec4 outColor;
 

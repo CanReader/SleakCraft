@@ -60,14 +60,8 @@ public:
     void Update(float playerX, float playerY, float playerZ);
 
     void FlushPendingChunks();
-    void SetRenderDistance(int chunks) {
-        if (chunks == m_renderDistance) return;
-        m_renderDistance = chunks;
-        m_drawDistance = static_cast<float>(chunks * Chunk::SIZE);
-        m_drawDistSq = m_drawDistance * m_drawDistance;
-        m_lastCenterX = INT_MAX;
-        BuildLoadSpiral();
-    }
+    void SetRenderDistance(int chunks);
+
     int GetRenderDistance() const { return m_renderDistance; }
 
     void SetMultithreaded(bool enabled);
@@ -141,6 +135,12 @@ private:
         bool visible = true;
     };
     void RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer = true);
+    // Max number of column meshes before we consider VRAM exhausted.
+    // At ~1.1 MB per column (96 bytes/vertex * ~12000 vertices), 800
+    // columns ≈ 880 MB mesh VRAM — conservative for a 6 GB GPU with
+    // other allocations (textures, framebuffers, etc.).
+    static constexpr int MAX_COLUMN_MESHES = 800;
+
     // Floor-division: negative cy must map downward (e.g. cy=-1 → band -1, not 0)
     static int ChunkYToBand(int cy) {
         return (cy >= 0) ? cy / BAND_SIZE : (cy - BAND_SIZE + 1) / BAND_SIZE;
@@ -175,6 +175,7 @@ private:
     int m_lastCenterX = INT_MAX;
     int m_lastCenterY = INT_MAX;
     int m_lastCenterZ = INT_MAX;
+    bool m_oomThisFrame = false;
     WorldGenerator m_generator;
 
     // Multithreading

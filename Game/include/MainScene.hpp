@@ -85,7 +85,7 @@ private:
     bool m_flying = false;
     float m_lastSpacePressTime = -1.0f;
     float m_gameTime = 0.0f;
-    float m_flySpeed = 6.0f;
+    float m_flySpeed = 20.0f;
     float m_flySprintMultiplier = 2.5f;
     static constexpr float DOUBLE_TAP_WINDOW = 0.3f;
     bool m_spaceHeld = false;

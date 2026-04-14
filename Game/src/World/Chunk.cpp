@@ -105,7 +105,7 @@ bool Chunk::IsBlockOpaqueAt(int x, int y, int z) const {
 }
 
 void Chunk::GenerateMeshData() {
-    VertexGroup vertices;
+    VoxelVertexGroup vertices;
     IndexGroup indices;
 
     bool opaque[18][18][18];
@@ -193,43 +193,43 @@ void Chunk::GenerateMeshData() {
         float ao[4];
         fastFaceAO(face, x, y, z, ao);
 
-        Vertex v[4];
+        VoxelVertex v[4];
         switch (face) {
             case BlockFace::Top:
-                v[0] = Vertex(bx,     by + 1, bz,     0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx,     by + 1, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx + 1, by + 1, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx + 1, by + 1, bz,     0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx,     by + 1, bz,     0, 1, 0, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx,     by + 1, bz + 1, 0, 1, 0, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx + 1, by + 1, bz + 1, 0, 1, 0, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx + 1, by + 1, bz,     0, 1, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::Bottom:
-                v[0] = Vertex(bx,     by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx,     by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx + 1, by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx + 1, by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx,     by, bz + 1, 0, -1, 0, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx,     by, bz,     0, -1, 0, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx + 1, by, bz,     0, -1, 0, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx + 1, by, bz + 1, 0, -1, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::North:
-                v[0] = Vertex(bx + 1, by,     bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx + 1, by + 1, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx,     by + 1, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx,     by,     bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx + 1, by,     bz + 1, 0, 0, 1, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx + 1, by + 1, bz + 1, 0, 0, 1, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx,     by + 1, bz + 1, 0, 0, 1, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx,     by,     bz + 1, 0, 0, 1, uv.u1, uv.v1);
                 break;
             case BlockFace::South:
-                v[0] = Vertex(bx,     by,     bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx,     by + 1, bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx + 1, by + 1, bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx + 1, by,     bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx,     by,     bz, 0, 0, -1, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx,     by + 1, bz, 0, 0, -1, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx + 1, by + 1, bz, 0, 0, -1, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx + 1, by,     bz, 0, 0, -1, uv.u1, uv.v1);
                 break;
             case BlockFace::East:
-                v[0] = Vertex(bx + 1, by,     bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx + 1, by + 1, bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx + 1, by + 1, bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx + 1, by,     bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx + 1, by,     bz,     1, 0, 0, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx + 1, by + 1, bz,     1, 0, 0, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx + 1, by + 1, bz + 1, 1, 0, 0, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx + 1, by,     bz + 1, 1, 0, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::West:
-                v[0] = Vertex(bx, by,     bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx, by + 1, bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx, by + 1, bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx, by,     bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx, by,     bz + 1, -1, 0, 0, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx, by + 1, bz + 1, -1, 0, 0, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx, by + 1, bz,     -1, 0, 0, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx, by,     bz,     -1, 0, 0, uv.u1, uv.v1);
                 break;
         }
 
@@ -248,7 +248,7 @@ void Chunk::GenerateMeshData() {
     };
 
     // Water mesh gets separate buffers
-    VertexGroup waterVertices;
+    VoxelVertexGroup waterVertices;
     IndexGroup waterIndices;
 
     // Helper to check if neighbor is water
@@ -281,43 +281,43 @@ void Chunk::GenerateMeshData() {
         float topY = (face == BlockFace::Top || face == BlockFace::Bottom)
                      ? by + 0.875f : by + 1.0f;
 
-        Vertex v[4];
+        VoxelVertex v[4];
         switch (face) {
             case BlockFace::Top:
-                v[0] = Vertex(bx,     topY, bz,     0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx,     topY, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx + 1, topY, bz + 1, 0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx + 1, topY, bz,     0, 1, 0, 1, 0, 0, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx,     topY, bz,     0, 1, 0, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx,     topY, bz + 1, 0, 1, 0, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx + 1, topY, bz + 1, 0, 1, 0, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx + 1, topY, bz,     0, 1, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::Bottom:
-                v[0] = Vertex(bx,     by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx,     by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx + 1, by, bz,     0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx + 1, by, bz + 1, 0, -1, 0, 1, 0, 0, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx,     by, bz + 1, 0, -1, 0, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx,     by, bz,     0, -1, 0, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx + 1, by, bz,     0, -1, 0, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx + 1, by, bz + 1, 0, -1, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::North:
-                v[0] = Vertex(bx + 1, by,         bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx + 1, by + 0.875f, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx,     by + 0.875f, bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx,     by,         bz + 1, 0, 0, 1, 1, 0, 0, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx + 1, by,         bz + 1, 0, 0, 1, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx + 1, by + 0.875f, bz + 1, 0, 0, 1, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx,     by + 0.875f, bz + 1, 0, 0, 1, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx,     by,         bz + 1, 0, 0, 1, uv.u1, uv.v1);
                 break;
             case BlockFace::South:
-                v[0] = Vertex(bx,     by,         bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx,     by + 0.875f, bz, 0, 0, -1, 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx + 1, by + 0.875f, bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx + 1, by,         bz, 0, 0, -1, 1, 0, 0, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx,     by,         bz, 0, 0, -1, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx,     by + 0.875f, bz, 0, 0, -1, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx + 1, by + 0.875f, bz, 0, 0, -1, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx + 1, by,         bz, 0, 0, -1, uv.u1, uv.v1);
                 break;
             case BlockFace::East:
-                v[0] = Vertex(bx + 1, by,         bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx + 1, by + 0.875f, bz,     1, 0, 0, 0, 0, 1, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx + 1, by + 0.875f, bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx + 1, by,         bz + 1, 1, 0, 0, 0, 0, 1, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx + 1, by,         bz,     1, 0, 0, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx + 1, by + 0.875f, bz,     1, 0, 0, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx + 1, by + 0.875f, bz + 1, 1, 0, 0, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx + 1, by,         bz + 1, 1, 0, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::West:
-                v[0] = Vertex(bx, by,         bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v1);
-                v[1] = Vertex(bx, by + 0.875f, bz + 1, -1, 0, 0, 0, 0, -1, 1, uv.u0, uv.v0);
-                v[2] = Vertex(bx, by + 0.875f, bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v0);
-                v[3] = Vertex(bx, by,         bz,     -1, 0, 0, 0, 0, -1, 1, uv.u1, uv.v1);
+                v[0] = VoxelVertex(bx, by,         bz + 1, -1, 0, 0, uv.u0, uv.v1);
+                v[1] = VoxelVertex(bx, by + 0.875f, bz + 1, -1, 0, 0, uv.u0, uv.v0);
+                v[2] = VoxelVertex(bx, by + 0.875f, bz,     -1, 0, 0, uv.u1, uv.v0);
+                v[3] = VoxelVertex(bx, by,         bz,     -1, 0, 0, uv.u1, uv.v1);
                 break;
         }
 
@@ -386,7 +386,7 @@ void Chunk::UploadMesh(const RefPtr<Material>& material) {
 
     delete m_gameObject;
 
-    MeshData meshData;
+    VoxelMeshData meshData;
     meshData.vertices = std::move(m_pendingMesh.vertices);
     meshData.indices = std::move(m_pendingMesh.indices);
 

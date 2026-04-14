@@ -21,6 +21,10 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
+if(NOT MSVC AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(_DEBUG DEBUG)
+endif()
+
 option(USE_MINGW "Build using MinGW for Windows" OFF)
 if(USE_MINGW)
     message(STATUS "Configuring MinGW build for Windows")
