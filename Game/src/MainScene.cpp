@@ -390,6 +390,15 @@ void MainScene::Update(float deltaTime) {
     }
 }
 
+
+bool castShadow = true;
+float bias = 0.0005f;
+float nbias = 0.05;
+float shadowfrustum = 120.0f;
+float shadowdistance = 120.0f;
+float shadownear = 0.1f;
+float shadowfar = 500.0f;
+
 void MainScene::RenderUI() {
     auto* cam = GetActiveCamera();
     auto* app = Application::GetInstance();
@@ -489,9 +498,6 @@ void MainScene::RenderUI() {
     if (UI::Checkbox("Multithreaded Loading", &m_multithreadedLoading))
         m_chunkManager.SetMultithreaded(m_multithreadedLoading);
 
-    if (UI::Checkbox("Show Colliders", &m_showColliders))
-        DebugLineRenderer::SetEnabled(m_showColliders);
-
     UI::Separator();
     UI::Text("Anti-Aliasing");
     {
@@ -560,6 +566,48 @@ void MainScene::RenderUI() {
     ambColorChanged |= UI::DragFloat("Amb B", &m_ambientColorB, 0.005f, 0.0f, 1.0f);
     if (ambColorChanged && lm)
         lm->SetAmbientColor(m_ambientColorR, m_ambientColorG, m_ambientColorB);
+
+// --- Shadows ---
+UI::Separator();
+UI::Text("-- Shadows --");
+
+// Enable / disable
+if (UI::Checkbox("Cast Shadows", &castShadow) && m_sun)
+    m_sun->SetCastShadows(castShadow);
+
+// Only show settings if enabled
+if (castShadow && m_sun)
+{
+    UI::Separator();
+    UI::Text("Shadow Settings");
+
+    bool changed = false;
+
+    changed |= UI::DragFloat("Bias", &bias, 0.00001f, 0.0f, 1.01f);
+    changed |= UI::DragFloat("Normal Bias", &nbias, 0.001f, 0.0f, 1.2f);
+
+    UI::Separator();
+    UI::Text("Frustum");
+
+    changed |= UI::DragFloat("Frustum Size", &shadowfrustum, 1.0f, 10.0f, 500.0f);
+    changed |= UI::DragFloat("Distance", &shadowdistance, 1.0f, 10.0f, 500.0f);
+
+    UI::Separator();
+    UI::Text("Clipping Planes");
+
+    changed |= UI::DragFloat("Near Plane", &shadownear, 0.01f, 0.01f, 10.0f);
+    changed |= UI::DragFloat("Far Plane", &shadowfar, 1.0f, 10.0f, 2000.0f);
+
+    if (changed)
+    {
+        m_sun->SetShadowBias(bias);
+        m_sun->SetShadowNormalBias(nbias);
+        m_sun->SetShadowFrustumSize(shadowfrustum);
+        m_sun->SetShadowDistance(shadowdistance);
+        m_sun->SetShadowNearPlane(shadownear);
+        m_sun->SetShadowFarPlane(shadowfar);
+    }
+}
 
     // ---- Texture Quality ----
     UI::Separator();
@@ -833,11 +881,11 @@ void MainScene::SetupLighting() {
     m_sun->SetDirection(Vector3D(dx, dy, dz));
     m_sun->SetColor(m_sunColorR, m_sunColorG, m_sunColorB);
     m_sun->SetIntensity(m_sunIntensity);
-    m_sun->SetCastShadows(true);
-    m_sun->SetShadowBias(0.0005f);
-    m_sun->SetShadowNormalBias(0.05f);
     m_sun->SetLightSize(4.0f);
-    m_sun->SetShadowFrustumSize(120.0f);
+    m_sun->SetCastShadows(true);
+    m_sun->SetShadowBias(0.002f);
+    m_sun->SetShadowNormalBias(0.05f);
+    m_sun->SetShadowFrustumSize(60.0f);
     m_sun->SetShadowDistance(120.0f);
     m_sun->SetShadowNearPlane(0.1f);
     m_sun->SetShadowFarPlane(500.0f);

@@ -111,7 +111,7 @@ private:
     float m_ambientColorB    = 1.00f;
 
     // Texture quality state
-    Sleak::TextureFilter m_texFilter = Sleak::TextureFilter::Anisotropic16x;
+    Sleak::TextureFilter m_texFilter = Sleak::TextureFilter::Trilinear;
     float m_texLodBias = 0.0f;
 };
 

@@ -8,11 +8,12 @@
 in  vec2 fragUV;
 out vec4 outColor;
 
-// GBuffer samplers (bound at texture units 8-11)
+// GBuffer samplers (bound at texture units 8-12)
 layout(binding = 8)  uniform sampler2D gbAlbedoAO;
 layout(binding = 9)  uniform sampler2D gbNormalRough;
 layout(binding = 10) uniform sampler2D gbMetalEmit;
 layout(binding = 11) uniform sampler2D gbDepth;
+layout(binding = 12) uniform sampler2D gbWorldPos;
 
 // Shadow map (already bound at unit 3 by the shadow pass)
 layout(binding = 3) uniform sampler2DShadow shadowMap;
@@ -153,10 +154,12 @@ void main() {
     float metallic  = metalEmit.r;
     float emitScale = metalEmit.g;
 
-    // ---- Reconstruct world position ----
-    vec4 ndcPos  = vec4(fragUV * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-    vec4 worldH  = InvViewProj * ndcPos;
-    vec3 worldPos = worldH.xyz / worldH.w;
+    // World position read DIRECTLY from GBuffer RT3 — never reconstructed
+    // via InvViewProj * ndcPos. Reconstruction depends on the camera
+    // view-projection matrix, so under pure rotation it produces sub-pixel
+    // FP drift in worldPos that propagates into shadow-map sample coords
+    // and shows up as visible "shadow shimmer" on every rotation tick.
+    vec3 worldPos = texture(gbWorldPos, fragUV).xyz;
 
     // ---- Lighting accumulation (matches forward shader style) ----
     vec3 totalDiffuse = vec3(0.0);
