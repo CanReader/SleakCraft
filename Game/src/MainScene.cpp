@@ -45,19 +45,24 @@ bool MainScene::Initialize() {
     cam->AddComponent<Sleak::RigidbodyComponent>(Sleak::BodyType::Dynamic);
     auto* rb = cam->GetComponent<Sleak::RigidbodyComponent>();
     rb->SetUseGravity(true);
-    rb->SetGravity(Vector3D(0, -29.0f, 0));
+    rb->SetGravity(Vector3D(0, -32.0f, 0));
     AddObject(cam);
     cam->Initialize();
     SetActiveCamera(cam);
 
     auto* fpc = cam->GetComponent<FirstPersonController>();
     if (fpc) {
+        // Walk + sprint
         fpc->SetMaxWalkSpeed(4.317f);
-        fpc->SetSprintSpeedMultiplier(2.3f);
-        fpc->SetMaxAcceleration(50.0f);
-        fpc->SetBrakingDeceleration(50.0f);
-        fpc->SetGroundFriction(4.0f);
-        fpc->SetJumpZVelocity(8.8f);
+        fpc->SetSprintSpeedMultiplier(1.3f);
+        fpc->SetMaxAcceleration(35.0f);
+        fpc->SetBrakingDeceleration(20.0f);
+        fpc->SetGroundFriction(6.0f);
+        fpc->SetAirControl(0.2f);
+        fpc->SetJumpZVelocity(8.4f);
+        // Fly
+        fpc->SetMaxFlySpeed(m_flySpeed);
+        fpc->SetFlySprintMultiplier(m_flySprintMultiplier);
         fpc->SetPitch(0.0f);
         fpc->SetYaw(0.0f);
         fpc->SetEnabled(true);
@@ -205,11 +210,13 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
                 m_flying = !m_flying;
                 auto* cam = GetActiveCamera();
                 auto* rb = cam ? cam->GetComponent<RigidbodyComponent>() : nullptr;
+                auto* fpc = cam ? cam->GetComponent<FirstPersonController>() : nullptr;
                 if (rb) {
                     rb->SetUseGravity(!m_flying);
                     if (m_flying)
                         rb->SetVelocity({0.0f, 0.0f, 0.0f});
                 }
+                if (fpc) fpc->SetFlying(m_flying);
                 m_lastSpacePressTime = -1.0f; // reset so triple-tap doesn't re-toggle
             } else {
                 m_lastSpacePressTime = now;
@@ -282,21 +289,21 @@ void MainScene::Update(float deltaTime) {
     if (cam) {
         auto pos = cam->GetPosition();
 
-        // Fly mode: space=up, ctrl=down, shift=faster, no gravity
+        // Fly: space=up, ctrl=down, shift=sprint
         if (m_flying) {
-            auto* rb = cam->GetComponent<RigidbodyComponent>();
-            float speed = m_shiftHeld ? m_flySpeed * m_flySprintMultiplier : m_flySpeed;
-            float verticalMove = 0.0f;
-            if (m_spaceHeld) verticalMove += speed * deltaTime;
-            if (m_ctrlHeld)  verticalMove -= speed * deltaTime;
-            if (verticalMove != 0.0f) {
-                auto p = cam->GetPosition();
-                cam->SetPosition({p.GetX(), p.GetY() + verticalMove, p.GetZ()});
-            }
+            auto* rb  = cam->GetComponent<RigidbodyComponent>();
+            auto* fpc = cam->GetComponent<FirstPersonController>();
+            float v = 0.0f;
+            if (m_spaceHeld) v += 1.0f;
+            if (m_ctrlHeld)  v -= 1.0f;
+            if (fpc) fpc->SetVerticalFlyInput(v);
             if (rb) {
                 rb->SetVelocity({0.0f, 0.0f, 0.0f});
                 rb->SetGrounded(false);
             }
+        } else {
+            auto* fpc = cam->GetComponent<FirstPersonController>();
+            if (fpc) fpc->SetVerticalFlyInput(0.0f);
         }
 
         // Collision resolution (always active)
