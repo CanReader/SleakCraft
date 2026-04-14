@@ -786,11 +786,14 @@ void MainScene::SetupMaterial() {
     mat->Initialize();
     m_blockMaterial = RefPtr<Material>(mat);
 
-    // Water material — uses same shader as blocks but with transparency
+    // Water material
     auto* waterMat = new Material();
     waterMat->SetShader("assets/shaders/water_shader.hlsl");
-    if (atlasTex) {
-        waterMat->SetDiffuseTexture(atlasTex);
+    auto* waterAtlasTex = TextureAtlas::BuildAtlas();
+    if (waterAtlasTex) {
+        waterAtlasTex->SetFilter(m_texFilter);
+        waterAtlasTex->SetWrapMode(TextureWrapMode::ClampToEdge);
+        waterMat->SetDiffuseTexture(waterAtlasTex);
     }
     waterMat->SetDiffuseColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
     waterMat->SetOpacity(0.7f);
