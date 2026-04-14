@@ -2,9 +2,8 @@
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec4 inTangent;
-layout(location = 3) in vec4 inColor;
-layout(location = 4) in vec2 inUV;
+layout(location = 2) in vec4 inColor;
+layout(location = 3) in vec2 inUV;
 
 layout(std140, binding = 0) uniform TransformUBO {
     mat4 WVP;
@@ -38,9 +37,11 @@ void main() {
 
     mat3 normalMat = transpose(inverse(mat3(World)));
     vec3 N = normalize(normalMat * inNormal);
-    vec3 T = normalize(normalMat * inTangent.xyz);
+
+    // Compute tangent from normal for axis-aligned voxel faces
+    vec3 T = abs(N.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
     T = normalize(T - dot(T, N) * N);
-    vec3 B = cross(N, T) * inTangent.w;
+    vec3 B = cross(N, T);
 
     fragWorldNorm  = N;
     fragWorldTan   = T;

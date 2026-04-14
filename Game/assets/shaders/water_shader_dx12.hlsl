@@ -1,7 +1,7 @@
 // Water Shader — DirectX 12 HLSL
 // BSL-style: no vertex displacement, procedural fragment normals, BSL water color.
 
-struct VS_INPUT  { float3 POSITION:POSITION; float3 NORMAL:NORMAL; float4 TANGENT:TANGENT; float4 COLOR:COLOR; float2 TEXCOORD:TEXCOORD; };
+struct VS_INPUT  { float3 POSITION:POSITION; float3 NORMAL:NORMAL; float4 COLOR:COLOR; float2 TEXCOORD:TEXCOORD; };
 struct VS_OUTPUT {
     float4 Position    : SV_POSITION;
     float3 WorldPos    : TEXCOORD0;

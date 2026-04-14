@@ -9,7 +9,6 @@ struct VS_INPUT
 {
     float3 POSITION : POSITION;
     float3 NORMAL   : NORMAL;
-    float4 TANGENT  : TANGENT;
     float4 COLOR    : COLOR;
     float2 TEXCOORD : TEXCOORD;
 };
@@ -19,11 +18,9 @@ struct VS_OUTPUT
     float4 Position    : SV_POSITION;
     float3 WorldPos    : TEXCOORD0;
     float3 WorldNorm   : TEXCOORD1;
-    float3 WorldTan    : TEXCOORD2;
-    float3 WorldBit    : TEXCOORD3;
     float4 Color       : COLOR;
-    float2 TexCoord    : TEXCOORD4;
-    float4 ShadowCoord : TEXCOORD5;
+    float2 TexCoord    : TEXCOORD2;
+    float4 ShadowCoord : TEXCOORD3;
 };
 
 // Transform CB — root parameter 0, register(b0)
@@ -116,9 +113,7 @@ VS_OUTPUT VS_Main(VS_INPUT input)
     float4 worldPos = mul(float4(input.POSITION, 1.0), World);
     output.WorldPos = worldPos.xyz;
 
-    output.WorldNorm = normalize(mul(input.NORMAL,      (float3x3)World));
-    output.WorldTan  = normalize(mul(input.TANGENT.xyz, (float3x3)World));
-    output.WorldBit  = cross(output.WorldNorm, output.WorldTan) * input.TANGENT.w;
+    output.WorldNorm = normalize(mul(input.NORMAL, (float3x3)World));
 
     output.Color    = input.COLOR;
     output.TexCoord = input.TEXCOORD;

@@ -30,6 +30,8 @@ static void PrintHelp(const char* exe) {
         << "  --no-vsync         Disable VSync on launch\n"
         << "\nBenchmark\n"
         << "  --bench            Start benchmark recording immediately\n"
+        << "\nDebug\n"
+        << "  --validate         Enable Vulkan validation layer\n"
         << "\nMisc\n"
         << "  --help             Show this message\n\n";
 }

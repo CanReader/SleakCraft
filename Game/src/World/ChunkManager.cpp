@@ -1,6 +1,7 @@
 #include "World/ChunkManager.hpp"
 #include <Camera/Camera.hpp>
 #include <Core/SceneBase.hpp>
+#include <Logger.hpp>
 #include <Runtime/Material.hpp>
 #include <Runtime/MeshBatch.hpp>
 #include <algorithm>
@@ -98,6 +99,55 @@ void ChunkManager::WorkerThread() {
     }
 }
 
+void ChunkManager::SetRenderDistance(int chunks) {
+    if (chunks == m_renderDistance) return;
+    int oldRD = m_renderDistance;
+    SLEAK_INFO("Render distance changed: {} -> {}", oldRD, chunks);
+    m_renderDistance = chunks;
+    m_drawDistance = static_cast<float>(chunks * Chunk::SIZE);
+    m_drawDistSq = m_drawDistance * m_drawDistance;
+
+    if (chunks > oldRD) {
+        m_pendingUnload.clear();
+    } else {
+        // RD decreased — immediately free out-of-range column meshes and
+        // chunks so VRAM is released before new allocations begin.
+        int cx = (m_lastCenterX == INT_MAX) ? 0 : m_lastCenterX;
+        int cz = (m_lastCenterZ == INT_MAX) ? 0 : m_lastCenterZ;
+
+        // Erase column meshes outside new range first (frees GPU buffers)
+        for (auto it = m_columns.begin(); it != m_columns.end(); ) {
+            if (std::abs(it->first.x - cx) > m_renderDistance ||
+                std::abs(it->first.z - cz) > m_renderDistance) {
+                m_dirtyColumns.erase(it->first);
+                it = m_columns.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        // Synchronously unload all out-of-range chunks
+        m_pendingUnload.clear();
+        std::vector<Chunk*> toDelete;
+        for (Chunk* chunk : m_activeChunks) {
+            if (!chunk) continue;
+            if (std::abs(chunk->GetChunkX() - cx) > m_renderDistance ||
+                std::abs(chunk->GetChunkZ() - cz) > m_renderDistance) {
+                if (!chunk->IsInFlight())
+                    toDelete.push_back(chunk);
+            }
+        }
+        for (Chunk* chunk : toDelete) {
+            UnlinkNeighbors({chunk->GetChunkX(), chunk->GetChunkY(), chunk->GetChunkZ()}, chunk);
+            ForceUnloadChunk(chunk);
+            delete chunk;
+        }
+    }
+
+    m_lastCenterX = INT_MAX;
+    BuildLoadSpiral();
+}
+
 void ChunkManager::Initialize(Sleak::SceneBase* scene, const Sleak::RefPtr<Sleak::Material>& material) {
     m_scene = scene;
     m_material = material;
@@ -115,21 +165,24 @@ int ChunkManager::GetGridIndex(int cx, int cy, int cz) const {
 }
 
 void ChunkManager::BuildLoadSpiral() {
-    m_gridWidth = (m_renderDistance + 2) * 2;
-    int totalSize = m_gridWidth * m_gridWidth * m_gridHeight;
-    m_chunkGrid.assign(totalSize, nullptr);
+    int requiredWidth = (m_renderDistance + 2) * 2;
+    bool needsRegrid = requiredWidth > m_gridWidth;
 
-    for (Chunk* chunk : m_activeChunks) {
-        if (!chunk) continue;
-        int idx = GetGridIndex(chunk->GetChunkX(), chunk->GetChunkY(), chunk->GetChunkZ());
-        if (idx >= 0) m_chunkGrid[idx] = chunk;
+    if (needsRegrid) {
+        m_gridWidth = requiredWidth;
+        int totalSize = m_gridWidth * m_gridWidth * m_gridHeight;
+        m_chunkGrid.assign(totalSize, nullptr);
+
+        for (Chunk* chunk : m_activeChunks) {
+            if (!chunk) continue;
+            int idx = GetGridIndex(chunk->GetChunkX(), chunk->GetChunkY(), chunk->GetChunkZ());
+            if (idx >= 0) m_chunkGrid[idx] = chunk;
+        }
     }
 
     m_loadSpiral.clear();
     for (int x = -m_renderDistance; x <= m_renderDistance; ++x) {
         for (int z = -m_renderDistance; z <= m_renderDistance; ++z) {
-            // Include corners for squared render distance, or make it circular:
-            // if (x*x + z*z <= m_renderDistance * m_renderDistance)
             m_loadSpiral.push_back({x, z});
         }
     }
@@ -486,9 +539,9 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
     int bandMinY = yBand * BAND_SIZE;
     int bandMaxY = bandMinY + BAND_SIZE - 1;
 
-    Sleak::VertexGroup mergedVerts;
+    Sleak::VoxelVertexGroup mergedVerts;
     Sleak::IndexGroup mergedIndices;
-    Sleak::VertexGroup mergedWaterVerts;
+    Sleak::VoxelVertexGroup mergedWaterVerts;
     Sleak::IndexGroup mergedWaterIndices;
 
     for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
@@ -518,7 +571,7 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
 
             if (md.vertices.GetSize() > 0) {
                 uint32_t baseVertex = static_cast<uint32_t>(mergedVerts.GetSize());
-                const Sleak::Vertex* vdata = md.vertices.GetData();
+                const Sleak::VoxelVertex* vdata = md.vertices.GetData();
                 for (size_t i = 0; i < md.vertices.GetSize(); ++i)
                     mergedVerts.AddVertex(vdata[i]);
                 const uint32_t* idata = md.indices.GetData();
@@ -536,7 +589,7 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
 
             if (wd.vertices.GetSize() > 0) {
                 uint32_t baseVertex = static_cast<uint32_t>(mergedWaterVerts.GetSize());
-                const Sleak::Vertex* vdata = wd.vertices.GetData();
+                const Sleak::VoxelVertex* vdata = wd.vertices.GetData();
                 for (size_t i = 0; i < wd.vertices.GetSize(); ++i)
                     mergedWaterVerts.AddVertex(vdata[i]);
                 const uint32_t* idata = wd.indices.GetData();
@@ -548,15 +601,29 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
         }
     }
 
-    m_columns.erase(key);
+    if (mergedVerts.GetSize() == 0 && mergedWaterVerts.GetSize() == 0) {
+        m_columns.erase(key);
+        return;
+    }
 
-    if (mergedVerts.GetSize() == 0 && mergedWaterVerts.GetSize() == 0) return;
+    // Release old GPU buffers BEFORE allocating new ones to reduce peak VRAM.
+    auto existingIt = m_columns.find(key);
+    if (existingIt != m_columns.end()) {
+        existingIt->second.mesh = {};
+        existingIt->second.waterMesh = {};
+    }
 
     ColumnMesh col;
     if (mergedVerts.GetSize() > 0)
-        col.mesh = Sleak::MeshBatch::CreateMesh(mergedVerts, mergedIndices);
+        col.mesh = Sleak::MeshBatch::CreateVoxelMesh(mergedVerts, mergedIndices);
     if (mergedWaterVerts.GetSize() > 0)
-        col.waterMesh = Sleak::MeshBatch::CreateMesh(mergedWaterVerts, mergedWaterIndices);
+        col.waterMesh = Sleak::MeshBatch::CreateVoxelMesh(mergedWaterVerts, mergedWaterIndices);
+
+    if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) {
+        m_oomThisFrame = true;
+        return;
+    }
+
     col.visible = true;
     m_columns[key] = std::move(col);
 }
@@ -660,6 +727,10 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             Chunk* chunk = GetChunk(coord.x, coord.y, coord.z);
             if (!chunk) continue;
 
+            if (std::abs(coord.x - centerX) <= m_renderDistance &&
+                std::abs(coord.z - centerZ) <= m_renderDistance)
+                continue;
+
             if (chunk->IsInFlight() || IsNeighborOfInFlight(coord))
                 continue;
 
@@ -670,7 +741,11 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             ++unloaded;
         }
 
-        // Remove column meshes for bands that lost all their chunks
+        // Free column meshes whose bands lost all chunks.  For columns
+        // that still have SOME chunks, erase the column mesh immediately
+        // (it references stale data) rather than keeping the oversized
+        // buffer alive until the next dirty-column rebuild.  The column
+        // will be re-created when the remaining chunks are remeshed.
         for (auto& colKey : columnsToCheck) {
             bool hasChunks = false;
             int bandMinY = colKey.yBand * BAND_SIZE;
@@ -680,7 +755,18 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             }
             if (!hasChunks) {
                 m_columns.erase(colKey);
-                m_dirtyColumns.erase(colKey);  // Don't rebuild a column with no chunks
+                m_dirtyColumns.erase(colKey);
+            } else {
+                // Column still has chunks but lost some — the existing
+                // column mesh is oversized.  Free its GPU buffers now
+                // and queue a rebuild so the next pass allocates a
+                // smaller buffer.
+                auto it = m_columns.find(colKey);
+                if (it != m_columns.end()) {
+                    it->second.mesh = {};
+                    it->second.waterMesh = {};
+                }
+                m_dirtyColumns.insert(colKey);
             }
         }
     }
@@ -831,22 +917,19 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         // Phase 4: Rebuild dirty band column meshes (GPU upload)
         // Skip columns where any chunk is still in-flight to prevent
         // flickering (the old column mesh stays visible until remesh is done).
-        // Adaptive budget: process more when backlog is large.
         {
-            // Adaptive budget: grow modestly when backlog is large.
-            // Cap at 2× base to avoid bursting VRAM — deferred deletion
-            // needs at least MAX_FRAMES_IN_FLIGHT frames to free old buffers,
-            // so uploading too many at once exhausts memory before recycling runs.
-            int uploadBudget = std::min(m_uploadsPerFrame * 2,
-                                        std::max(m_uploadsPerFrame,
-                                                 (int)m_dirtyColumns.size() / 8));
+            m_oomThisFrame = false;
+            // Strict cap: never exceed m_uploadsPerFrame column rebuilds
+            // per frame.  The old adaptive *2 boost caused VRAM spikes
+            // when many columns became dirty simultaneously (e.g. after
+            // a render-distance change or fast player movement).
+            int uploadBudget = m_uploadsPerFrame;
 
             std::vector<ColumnKey> toRebuild;
             {
                 int count = 0;
                 for (auto it = m_dirtyColumns.begin();
                      it != m_dirtyColumns.end() && count < uploadBudget; ) {
-                    // Defer if any chunk in this band is still in-flight
                     bool anyInFlight = false;
                     int bandMinY = it->yBand * BAND_SIZE;
                     int bandMaxY = bandMinY + BAND_SIZE - 1;
@@ -855,7 +938,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                         if (ch && ch->IsInFlight()) { anyInFlight = true; break; }
                     }
                     if (anyInFlight) {
-                        ++it;  // keep dirty, try again next frame
+                        ++it;
                         continue;
                     }
                     toRebuild.push_back(*it);
@@ -865,6 +948,10 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             }
 
             for (auto& key : toRebuild) {
+                if (m_oomThisFrame) {
+                    m_dirtyColumns.insert(key);
+                    continue;
+                }
                 RebuildColumnMesh(key.x, key.yBand, key.z);
             }
         }
@@ -923,8 +1010,14 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             }
         }
 
-        for (auto& col : syncDirtyColumns)
+        m_oomThisFrame = false;
+        for (auto& col : syncDirtyColumns) {
+            if (m_oomThisFrame) {
+                m_dirtyColumns.insert(col);
+                continue;
+            }
             RebuildColumnMesh(col.x, col.yBand, col.z);
+        }
     }
 
     FrustumCull();

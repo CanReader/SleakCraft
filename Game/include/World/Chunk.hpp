@@ -14,7 +14,7 @@ namespace Sleak {
 }
 
 struct ChunkMeshData {
-    Sleak::VertexGroup vertices;
+    Sleak::VoxelVertexGroup vertices;
     Sleak::IndexGroup indices;
 };
 
