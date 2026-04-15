@@ -15,6 +15,10 @@ layout(binding = 10) uniform sampler2D gbMetalEmit;
 layout(binding = 11) uniform sampler2D gbDepth;
 layout(binding = 12) uniform sampler2D gbWorldPos;
 
+// SSAO (bound at unit 13; blurred R8 AO — 1.0 means fully lit)
+layout(binding = 13) uniform sampler2D gbSSAO;
+uniform int uSSAOEnabled;
+
 // Shadow map (already bound at unit 3 by the shadow pass)
 layout(binding = 3) uniform sampler2DShadow shadowMap;
 
@@ -178,6 +182,12 @@ void main() {
 
     vec3  albedo    = albedoAO.rgb;
     float ao        = albedoAO.a;
+    // Multiply per-vertex AO by screen-space AO (both in [0,1]). SSAO output
+    // is 1.0 for fully-lit pixels, so this darkens crevices without adding
+    // energy to exposed surfaces.
+    if (uSSAOEnabled != 0) {
+        ao *= texture(gbSSAO, fragUV).r;
+    }
     vec3  N         = normalize(normalRough.rgb * 2.0 - 1.0);  // unpack from [0,1]
     float roughness = normalRough.a;
     float metallic  = metalEmit.r;

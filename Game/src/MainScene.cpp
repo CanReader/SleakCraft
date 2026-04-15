@@ -639,6 +639,26 @@ if (castShadow && m_sun)
     }
 }
 
+    // ---- SSAO ----
+    UI::Separator();
+    UI::Text("-- SSAO --");
+    if (auto* app = Sleak::Application::GetInstance()) {
+        bool  ssaoEnabled = app->IsSSAOEnabled();
+        float ssaoRadius  = app->GetSSAORadius();
+        float ssaoBias    = app->GetSSAOBias();
+        float ssaoPower   = app->GetSSAOPower();
+        if (UI::Checkbox("SSAO Enabled", &ssaoEnabled))
+            app->SetSSAOEnabled(ssaoEnabled);
+        if (ssaoEnabled) {
+            if (UI::DragFloat("SSAO Radius", &ssaoRadius, 0.01f, 0.05f, 4.0f))
+                app->SetSSAORadius(ssaoRadius);
+            if (UI::DragFloat("SSAO Bias",   &ssaoBias,   0.001f, 0.0f, 0.2f))
+                app->SetSSAOBias(ssaoBias);
+            if (UI::DragFloat("SSAO Power",  &ssaoPower,  0.05f, 0.1f, 8.0f))
+                app->SetSSAOPower(ssaoPower);
+        }
+    }
+
     // ---- Texture Quality ----
     UI::Separator();
     UI::Text("-- Texture --");
