@@ -394,8 +394,8 @@ void MainScene::Update(float deltaTime) {
 bool castShadow = true;
 float bias = 0.0005f;
 float nbias = 0.05;
-float shadowfrustum = 120.0f;
-float shadowdistance = 120.0f;
+float shadowfrustum = 160.0f;
+float shadowdistance = 160.0f;
 float shadownear = 0.1f;
 float shadowfar = 500.0f;
 
@@ -915,8 +915,8 @@ void MainScene::SetupLighting() {
     m_sun->SetCastShadows(true);
     m_sun->SetShadowBias(0.002f);
     m_sun->SetShadowNormalBias(0.05f);
-    m_sun->SetShadowFrustumSize(120.0f);
-    m_sun->SetShadowDistance(120.0f);
+    m_sun->SetShadowFrustumSize(160.0f);
+    m_sun->SetShadowDistance(160.0f);
     m_sun->SetShadowNearPlane(0.1f);
     m_sun->SetShadowFarPlane(500.0f);
     AddObject(m_sun);
