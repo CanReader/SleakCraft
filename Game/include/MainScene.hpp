@@ -113,6 +113,22 @@ private:
     // Texture quality state
     Sleak::TextureFilter m_texFilter = Sleak::TextureFilter::Trilinear;
     float m_texLodBias = 0.0f;
+
+    // Fog state (live-editable). Defaults align with LightManager defaults so
+    // toggling the fog UI without touching sliders matches the engine's idle
+    // state. Horizon RGB is overridden by SetupLighting() to a slightly
+    // bluer tint that matches the skybox.
+    bool  m_fogEnabled        = true;
+    float m_fogHorizonR       = 0.62f;
+    float m_fogHorizonG       = 0.78f;
+    float m_fogHorizonB       = 1.00f;
+    float m_fogZenithR        = 0.42f;
+    float m_fogZenithG        = 0.58f;
+    float m_fogZenithB        = 0.86f;
+    bool  m_heightFogEnabled  = true;
+    float m_heightFogTop      = 80.0f;
+    float m_heightFogDensity  = 0.55f;
+    float m_heightFogFalloff  = 0.04f;
 };
 
 #endif

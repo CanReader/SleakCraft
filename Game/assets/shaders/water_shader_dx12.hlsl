@@ -34,10 +34,15 @@ cbuffer LightCB : register(b2) {
     float ShadowStrength;
     float ShadowTexelSize;
     float LightSize;
-    float4 FogColor;
+    float4 FogColor;        // horizon
     float FogStart;
     float FogEnd;
     float2 _fogPad;
+    float4 FogColorZenith;  // zenith
+    float HeightFogTop;
+    float HeightFogDensity;
+    float HeightFogFalloff;
+    float HeightFogEnabled;
 };
 
 Texture2D diffuseTexture : register(t0); SamplerState mainSampler : register(s0);
@@ -100,6 +105,24 @@ float3 ACESFilm(float3 x) { return saturate((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0
 float  Fresnel(float c)   { return 0.02 + 0.98*pow(saturate(1.0-c),5.0); }
 float  GGX(float NdotH, float r) { float a=r*r*r*r; float d=NdotH*NdotH*(a-1.0)+1.0; return a/(3.14159265*d*d); }
 
+// Sky-matched gradient fog + exponential height fog.
+float3 ApplyFog(float3 color, float3 worldPos) {
+    if (FogEnd <= 0.0) return color;
+    float3 toFrag = worldPos - CameraPos.xyz;
+    float dist = length(toFrag.xz);
+    float distFog = saturate((dist - FogStart) / max(FogEnd - FogStart, 1e-4));
+    float heightFog = 0.0;
+    if (HeightFogEnabled > 0.5) {
+        float h = max(HeightFogTop - worldPos.y, 0.0);
+        heightFog = saturate(HeightFogDensity * (1.0 - exp(-h * HeightFogFalloff)));
+    }
+    float fogAmount = 1.0 - (1.0 - distFog) * (1.0 - heightFog);
+    float3 viewDir = normalize(toFrag);
+    float t = smoothstep(0.0, 1.0, saturate(viewDir.y * 0.5 + 0.5));
+    float3 fogColor = lerp(FogColor.rgb, FogColorZenith.rgb, t);
+    return lerp(color, fogColor, fogAmount);
+}
+
 // ---- VS ----
 VS_OUTPUT VS_Main(VS_INPUT i) {
     VS_OUTPUT o;
@@ -155,7 +178,7 @@ float4 PS_Main(VS_OUTPUT i) : SV_Target {
     }
 
     final = ACESFilm(final);
-    if (FogEnd > 0.0) { float dist=length(i.WorldPos-CameraPos.xyz); final=lerp(FogColor.rgb,final,saturate((FogEnd-dist)/(FogEnd-FogStart))); }
+    final = ApplyFog(final, i.WorldPos);
 
     float alpha = lerp(0.72, 0.97, pow(saturate(1.0-NdotV), 2.0));
     return float4(final, alpha);
