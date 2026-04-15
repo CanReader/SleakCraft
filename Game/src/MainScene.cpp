@@ -597,48 +597,6 @@ void MainScene::RenderUI() {
     if (UI::DragFloat("Height Falloff", &m_heightFogFalloff, 0.001f,  0.0f,   1.0f) && lm)
         lm->SetHeightFogFalloff(m_heightFogFalloff);
 
-// --- Shadows ---
-UI::Separator();
-UI::Text("-- Shadows --");
-
-// Enable / disable
-if (UI::Checkbox("Cast Shadows", &castShadow) && m_sun)
-    m_sun->SetCastShadows(castShadow);
-
-// Only show settings if enabled
-if (castShadow && m_sun)
-{
-    UI::Separator();
-    UI::Text("Shadow Settings");
-
-    bool changed = false;
-
-    changed |= UI::DragFloat("Bias", &bias, 0.00001f, 0.0f, 1.01f);
-    changed |= UI::DragFloat("Normal Bias", &nbias, 0.001f, 0.0f, 1.2f);
-
-    UI::Separator();
-    UI::Text("Frustum");
-
-    changed |= UI::DragFloat("Frustum Size", &shadowfrustum, 1.0f, 10.0f, 500.0f);
-    changed |= UI::DragFloat("Distance", &shadowdistance, 1.0f, 10.0f, 500.0f);
-
-    UI::Separator();
-    UI::Text("Clipping Planes");
-
-    changed |= UI::DragFloat("Near Plane", &shadownear, 0.01f, 0.01f, 10.0f);
-    changed |= UI::DragFloat("Far Plane", &shadowfar, 1.0f, 10.0f, 2000.0f);
-
-    if (changed)
-    {
-        m_sun->SetShadowBias(bias);
-        m_sun->SetShadowNormalBias(nbias);
-        m_sun->SetShadowFrustumSize(shadowfrustum);
-        m_sun->SetShadowDistance(shadowdistance);
-        m_sun->SetShadowNearPlane(shadownear);
-        m_sun->SetShadowFarPlane(shadowfar);
-    }
-}
-
     // ---- SSAO ----
     UI::Separator();
     UI::Text("-- SSAO --");
@@ -656,6 +614,20 @@ if (castShadow && m_sun)
                 app->SetSSAOBias(ssaoBias);
             if (UI::DragFloat("SSAO Power",  &ssaoPower,  0.05f, 0.1f, 8.0f))
                 app->SetSSAOPower(ssaoPower);
+        }
+    }
+
+    // ---- IBL ----
+    UI::Separator();
+    UI::Text("-- IBL --");
+    if (auto* app = Sleak::Application::GetInstance()) {
+        bool  iblEnabled   = app->IsIBLEnabled();
+        float iblIntensity = app->GetIBLIntensity();
+        if (UI::Checkbox("IBL Enabled", &iblEnabled))
+            app->SetIBLEnabled(iblEnabled);
+        if (iblEnabled) {
+            if (UI::DragFloat("IBL Intensity", &iblIntensity, 0.05f, 0.0f, 5.0f))
+                app->SetIBLIntensity(iblIntensity);
         }
     }
 
