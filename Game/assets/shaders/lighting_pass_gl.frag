@@ -19,6 +19,11 @@ layout(binding = 12) uniform sampler2D gbWorldPos;
 layout(binding = 13) uniform sampler2D gbSSAO;
 uniform int uSSAOEnabled;
 
+// IBL (bound at units 14-16 by EnsureIBL/Bind)
+layout(binding = 14) uniform samplerCube irradianceMap;
+layout(binding = 15) uniform samplerCube prefilterMap;
+layout(binding = 16) uniform sampler2D   brdfLUT;
+
 // Shadow map (already bound at unit 3 by the shadow pass)
 layout(binding = 3) uniform sampler2DShadow shadowMap;
 
@@ -70,6 +75,13 @@ layout(std140, binding = 6) uniform DeferredCB {
     float FarPlane;
 };
 
+layout(std140, binding = 10) uniform IBLUBO {
+    uint  IBLEnabled;
+    float IBLIntensity;
+    float MaxReflectionLOD;
+    uint  _iblPad0;
+};
+
 // ---- Constants ----
 const float PI = 3.14159265359;
 
@@ -109,6 +121,12 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
 
 vec3 FresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(max(1.0 - cosTheta, 0.0), 5.0);
+}
+
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
+    float oneMinusRoughness = 1.0 - roughness;
+    return F0 + (max(vec3(oneMinusRoughness), F0) - F0)
+             * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
 // ---- Shadow ----
@@ -182,11 +200,13 @@ void main() {
 
     vec3  albedo    = albedoAO.rgb;
     float ao        = albedoAO.a;
-    // Multiply per-vertex AO by screen-space AO (both in [0,1]). SSAO output
-    // is 1.0 for fully-lit pixels, so this darkens crevices without adding
-    // energy to exposed surfaces.
+    // Multiply per-vertex AO by screen-space AO. Remap SSAO result from
+    // [0,1] to [0.5,1] so it can at most halve ambient — prevents shadowed
+    // block sides from collapsing to pitch black when the shadow map has
+    // already zeroed out direct light.
     if (uSSAOEnabled != 0) {
-        ao *= texture(gbSSAO, fragUV).r;
+        float ssao = texture(gbSSAO, fragUV).r;
+        ao *= 0.5 + 0.5 * ssao;
     }
     vec3  N         = normalize(normalRough.rgb * 2.0 - 1.0);  // unpack from [0,1]
     float roughness = normalRough.a;
@@ -237,13 +257,36 @@ void main() {
     }
 
     // ---- Ambient + AO ----
-    vec3 skyAmbient    = AmbientColor * AmbientIntensity;
-    vec3 groundAmbient = skyAmbient * vec3(0.55, 0.50, 0.45);
-    float hemisphere   = N.y * 0.5 + 0.5;
-    vec3  ambient      = mix(groundAmbient, skyAmbient, hemisphere);
+    // Hemisphere ambient is the base. With IBL enabled we ADD reflected
+    // environmental light on top — additive form keeps the scene from going
+    // dim when the source skybox is LDR (low irradiance dynamic range).
+    vec3  V             = normalize(CameraPos - worldPos);
+    vec3  F0            = mix(vec3(0.04), albedo, metallic);
+    vec3  skyAmbient    = AmbientColor * AmbientIntensity;
+    vec3  groundAmbient = skyAmbient * vec3(0.55, 0.50, 0.45);
+    float hemisphere    = N.y * 0.5 + 0.5;
+    vec3  hemAmbient    = mix(groundAmbient, skyAmbient, hemisphere);
+    vec3  ambient       = albedo * hemAmbient;
 
-    // Compose: AO only on ambient (matches forward shader)
-    vec3 color = albedo * (ao * ambient + totalDiffuse);
+    if (IBLEnabled != 0u) {
+        float NdotV_ibl       = max(dot(N, V), 0.0);
+        vec3  kS_ibl          = FresnelSchlickRoughness(NdotV_ibl, F0, roughness);
+        vec3  kD_ibl          = (1.0 - kS_ibl) * (1.0 - metallic);
+        vec3  irradiance      = texture(irradianceMap, N).rgb;
+        vec3  diffuseIBL      = irradiance * albedo;
+        vec3  R               = reflect(-V, N);
+        vec3  prefilteredColor= textureLod(prefilterMap, R,
+                                            roughness * MaxReflectionLOD).rgb;
+        vec2  envBRDF         = texture(brdfLUT,
+                                        vec2(NdotV_ibl, roughness)).rg;
+        vec3  specularIBL     = prefilteredColor
+                              * (kS_ibl * envBRDF.x + envBRDF.y);
+        ambient += (kD_ibl * diffuseIBL + specularIBL) * IBLIntensity;
+    }
+    ambient *= ao;
+
+    // Diffuse term carries albedo here (totalDiffuse is light radiance only).
+    vec3 color = ambient + albedo * totalDiffuse;
 
     // ---- Emissive ----
     color += albedo * emitScale;
