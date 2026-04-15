@@ -32,11 +32,17 @@ layout(std140, binding = 2) uniform LightUBO {
     uint  NumActiveLights;
     vec3  AmbientColor;
     float AmbientIntensity;
-    vec4  FogColor;
+    vec4  FogColor;            // horizon
     float FogStart;
     float FogEnd;
     float _pad0, _pad1;
     LightData Lights[16];
+    // Trailing block — must match LightCBData order in ConstantBuffer.hpp.
+    vec4  FogColorZenith;      // zenith
+    float HeightFogTop;
+    float HeightFogDensity;
+    float HeightFogFalloff;
+    float HeightFogEnabled;
 };
 
 layout(std140, binding = 5) uniform ShadowUBO {
@@ -123,6 +129,25 @@ vec3  ACESFilm(vec3 x) { return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 
 float FresnelSchlick(float c) { return 0.02 + 0.98 * pow(clamp(1.0-c,0.0,1.0), 5.0); }
 float GGX(float NdotH, float r) { float a=r*r*r*r; float d=NdotH*NdotH*(a-1.0)+1.0; return a/(3.14159265*d*d); }
 
+// Sky-matched gradient fog + exponential height fog (mirrors lighting_pass_gl.frag).
+vec3 ApplyFog(vec3 color, vec3 worldPos) {
+    if (FogEnd <= 0.0) return color;
+    vec3 toFrag = worldPos - CameraPos;
+    float dist = length(toFrag.xz);
+    float distFog = clamp((dist - FogStart) / max(FogEnd - FogStart, 1e-4), 0.0, 1.0);
+    float heightFog = 0.0;
+    if (HeightFogEnabled > 0.5) {
+        float h = max(HeightFogTop - worldPos.y, 0.0);
+        heightFog = clamp(HeightFogDensity * (1.0 - exp(-h * HeightFogFalloff)),
+                          0.0, 1.0);
+    }
+    float fogAmount = 1.0 - (1.0 - distFog) * (1.0 - heightFog);
+    vec3 viewDir = normalize(toFrag);
+    float t = smoothstep(0.0, 1.0, clamp(viewDir.y * 0.5 + 0.5, 0.0, 1.0));
+    vec3 fogColor = mix(FogColor.rgb, FogColorZenith.rgb, t);
+    return mix(color, fogColor, fogAmount);
+}
+
 void main() {
     float time = fragTime;
     vec3  N    = WaveNormal(fragWorldPos, time);
@@ -177,10 +202,7 @@ void main() {
     }
 
     finalColor = ACESFilm(finalColor);
-    if (FogEnd > 0.0) {
-        float dist = length(fragWorldPos - CameraPos);
-        finalColor = mix(FogColor.rgb, finalColor, clamp((FogEnd-dist)/(FogEnd-FogStart), 0.0, 1.0));
-    }
+    finalColor = ApplyFog(finalColor, fragWorldPos);
 
     float alpha = mix(0.72, 0.97, pow(clamp(1.0-NdotV, 0.0, 1.0), 2.0));
     outColor = vec4(finalColor, alpha);

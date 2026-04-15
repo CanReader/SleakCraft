@@ -107,7 +107,7 @@ bool MainScene::Initialize() {
 
     if (auto* lm = GetLightManager()) {
         float fogDist = m_chunkManager.GetDrawDistance();
-        lm->SetFogDistances(fogDist * 0.9f, fogDist);
+        lm->SetFogDistances(fogDist * 0.91f, fogDist);
     }
 
     // Register game-specific benchmark metrics
@@ -567,6 +567,36 @@ void MainScene::RenderUI() {
     if (ambColorChanged && lm)
         lm->SetAmbientColor(m_ambientColorR, m_ambientColorG, m_ambientColorB);
 
+    UI::Separator();
+    UI::Text("-- Fog --");
+
+    if (UI::Checkbox("Fog Enabled", &m_fogEnabled) && lm)
+        lm->SetFogEnabled(m_fogEnabled);
+
+    bool horizonChanged = false;
+    horizonChanged |= UI::DragFloat("Horizon R", &m_fogHorizonR, 0.005f, 0.0f, 1.0f);
+    horizonChanged |= UI::DragFloat("Horizon G", &m_fogHorizonG, 0.005f, 0.0f, 1.0f);
+    horizonChanged |= UI::DragFloat("Horizon B", &m_fogHorizonB, 0.005f, 0.0f, 1.0f);
+    if (horizonChanged && lm)
+        lm->SetFogColor(m_fogHorizonR, m_fogHorizonG, m_fogHorizonB);
+
+    bool zenithChanged = false;
+    zenithChanged |= UI::DragFloat("Zenith R", &m_fogZenithR, 0.005f, 0.0f, 1.0f);
+    zenithChanged |= UI::DragFloat("Zenith G", &m_fogZenithG, 0.005f, 0.0f, 1.0f);
+    zenithChanged |= UI::DragFloat("Zenith B", &m_fogZenithB, 0.005f, 0.0f, 1.0f);
+    if (zenithChanged && lm)
+        lm->SetFogZenithColor(m_fogZenithR, m_fogZenithG, m_fogZenithB);
+
+    if (UI::Checkbox("Height Fog", &m_heightFogEnabled) && lm)
+        lm->SetHeightFogEnabled(m_heightFogEnabled);
+
+    if (UI::DragFloat("Height Top",     &m_heightFogTop,     0.5f,  -64.0f, 256.0f) && lm)
+        lm->SetHeightFogTop(m_heightFogTop);
+    if (UI::DragFloat("Height Density", &m_heightFogDensity, 0.005f,  0.0f,   1.0f) && lm)
+        lm->SetHeightFogDensity(m_heightFogDensity);
+    if (UI::DragFloat("Height Falloff", &m_heightFogFalloff, 0.001f,  0.0f,   1.0f) && lm)
+        lm->SetHeightFogFalloff(m_heightFogFalloff);
+
 // --- Shadows ---
 UI::Separator();
 UI::Text("-- Shadows --");
@@ -885,7 +915,7 @@ void MainScene::SetupLighting() {
     m_sun->SetCastShadows(true);
     m_sun->SetShadowBias(0.002f);
     m_sun->SetShadowNormalBias(0.05f);
-    m_sun->SetShadowFrustumSize(60.0f);
+    m_sun->SetShadowFrustumSize(120.0f);
     m_sun->SetShadowDistance(120.0f);
     m_sun->SetShadowNearPlane(0.1f);
     m_sun->SetShadowFarPlane(500.0f);
@@ -896,9 +926,15 @@ void MainScene::SetupLighting() {
         lm->SetAmbientColor(m_ambientColorR, m_ambientColorG, m_ambientColorB);
         lm->SetAmbientIntensity(m_ambientIntensity);
 
-        lm->SetFogColor(0.62f, 0.78f, 1.0f);
+        lm->SetFogColor(m_fogHorizonR, m_fogHorizonG, m_fogHorizonB);
+        lm->SetFogZenithColor(m_fogZenithR, m_fogZenithG, m_fogZenithB);
         float fogDist = m_chunkManager.GetDrawDistance();
         lm->SetFogDistances(fogDist * 0.9f, fogDist);
-        lm->SetFogEnabled(true);
+        lm->SetFogEnabled(m_fogEnabled);
+
+        lm->SetHeightFogEnabled(m_heightFogEnabled);
+        lm->SetHeightFogTop(m_heightFogTop);
+        lm->SetHeightFogDensity(m_heightFogDensity);
+        lm->SetHeightFogFalloff(m_heightFogFalloff);
     }
 }
