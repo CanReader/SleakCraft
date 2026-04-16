@@ -111,7 +111,7 @@ private:
     float m_ambientColorB    = 1.00f;
 
     // Texture quality state
-    Sleak::TextureFilter m_texFilter = Sleak::TextureFilter::Trilinear;
+    Sleak::TextureFilter m_texFilter = Sleak::TextureFilter::Nearest;
     float m_texLodBias = 0.0f;
 
     // Fog state (live-editable). Defaults align with LightManager defaults so
