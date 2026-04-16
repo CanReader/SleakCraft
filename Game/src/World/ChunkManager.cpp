@@ -649,9 +649,11 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
     int centerX = static_cast<int>(std::floor(playerX / Chunk::SIZE));
     int centerY = static_cast<int>(std::floor(playerY / Chunk::SIZE));
     int centerZ = static_cast<int>(std::floor(playerZ / Chunk::SIZE));
-    m_lastCenterY = centerY;
 
-    if (centerX != m_lastCenterX || centerZ != m_lastCenterZ) {
+    bool xzMoved = (centerX != m_lastCenterX || centerZ != m_lastCenterZ);
+    bool yMoved  = (centerY != m_lastCenterY);
+
+    if (xzMoved) {
         // Save previous center before updating, so we can compute exiting slabs.
         int prevCX = (m_lastCenterX == INT_MAX) ? centerX : m_lastCenterX;
         int prevCZ = (m_lastCenterZ == INT_MAX) ? centerZ : m_lastCenterZ;
@@ -696,25 +698,71 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             else if (centerZ < prevCZ)
                 for (int z = centerZ + m_renderDistance + 1; z <= prevCZ + m_renderDistance; ++z) unloadSlabZ(z);
         }
+    }
+
+    if (xzMoved || yMoved) {
+        m_lastCenterY = centerY;
 
         m_pendingLoad.clear();
         m_pendingLoad.reserve(m_loadSpiral.size() * (WorldGenerator::MAX_CHUNK_Y - WorldGenerator::MIN_CHUNK_Y + 1));
 
-        // Spiral generates coordinates from closest to furthest.
-        // We push them in reverse so the pop_back() takes the closest chunks first!
-        // GetCachedColumnMaxCy() computes GetMaxFilledChunkY once per XZ column and caches
-        // the result permanently (terrain is deterministic), replacing O(8) IsChunkAboveTerrain
-        // calls (each with 9×6 FBM evaluations) with a single cached lookup per column.
-        for (auto it = m_loadSpiral.rbegin(); it != m_loadSpiral.rend(); ++it) {
-            int cx = centerX + it->first;
-            int cz = centerZ + it->second;
+        for (const auto& offset : m_loadSpiral) {
+            int cx = centerX + offset.first;
+            int cz = centerZ + offset.second;
             int maxCy = GetCachedColumnMaxCy(cx, cz);
             for (int cy = WorldGenerator::MIN_CHUNK_Y; cy <= maxCy; ++cy) {
                 if (!GetChunk(cx, cy, cz))
                     m_pendingLoad.push_back({cx, cy, cz});
             }
         }
+
+        // Velocity in chunk-space from last player world position.
+        float dvx = (playerX - m_lastPlayerX) / Chunk::SIZE;
+        float dvy = (playerY - m_lastPlayerY) / Chunk::SIZE;
+        float dvz = (playerZ - m_lastPlayerZ) / Chunk::SIZE;
+        float speed = std::sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
+
+        if (speed > 0.05f) {
+            // Velocity-biased sort: chunks ahead of the player are pulled to the
+            // front of the load queue so they appear before the player arrives.
+            // lookahead scales with speed, capped at render distance.
+            float inv = 1.0f / speed;
+            float nx = dvx * inv, ny = dvy * inv, nz = dvz * inv;
+            float lookahead = std::min(speed * 4.0f,
+                                       static_cast<float>(m_renderDistance));
+            std::sort(m_pendingLoad.begin(), m_pendingLoad.end(),
+                [centerX, centerY, centerZ, nx, ny, nz, lookahead](
+                        const ChunkCoord& a, const ChunkCoord& b) {
+                    float dax = static_cast<float>(a.x - centerX);
+                    float day = static_cast<float>(a.y - centerY);
+                    float daz = static_cast<float>(a.z - centerZ);
+                    float dbx = static_cast<float>(b.x - centerX);
+                    float dby = static_cast<float>(b.y - centerY);
+                    float dbz = static_cast<float>(b.z - centerZ);
+                    float sa = dax*dax + day*day + daz*daz
+                               - lookahead * (dax*nx + day*ny + daz*nz);
+                    float sb = dbx*dbx + dby*dby + dbz*dbz
+                               - lookahead * (dbx*nx + dby*ny + dbz*nz);
+                    return sa > sb;
+                });
+        } else {
+            // Static: pure 3D distance, closest at back for pop_back().
+            std::sort(m_pendingLoad.begin(), m_pendingLoad.end(),
+                [centerX, centerY, centerZ](const ChunkCoord& a, const ChunkCoord& b) {
+                    int da = (a.x-centerX)*(a.x-centerX)
+                           + (a.y-centerY)*(a.y-centerY)
+                           + (a.z-centerZ)*(a.z-centerZ);
+                    int db = (b.x-centerX)*(b.x-centerX)
+                           + (b.y-centerY)*(b.y-centerY)
+                           + (b.z-centerZ)*(b.z-centerZ);
+                    return da > db;
+                });
+        }
     }
+
+    m_lastPlayerX = playerX;
+    m_lastPlayerY = playerY;
+    m_lastPlayerZ = playerZ;
 
     // Process pending unloads gradually (rate-limited)
     {
@@ -1119,6 +1167,9 @@ void ChunkManager::ForceReload() {
     m_lastCenterX = INT_MAX;
     m_lastCenterY = INT_MAX;
     m_lastCenterZ = INT_MAX;
+    m_lastPlayerX = 0.0f;
+    m_lastPlayerY = 0.0f;
+    m_lastPlayerZ = 0.0f;
 
     if (wasMultithreaded) StartWorkers();
 }
