@@ -859,7 +859,7 @@ void MainScene::SetupMaterial() {
     mat->SetSpecularColor((uint8_t)0, (uint8_t)0, (uint8_t)0);
     mat->SetShininess(0.0f);
     mat->SetMetallic(0.0f);
-    mat->SetRoughness(0.0f);
+    mat->SetRoughness(0.85f);
     mat->SetAO(1.0f);
     mat->SetOpacity(1.0f);
     mat->Initialize();
@@ -907,7 +907,7 @@ void MainScene::SetupLighting() {
     m_sun->SetCastShadows(true);
     m_sun->SetShadowBias(0.002f);
     m_sun->SetShadowNormalBias(0.05f);
-    m_sun->SetShadowFrustumSize(160.0f);
+    m_sun->SetShadowFrustumSize(96.0f);   // tight frustum → high 2048-map texel density (crisp shadows)
     m_sun->SetShadowDistance(160.0f);
     m_sun->SetShadowNearPlane(0.1f);
     m_sun->SetShadowFarPlane(500.0f);

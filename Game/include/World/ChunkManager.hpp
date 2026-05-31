@@ -133,6 +133,7 @@ private:
         Sleak::MeshHandle mesh;
         Sleak::MeshHandle waterMesh;
         bool visible = true;
+        bool castsShadow = true;  // false for distant columns (skip shadow pass)
     };
     void RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer = true);
     // Max number of column meshes before we consider VRAM exhausted.
@@ -175,9 +176,6 @@ private:
     int m_lastCenterX = INT_MAX;
     int m_lastCenterY = INT_MAX;
     int m_lastCenterZ = INT_MAX;
-    float m_lastPlayerX = 0.0f;
-    float m_lastPlayerY = 0.0f;
-    float m_lastPlayerZ = 0.0f;
     bool m_oomThisFrame = false;
     WorldGenerator m_generator;
 

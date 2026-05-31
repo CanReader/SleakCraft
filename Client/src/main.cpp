@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     Sleak::CommandLine::SetHelpCallback(PrintHelp);
     Sleak::CommandLine::Parse(argc, argv);
 
-    Sleak::Logger::Init((char*)PROJECT_NAME);
+    Sleak::Logger::Init(PROJECT_NAME);
 
     Sleak::ApplicationDefaults defaults {
         .Name             = PROJECT_NAME,
