@@ -82,6 +82,7 @@ public:
 
     BlockType GetBlockAt(int worldX, int worldY, int worldZ) const;
     bool SetBlockAt(int worldX, int worldY, int worldZ, BlockType type);
+    void FlushPendingEdits();
     VoxelRaycastResult VoxelRaycast(const Sleak::Math::Vector3D& origin,
                                      const Sleak::Math::Vector3D& direction,
                                      float maxDist) const;
@@ -165,12 +166,21 @@ private:
     std::vector<ChunkCoord> m_pendingLoad;
     std::unordered_set<ChunkCoord, ChunkCoordHash> m_pendingSet;
     std::vector<ChunkCoord> m_pendingUnload;
+
+    // Block edits deferred while a worker held the target/neighbor chunk
+    struct PendingBlockEdit { int x, y, z; BlockType type; };
+    std::vector<PendingBlockEdit> m_pendingEdits;
+
+    // Edited chunks unloaded before a save — data lives in m_savedBlockData
+    std::unordered_set<ChunkCoord, ChunkCoordHash> m_stashedDirty;
+    void StashIfDirty(Chunk* chunk);
     Sleak::SceneBase* m_scene = nullptr;
     Sleak::RefPtr<Sleak::Material> m_material;
     Sleak::RefPtr<Sleak::Material> m_waterMaterial;
     int m_renderDistance = 8;
-    int m_chunksPerFrame = 32;
-    int m_uploadsPerFrame = 8;   // Base uploads/frame; adaptive logic in Update() can double this
+    int m_chunksPerFrame = 32;    // remesh + unload budget per frame
+    int m_dispatchPerFrame = 64;  // new-chunk generation dispatches per frame
+    int m_uploadsPerFrame = 16;   // column mesh rebuilds (GPU uploads) per frame
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
     int m_lastCenterX = INT_MAX;

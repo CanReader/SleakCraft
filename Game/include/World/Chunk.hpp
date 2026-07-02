@@ -2,6 +2,7 @@
 #define _CHUNK_HPP_
 
 #include "Block.hpp"
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <Runtime/MeshData.hpp>
@@ -65,8 +66,13 @@ public:
     }
     bool NeedsMeshRebuild() const { return m_needsRebuild; }
     void SetNeedsMeshRebuild(bool v) { m_needsRebuild = v; }
-    bool NeedsGeneration() const { return m_needsGeneration; }
-    void SetNeedsGeneration(bool v) { m_needsGeneration = v; }
+    // Atomic: worker clears it after Generate() finishes writing blocks
+    bool NeedsGeneration() const {
+        return m_needsGeneration.load(std::memory_order_acquire);
+    }
+    void SetNeedsGeneration(bool v) {
+        m_needsGeneration.store(v, std::memory_order_release);
+    }
 
     int GetActiveIndex() const { return m_activeIndex; }
     void SetActiveIndex(int idx) { m_activeIndex = idx; }
@@ -97,7 +103,7 @@ private:
     bool m_inFlight = false;
     bool m_dirty = false;
     bool m_needsRebuild = false;
-    bool m_needsGeneration = true;
+    std::atomic<bool> m_needsGeneration{true};
     int m_activeIndex = -1;
 };
 
