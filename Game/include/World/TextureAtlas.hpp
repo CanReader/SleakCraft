@@ -20,14 +20,15 @@ public:
     // Tile order must match BlockTile enum in Block.hpp
     static Sleak::Texture* BuildAtlas();
 
+    // UVs address the tile content inside its gutter-padded cell
     static AtlasUV GetTileUV(uint8_t tileIndex) {
         int col = tileIndex % TILES_PER_ROW;
         int row = tileIndex / TILES_PER_ROW;
-        float tw = 1.0f / static_cast<float>(TILES_PER_ROW);
-        float th = 1.0f / static_cast<float>(s_rows);
+        float x0 = static_cast<float>(col * s_cell + s_pad);
+        float y0 = static_cast<float>(row * s_cell + s_pad);
         return {
-            col * tw,       row * th,
-            (col + 1) * tw, (row + 1) * th
+            x0 * s_invW,            y0 * s_invH,
+            (x0 + s_tile) * s_invW, (y0 + s_tile) * s_invH
         };
     }
 
@@ -35,6 +36,8 @@ public:
 
 private:
     static int s_rows;
+    static int s_tile, s_pad, s_cell;
+    static float s_invW, s_invH;
 };
 
 #endif
