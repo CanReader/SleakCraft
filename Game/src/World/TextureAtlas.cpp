@@ -9,6 +9,11 @@ using namespace Sleak;
 using namespace Sleak::UI;
 
 int TextureAtlas::s_rows = 1;
+int TextureAtlas::s_tile = 16;
+int TextureAtlas::s_pad  = 8;
+int TextureAtlas::s_cell = 32;
+float TextureAtlas::s_invW = 1.0f / 128.0f;
+float TextureAtlas::s_invH = 1.0f / 160.0f;
 
 // Tile source files in BlockTile enum order
 static const char* s_tilePaths[] = {
@@ -68,8 +73,19 @@ Texture* TextureAtlas::BuildAtlas() {
 
     if (tileSize == 0) tileSize = 16; // fallback
 
-    int atlasW = tileSize * TILES_PER_ROW;
-    int atlasH = tileSize * s_rows;
+    // Wrapped gutters: each cell holds the tile plus PAD px of the tile
+    // wrapped around itself, so linear/aniso taps crossing the tile edge
+    // read the seamless continuation instead of the neighboring tile.
+    int pad  = tileSize / 2;
+    int cell = tileSize + 2 * pad;
+    int atlasW = cell * TILES_PER_ROW;
+    int atlasH = cell * s_rows;
+
+    s_tile = tileSize;
+    s_pad  = pad;
+    s_cell = cell;
+    s_invW = 1.0f / static_cast<float>(atlasW);
+    s_invH = 1.0f / static_cast<float>(atlasH);
 
     // Allocate atlas pixel buffer (RGBA)
     std::vector<unsigned char> atlas(atlasW * atlasH * 4, 0);
@@ -80,8 +96,8 @@ Texture* TextureAtlas::BuildAtlas() {
     for (int i = 0; i < tileCount; ++i) {
         int col = i % TILES_PER_ROW;
         int row = i / TILES_PER_ROW;
-        int offsetX = col * tileSize;
-        int offsetY = row * tileSize;
+        int offsetX = col * cell;
+        int offsetY = row * cell;
 
         if (!tiles[i].pixels) continue;
 
@@ -93,16 +109,21 @@ Texture* TextureAtlas::BuildAtlas() {
             src = resampled.data();
         }
 
-        // Copy into atlas
-        for (int y = 0; y < tileSize; ++y) {
-            memcpy(&atlas[((offsetY + y) * atlasW + offsetX) * 4],
-                   &src[y * tileSize * 4],
-                   tileSize * 4);
+        // Fill the whole cell with the tile wrapped (content + gutters)
+        for (int y = 0; y < cell; ++y) {
+            int sy = ((y - pad) % tileSize + tileSize) % tileSize;
+            for (int x = 0; x < cell; ++x) {
+                int sx = ((x - pad) % tileSize + tileSize) % tileSize;
+                memcpy(&atlas[((offsetY + y) * atlasW + offsetX + x) * 4],
+                       &src[(sy * tileSize + sx) * 4], 4);
+            }
         }
 
         FreeImagePixels(tiles[i].pixels);
     }
 
-    // Create texture from atlas pixels
-    return CreateTextureFromPixels(atlasW, atlasH, atlas.data());
+    // Cap mips so the gutter stays >=1px at the deepest level
+    uint32_t maxMips = 1;
+    for (int p = pad; p > 1; p >>= 1) ++maxMips;
+    return CreateTextureFromPixels(atlasW, atlasH, atlas.data(), maxMips);
 }
