@@ -40,6 +40,7 @@ public:
 
     struct CompletedPlace { int x, y, z; BlockType type; };
     std::vector<CompletedPlace> PopCompletedPlacements();
+    std::vector<CompletedPlace> DrainAllPlacements();
 
 
 private:

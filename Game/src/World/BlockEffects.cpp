@@ -242,6 +242,18 @@ std::vector<BlockEffects::CompletedPlace> BlockEffects::PopCompletedPlacements()
     return result;
 }
 
+std::vector<BlockEffects::CompletedPlace> BlockEffects::DrainAllPlacements() {
+    // Commit everything still animating — used by save/exit paths
+    std::vector<CompletedPlace> result;
+    result.reserve(m_placeEffects.size());
+    for (auto& e : m_placeEffects) {
+        if (e.obj) m_scene->RemoveObject(e.obj);
+        result.push_back({e.x, e.y, e.z, e.type});
+    }
+    m_placeEffects.clear();
+    return result;
+}
+
 void BlockEffects::Cleanup() {
     for (auto& e : m_placeEffects) {
         if (e.obj) m_scene->RemoveObject(e.obj);
