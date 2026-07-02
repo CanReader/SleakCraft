@@ -1,12 +1,53 @@
 #include "World/SaveManager.hpp"
 #include <fstream>
 #include <cstring>
+#include <cstdio>
 #include <chrono>
 #include <filesystem>
 #include <sys/stat.h>
+#include <Logger.hpp>
 #ifdef _WIN32
 #include <direct.h>
+#include <io.h>
+#else
+#include <unistd.h>
 #endif
+
+// ── Atomic write: temp file + fsync + rename; target intact on failure ─
+
+static bool AtomicWriteFile(const std::string& path,
+                            const std::vector<uint8_t>& buf) {
+    std::string tmp = path + ".tmp";
+    std::FILE* fp = std::fopen(tmp.c_str(), "wb");
+    if (!fp) {
+        SLEAK_ERROR("Save: cannot open temp file {}", tmp);
+        return false;
+    }
+    bool ok = buf.empty() ||
+              std::fwrite(buf.data(), 1, buf.size(), fp) == buf.size();
+    if (ok) ok = (std::fflush(fp) == 0);
+    if (ok) {
+#ifdef _WIN32
+        ok = (_commit(_fileno(fp)) == 0);
+#else
+        ok = (::fsync(::fileno(fp)) == 0);
+#endif
+    }
+    std::fclose(fp);
+    std::error_code ec;
+    if (!ok) {
+        SLEAK_ERROR("Save: write/fsync failed for {}", tmp);
+        std::filesystem::remove(tmp, ec);
+        return false;
+    }
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        SLEAK_ERROR("Save: rename {} -> {} failed: {}", tmp, path, ec.message());
+        std::filesystem::remove(tmp, ec);
+        return false;
+    }
+    return true;
+}
 
 // ── Binary write helpers ─────────────────────────────────────────────
 
@@ -255,11 +296,7 @@ bool SaveManager::WriteWorldDat(const WorldMeta& meta,
     }
 
     std::string worldDat = m_savePath + "/world.dat";
-    std::ofstream file(worldDat, std::ios::binary);
-    if (!file.is_open()) return false;
-    file.write(reinterpret_cast<const char*>(buf.data()),
-               static_cast<std::streamsize>(buf.size()));
-    return file.good();
+    return AtomicWriteFile(worldDat, buf);
 }
 
 // ── Load ─────────────────────────────────────────────────────────────
@@ -275,7 +312,11 @@ bool SaveManager::LoadWorld(WorldMeta& meta,
         std::string regionPath = m_savePath + "/regions/" +
                                  RegionFile::RegionFileName(region.rx, region.rz);
         std::vector<ChunkSaveData> chunks;
-        if (!RegionFile::Load(regionPath, chunks)) continue;
+        if (!RegionFile::Load(regionPath, chunks)) {
+            SLEAK_WARN("World load: skipping region ({},{}) — unreadable {}",
+                       region.rx, region.rz, regionPath);
+            continue;
+        }
 
         for (auto& c : chunks)
             chunkData[PackCoord(c.cx, c.cy, c.cz)] = c.blocks;
@@ -299,6 +340,10 @@ bool SaveManager::ReadWorldDat(WorldMeta& meta) const {
     if (!file.is_open()) return false;
 
     auto fileSize = file.tellg();
+    if (fileSize < 0) {
+        SLEAK_WARN("World load: bad size for {}", worldDat);
+        return false;
+    }
     file.seekg(0);
     std::vector<uint8_t> buf(static_cast<size_t>(fileSize));
     file.read(reinterpret_cast<char*>(buf.data()), fileSize);
@@ -309,7 +354,11 @@ bool SaveManager::ReadWorldDat(WorldMeta& meta) const {
 
     uint32_t magic;
     if (!ReadU32(p, end, magic) || magic != WorldMeta::MAGIC) return false;
-    if (!ReadU16(p, end, meta.version) || meta.version > WorldMeta::CURRENT_VERSION) return false;
+    if (!ReadU16(p, end, meta.version) ||
+        meta.version != WorldMeta::CURRENT_VERSION) {
+        SLEAK_ERROR("World load: unsupported version in {}", worldDat);
+        return false;
+    }
     if (!ReadU16(p, end, meta.flags)) return false;
     if (!ReadI64(p, end, meta.saveTimestamp)) return false;
     if (!ReadString(p, end, meta.worldName)) return false;
@@ -327,6 +376,12 @@ bool SaveManager::ReadWorldDat(WorldMeta& meta) const {
     // Region index
     uint32_t regionCount;
     if (!ReadU32(p, end, regionCount)) return false;
+    // Bound count against remaining bytes (12-byte entry: rx, rz, chunkCount).
+    if (regionCount > static_cast<size_t>(end - p) / 12) {
+        SLEAK_ERROR("World load: regionCount {} exceeds file size in {}",
+                    regionCount, worldDat);
+        return false;
+    }
     meta.regions.resize(regionCount);
     for (uint32_t i = 0; i < regionCount; ++i) {
         auto& r = meta.regions[i];
