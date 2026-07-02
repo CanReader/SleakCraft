@@ -85,7 +85,7 @@ cmake --build --preset debug
 
 > **Cloned without `--recursive`?**
 > ```bash
-> git submodule update --init --recursive --remote
+> git submodule update --init --recursive
 > ```
 
 Binaries are output to `bin/`.
