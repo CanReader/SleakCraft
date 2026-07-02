@@ -27,6 +27,7 @@ public:
 
     // Save current world state (called by Game when returning to menu)
     void SaveGame();
+    void UnregisterBenchmarkMetrics();
     bool HasUnsavedChanges() const;
 
 private:
@@ -126,9 +127,9 @@ private:
     float m_fogZenithG        = 0.58f;
     float m_fogZenithB        = 0.86f;
     bool  m_heightFogEnabled  = true;
-    float m_heightFogTop      = 80.0f;
-    float m_heightFogDensity  = 0.55f;
-    float m_heightFogFalloff  = 0.04f;
+    float m_heightFogTop      = 64.0f;
+    float m_heightFogDensity  = 0.25f;
+    float m_heightFogFalloff  = 0.05f;
 };
 
 #endif

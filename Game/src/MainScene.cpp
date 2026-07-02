@@ -149,6 +149,7 @@ MainScene::~MainScene() {
     EventDispatcher::UnregisterEvent(EventType::MouseScrolled, m_mouseScrolledHandlerId);
     EventDispatcher::UnregisterEvent(EventType::KeyPressed,    m_keyPressedHandlerId);
     EventDispatcher::UnregisterEvent(EventType::KeyReleased,   m_keyReleasedHandlerId);
+    UnregisterBenchmarkMetrics();
 }
 
 void MainScene::OnDeactivate() {
@@ -161,6 +162,18 @@ void MainScene::OnDeactivate() {
     m_mouseScrolledHandlerId.clear();
     m_keyPressedHandlerId.clear();
     m_keyReleasedHandlerId.clear();
+    UnregisterBenchmarkMetrics();
+}
+
+void MainScene::UnregisterBenchmarkMetrics() {
+    // Metric lambdas capture `this`; the Benchmark outlives the scene
+    auto* app = Sleak::Application::GetInstance();
+    if (app && app->GetBenchmark()) {
+        app->GetBenchmark()->UnregisterMetric("RenderDistance");
+        app->GetBenchmark()->UnregisterMetric("IsMoving");
+        app->GetBenchmark()->UnregisterMetric("VRAM_MB");
+        app->GetBenchmark()->UnregisterMetric("VRAM_Pct");
+    }
 }
 
 bool MainScene::HasUnsavedChanges() const {
@@ -686,6 +699,11 @@ void MainScene::SaveGame() {
     meta.player.selectedBlock = static_cast<uint8_t>(m_selectedBlock);
     meta.player.renderDistance = m_chunkManager.GetRenderDistance();
 
+    // Commit placements still inside the 0.15s animation window
+    for (auto& p : m_blockEffects.DrainAllPlacements())
+        m_chunkManager.SetBlockAt(p.x, p.y, p.z, p.type);
+    m_chunkManager.FlushPendingEdits();
+
     // Collect dirty chunks
     auto dirtyInfos = m_chunkManager.GetDirtyChunks();
     std::vector<ChunkSaveData> dirtyChunks;
@@ -904,11 +922,24 @@ void MainScene::SetupLighting() {
     m_sun->SetColor(m_sunColorR, m_sunColorG, m_sunColorB);
     m_sun->SetIntensity(m_sunIntensity);
     m_sun->SetLightSize(4.0f);
-    m_sun->SetCastShadows(true);
-    m_sun->SetShadowBias(0.002f);
+
+    // Voxel-tuned graphics config: shadows on, no SSAO/SSR/IBL/bloom.
+    Sleak::GraphicsConfig cfg =
+        Sleak::GraphicsConfig::Preset(Sleak::GraphicsQuality::Medium);
+    cfg.ssaoEnabled = false;
+    cfg.ssrEnabled = false;
+    cfg.iblEnabled = false;
+    cfg.bloomEnabled = false;          // match OpenGL ref (no post-FX bloom chain)
+    cfg.shadowFrustumSize = 96.0f;     // tight frustum → crisp 2048-map texels
+    cfg.shadowCasterDistance = 96.0f;
+    cfg.shadowDistance = 160.0f;
+
+    auto* app = Sleak::Application::GetInstance();
+    if (app) app->ApplyGraphicsConfig(cfg);
+    cfg.ApplyShadows(*m_sun);
+
+    // Settings not carried by the config — applied directly.
     m_sun->SetShadowNormalBias(0.05f);
-    m_sun->SetShadowFrustumSize(96.0f);   // tight frustum → high 2048-map texel density (crisp shadows)
-    m_sun->SetShadowDistance(160.0f);
     m_sun->SetShadowNearPlane(0.1f);
     m_sun->SetShadowFarPlane(500.0f);
     AddObject(m_sun);
