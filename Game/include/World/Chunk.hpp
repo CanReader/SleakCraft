@@ -82,6 +82,22 @@ public:
     bool HasPendingWaterMesh() const { return m_hasPendingWaterMesh; }
     void ClearPendingWaterMesh() { m_hasPendingWaterMesh = false; }
 
+    // All contiguous runs (>= 4 layers) of fully-opaque horizontal
+    // layers per 8x8 XZ quadrant (q = (x>=8) + 2*(z>=8)), ascending,
+    // published with the mesh data. At most 3 such runs fit in 16
+    // layers. Returns run count, fills outMinY/outMaxY.
+    static constexpr int OCC_MAX_RUNS = 3;
+    int GetOccluderRuns(int q, int8_t outMinY[OCC_MAX_RUNS],
+                        int8_t outMaxY[OCC_MAX_RUNS]) const {
+        int n = 0;
+        for (int i = 0; i < OCC_MAX_RUNS && m_occRunMinY[q][i] >= 0; ++i) {
+            outMinY[n] = m_occRunMinY[q][i];
+            outMaxY[n] = m_occRunMaxY[q][i];
+            ++n;
+        }
+        return n;
+    }
+
 private:
     static int BlockIndex(int x, int y, int z) {
         return x + z * SIZE + y * SIZE * SIZE;
@@ -105,6 +121,10 @@ private:
     bool m_needsRebuild = false;
     std::atomic<bool> m_needsGeneration{true};
     int m_activeIndex = -1;
+    int8_t m_occRunMinY[4][OCC_MAX_RUNS] = {
+        {-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}};
+    int8_t m_occRunMaxY[4][OCC_MAX_RUNS] = {
+        {-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}};
 };
 
 #endif

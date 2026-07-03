@@ -1,34 +1,42 @@
 #include "MainScene.hpp"
-#include "Game.hpp"
-#include "World/TextureAtlas.hpp"
-#include <cstring>
-#include <cmath>
-#include <Core/CommandLine.hpp>
-#include <Core/GameObject.hpp>
-#include <Core/Application.hpp>
-#include <Math/Vector.hpp>
-#include <Lighting/DirectionalLight.hpp>
-#include <Lighting/LightManager.hpp>
-#include <Runtime/Material.hpp>
-#include <Runtime/Texture.hpp>
-#include <Runtime/Skybox.hpp>
-#include <Camera/Camera.hpp>
-#include <Physics/RigidbodyComponent.hpp>
-#include <ECS/Components/FirstPersonController.hpp>
+
 #include <Events/Event.h>
 #include <Input/KeyCodes.h>
-#include <UI/UI.hpp>
+
+#include <Camera/Camera.hpp>
+#include <Core/Application.hpp>
+#include <Core/CommandLine.hpp>
+#include <Core/GameObject.hpp>
+#include <Culling/CullingSystem.hpp>
 #include <Debug/DebugLineRenderer.hpp>
-#include <Physics/Colliders.hpp>
+#include <ECS/Components/FirstPersonController.hpp>
+#include <Lighting/DirectionalLight.hpp>
+#include <Lighting/LightManager.hpp>
+#include <Math/Vector.hpp>
 #include <Physics/ColliderComponent.hpp>
+#include <Physics/Colliders.hpp>
+#include <Physics/RigidbodyComponent.hpp>
+#include <Runtime/Material.hpp>
+#include <Runtime/Skybox.hpp>
+#include <Runtime/Texture.hpp>
+#include <UI/UI.hpp>
+#include <cmath>
+#include <cstring>
+
+#include "Game.hpp"
+#include "World/TextureAtlas.hpp"
 
 using namespace Sleak;
 using namespace Sleak::Math;
 
 MainScene::MainScene(const std::string& name, const std::string& savePath,
-                     const std::string& worldName, uint32_t seed, bool isNewWorld)
-    : Scene(name), m_savePath(savePath), m_worldName(worldName),
-      m_worldSeed(seed), m_isNewWorld(isNewWorld) {}
+                     const std::string& worldName, uint32_t seed,
+                     bool isNewWorld)
+    : Scene(name),
+      m_savePath(savePath),
+      m_worldName(worldName),
+      m_worldSeed(seed),
+      m_isNewWorld(isNewWorld) {}
 
 bool MainScene::Initialize() {
     SetupMaterial();
@@ -37,7 +45,8 @@ bool MainScene::Initialize() {
     Scene::Initialize();
 
     // Create the player camera as a regular scene object
-    auto* cam = new Sleak::Camera("PlayerCamera", {8.0f, 70.0f, 8.0f}, 60, 0.1f, 1500.0f);
+    auto* cam = new Sleak::Camera("PlayerCamera", {8.0f, 70.0f, 8.0f}, 60, 0.1f,
+                                  1500.0f);
     cam->SetDirection({0.0f, 0.0f, 1.0f});
     cam->AddComponent<FirstPersonController>();
     cam->AddComponent<Sleak::ColliderComponent>(
@@ -125,39 +134,68 @@ bool MainScene::Initialize() {
             return (vel.Magnitude() > 0.01f) ? 1.0f : 0.0f;
         });
         app->GetBenchmark()->RegisterMetric("VRAM_MB", [app]() {
-            return static_cast<float>(app->GetGPUMemoryUsed()) / (1024.0f * 1024.0f);
+            return static_cast<float>(app->GetGPUMemoryUsed()) /
+                   (1024.0f * 1024.0f);
         });
         app->GetBenchmark()->RegisterMetric("VRAM_Pct", [app]() {
             size_t budget = app->GetGPUMemoryBudget();
             if (budget == 0) return 0.0f;
             return (static_cast<float>(app->GetGPUMemoryUsed()) /
-                    static_cast<float>(budget)) * 100.0f;
+                    static_cast<float>(budget)) *
+                   100.0f;
+        });
+        app->GetBenchmark()->RegisterMetric("Cull_Tested", []() {
+            return static_cast<float>(
+                Sleak::CullingSystem::GetStats().tested);
+        });
+        app->GetBenchmark()->RegisterMetric("Cull_Frustum", []() {
+            return static_cast<float>(
+                Sleak::CullingSystem::GetStats().frustumCulled);
+        });
+        app->GetBenchmark()->RegisterMetric("Cull_Occlusion", []() {
+            return static_cast<float>(
+                Sleak::CullingSystem::GetStats().occlusionCulled);
+        });
+        app->GetBenchmark()->RegisterMetric("Cull_RasterMs", []() {
+            return Sleak::CullingSystem::GetStats().rasterizeMs;
         });
     }
 
-    m_mousePressedHandlerId  = EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
-    m_mouseScrolledHandlerId = EventDispatcher::RegisterEventHandler(this, &MainScene::OnMouseScrolled);
-    m_keyPressedHandlerId    = EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
-    m_keyReleasedHandlerId   = EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyReleased);
+    m_mousePressedHandlerId =
+        EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
+    m_mouseScrolledHandlerId = EventDispatcher::RegisterEventHandler(
+        this, &MainScene::OnMouseScrolled);
+    m_keyPressedHandlerId =
+        EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyPressed);
+    m_keyReleasedHandlerId =
+        EventDispatcher::RegisterEventHandler(this, &MainScene::OnKeyReleased);
 
     return true;
 }
 
 MainScene::~MainScene() {
     // Unregister anything that OnDeactivate may not have caught
-    EventDispatcher::UnregisterEvent(EventType::MousePressed,  m_mousePressedHandlerId);
-    EventDispatcher::UnregisterEvent(EventType::MouseScrolled, m_mouseScrolledHandlerId);
-    EventDispatcher::UnregisterEvent(EventType::KeyPressed,    m_keyPressedHandlerId);
-    EventDispatcher::UnregisterEvent(EventType::KeyReleased,   m_keyReleasedHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::MousePressed,
+                                     m_mousePressedHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::MouseScrolled,
+                                     m_mouseScrolledHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::KeyPressed,
+                                     m_keyPressedHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::KeyReleased,
+                                     m_keyReleasedHandlerId);
     UnregisterBenchmarkMetrics();
 }
 
 void MainScene::OnDeactivate() {
     Scene::OnDeactivate();
-    EventDispatcher::UnregisterEvent(EventType::MousePressed,  m_mousePressedHandlerId);
-    EventDispatcher::UnregisterEvent(EventType::MouseScrolled, m_mouseScrolledHandlerId);
-    EventDispatcher::UnregisterEvent(EventType::KeyPressed,    m_keyPressedHandlerId);
-    EventDispatcher::UnregisterEvent(EventType::KeyReleased,   m_keyReleasedHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::MousePressed,
+                                     m_mousePressedHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::MouseScrolled,
+                                     m_mouseScrolledHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::KeyPressed,
+                                     m_keyPressedHandlerId);
+    EventDispatcher::UnregisterEvent(EventType::KeyReleased,
+                                     m_keyReleasedHandlerId);
     m_mousePressedHandlerId.clear();
     m_mouseScrolledHandlerId.clear();
     m_keyPressedHandlerId.clear();
@@ -180,7 +218,8 @@ bool MainScene::HasUnsavedChanges() const {
     return !m_chunkManager.GetDirtyChunks().empty();
 }
 
-void MainScene::OnMousePressed(const Events::Input::MouseButtonPressedEvent& e) {
+void MainScene::OnMousePressed(
+    const Events::Input::MouseButtonPressedEvent& e) {
     auto* cam = GetActiveCamera();
     if (!cam) return;
 
@@ -196,17 +235,22 @@ void MainScene::OnMousePressed(const Events::Input::MouseButtonPressedEvent& e) 
     MouseCode button = e.GetMouseButton();
     if (button == MouseCode::ButtonLeft) {
         BlockType broken = hit.blockType;
-        m_chunkManager.SetBlockAt(hit.blockX, hit.blockY, hit.blockZ, BlockType::Air);
+        m_chunkManager.SetBlockAt(hit.blockX, hit.blockY, hit.blockZ,
+                                  BlockType::Air);
         if (broken != BlockType::Air)
-            m_blockEffects.SpawnBreakEffect(hit.blockX, hit.blockY, hit.blockZ, broken);
+            m_blockEffects.SpawnBreakEffect(hit.blockX, hit.blockY, hit.blockZ,
+                                            broken);
     } else if (button == MouseCode::ButtonRight) {
         // Prevent placing a block inside the player's bounding box
         float feetY = pos.GetY() - 1.62f;
-        bool overlaps = (hit.placeX + 1 > pos.GetX() - 0.3f && hit.placeX < pos.GetX() + 0.3f) &&
-                        (hit.placeY + 1 > feetY             && hit.placeY < feetY + 1.8f) &&
-                        (hit.placeZ + 1 > pos.GetZ() - 0.3f && hit.placeZ < pos.GetZ() + 0.3f);
+        bool overlaps = (hit.placeX + 1 > pos.GetX() - 0.3f &&
+                         hit.placeX < pos.GetX() + 0.3f) &&
+                        (hit.placeY + 1 > feetY && hit.placeY < feetY + 1.8f) &&
+                        (hit.placeZ + 1 > pos.GetZ() - 0.3f &&
+                         hit.placeZ < pos.GetZ() + 0.3f);
         if (!overlaps)
-            m_blockEffects.SpawnPlaceEffect(hit.placeX, hit.placeY, hit.placeZ, m_selectedBlock);
+            m_blockEffects.SpawnPlaceEffect(hit.placeX, hit.placeY, hit.placeZ,
+                                            m_selectedBlock);
     }
 }
 
@@ -231,15 +275,17 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
             if ((now - m_lastSpacePressTime) < DOUBLE_TAP_WINDOW) {
                 m_flying = !m_flying;
                 auto* cam = GetActiveCamera();
-                auto* rb = cam ? cam->GetComponent<RigidbodyComponent>() : nullptr;
-                auto* fpc = cam ? cam->GetComponent<FirstPersonController>() : nullptr;
+                auto* rb =
+                    cam ? cam->GetComponent<RigidbodyComponent>() : nullptr;
+                auto* fpc =
+                    cam ? cam->GetComponent<FirstPersonController>() : nullptr;
                 if (rb) {
                     rb->SetUseGravity(!m_flying);
-                    if (m_flying)
-                        rb->SetVelocity({0.0f, 0.0f, 0.0f});
+                    if (m_flying) rb->SetVelocity({0.0f, 0.0f, 0.0f});
                 }
                 if (fpc) fpc->SetFlying(m_flying);
-                m_lastSpacePressTime = -1.0f; // reset so triple-tap doesn't re-toggle
+                m_lastSpacePressTime =
+                    -1.0f;  // reset so triple-tap doesn't re-toggle
             } else {
                 m_lastSpacePressTime = now;
             }
@@ -255,15 +301,42 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
         m_shiftHeld = true;
     }
 
-    if_key_press(KEY__1) { m_selectedSlot = 0; m_selectedBlock = m_hotbar[0]; }
-    if_key_press(KEY__2) { m_selectedSlot = 1; m_selectedBlock = m_hotbar[1]; }
-    if_key_press(KEY__3) { m_selectedSlot = 2; m_selectedBlock = m_hotbar[2]; }
-    if_key_press(KEY__4) { m_selectedSlot = 3; m_selectedBlock = m_hotbar[3]; }
-    if_key_press(KEY__5) { m_selectedSlot = 4; m_selectedBlock = m_hotbar[4]; }
-    if_key_press(KEY__6) { m_selectedSlot = 5; m_selectedBlock = m_hotbar[5]; }
-    if_key_press(KEY__7) { m_selectedSlot = 6; m_selectedBlock = m_hotbar[6]; }
-    if_key_press(KEY__8) { m_selectedSlot = 7; m_selectedBlock = m_hotbar[7]; }
-    if_key_press(KEY__9) { m_selectedSlot = 8; m_selectedBlock = m_hotbar[8]; }
+    if_key_press(KEY__1) {
+        m_selectedSlot = 0;
+        m_selectedBlock = m_hotbar[0];
+    }
+    if_key_press(KEY__2) {
+        m_selectedSlot = 1;
+        m_selectedBlock = m_hotbar[1];
+    }
+    if_key_press(KEY__3) {
+        m_selectedSlot = 2;
+        m_selectedBlock = m_hotbar[2];
+    }
+    if_key_press(KEY__4) {
+        m_selectedSlot = 3;
+        m_selectedBlock = m_hotbar[3];
+    }
+    if_key_press(KEY__5) {
+        m_selectedSlot = 4;
+        m_selectedBlock = m_hotbar[4];
+    }
+    if_key_press(KEY__6) {
+        m_selectedSlot = 5;
+        m_selectedBlock = m_hotbar[5];
+    }
+    if_key_press(KEY__7) {
+        m_selectedSlot = 6;
+        m_selectedBlock = m_hotbar[6];
+    }
+    if_key_press(KEY__8) {
+        m_selectedSlot = 7;
+        m_selectedBlock = m_hotbar[7];
+    }
+    if_key_press(KEY__9) {
+        m_selectedSlot = 8;
+        m_selectedBlock = m_hotbar[8];
+    }
     if_key_press(KEY__ESCAPE) {
         auto* app = Application::GetInstance();
         if (app) {
@@ -278,8 +351,7 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
 }
 
 void MainScene::OnKeyReleased(const Events::Input::KeyReleasedEvent& e) {
-    if (e.GetKeyCode() == Input::KEY_CODE::KEY__SPACE)
-        m_spaceHeld = false;
+    if (e.GetKeyCode() == Input::KEY_CODE::KEY__SPACE) m_spaceHeld = false;
     if (e.GetKeyCode() == Input::KEY_CODE::KEY__LCTRL ||
         e.GetKeyCode() == Input::KEY_CODE::KEY__RCTRL)
         m_ctrlHeld = false;
@@ -296,7 +368,8 @@ void MainScene::Update(float deltaTime) {
     if (cam) {
         m_blockEffects.Update(deltaTime, cam->GetPosition());
         for (auto& completed : m_blockEffects.PopCompletedPlacements())
-            m_chunkManager.SetBlockAt(completed.x, completed.y, completed.z, completed.type);
+            m_chunkManager.SetBlockAt(completed.x, completed.y, completed.z,
+                                      completed.type);
     }
 
     Scene::Update(deltaTime);
@@ -313,11 +386,11 @@ void MainScene::Update(float deltaTime) {
 
         // Fly: space=up, ctrl=down, shift=sprint
         if (m_flying) {
-            auto* rb  = cam->GetComponent<RigidbodyComponent>();
+            auto* rb = cam->GetComponent<RigidbodyComponent>();
             auto* fpc = cam->GetComponent<FirstPersonController>();
             float v = 0.0f;
             if (m_spaceHeld) v += 1.0f;
-            if (m_ctrlHeld)  v -= 1.0f;
+            if (m_ctrlHeld) v -= 1.0f;
             if (fpc) fpc->SetVerticalFlyInput(v);
             if (rb) {
                 rb->SetVelocity({0.0f, 0.0f, 0.0f});
@@ -331,8 +404,10 @@ void MainScene::Update(float deltaTime) {
         // Collision resolution (always active)
         {
             auto curPos = cam->GetPosition();
-            auto collision = m_chunkManager.ResolveVoxelCollision(curPos, 0.3f, 1.8f, 1.62f);
-            if (collision.onGround || collision.hitCeiling || collision.hitWall) {
+            auto collision =
+                m_chunkManager.ResolveVoxelCollision(curPos, 0.3f, 1.8f, 1.62f);
+            if (collision.onGround || collision.hitCeiling ||
+                collision.hitWall) {
                 cam->SetPosition({curPos.GetX() + collision.correction.GetX(),
                                   curPos.GetY() + collision.correction.GetY(),
                                   curPos.GetZ() + collision.correction.GetZ()});
@@ -347,8 +422,12 @@ void MainScene::Update(float deltaTime) {
                         if (collision.hitCeiling && vel.GetY() > 0.0f)
                             rb->SetVelocity({vel.GetX(), 0.0f, vel.GetZ()});
                         if (collision.hitWall) {
-                            float vx = (collision.correction.GetX() != 0.0f) ? 0.0f : vel.GetX();
-                            float vz = (collision.correction.GetZ() != 0.0f) ? 0.0f : vel.GetZ();
+                            float vx = (collision.correction.GetX() != 0.0f)
+                                           ? 0.0f
+                                           : vel.GetX();
+                            float vz = (collision.correction.GetZ() != 0.0f)
+                                           ? 0.0f
+                                           : vel.GetZ();
                             rb->SetVelocity({vx, vel.GetY(), vz});
                         }
                     }
@@ -367,12 +446,15 @@ void MainScene::Update(float deltaTime) {
 
         // Block outline always visible
         auto dir = cam->GetDirection();
-        auto rayHit = m_chunkManager.VoxelRaycast(cam->GetPosition(), dir, 6.0f);
+        auto rayHit =
+            m_chunkManager.VoxelRaycast(cam->GetPosition(), dir, 6.0f);
         if (rayHit.hit) {
             constexpr float E = 0.002f;
             Physics::AABB blockAABB(
-                Vector3D(rayHit.blockX - E, rayHit.blockY - E, rayHit.blockZ - E),
-                Vector3D(rayHit.blockX + 1.0f + E, rayHit.blockY + 1.0f + E, rayHit.blockZ + 1.0f + E));
+                Vector3D(rayHit.blockX - E, rayHit.blockY - E,
+                         rayHit.blockZ - E),
+                Vector3D(rayHit.blockX + 1.0f + E, rayHit.blockY + 1.0f + E,
+                         rayHit.blockZ + 1.0f + E));
             DebugLineRenderer::DrawAABB(blockAABB, 0.0f, 0.0f, 0.0f);
         }
 
@@ -380,35 +462,33 @@ void MainScene::Update(float deltaTime) {
         m_autoSaveTimer += deltaTime;
         if (m_autoSaveTimer >= AUTO_SAVE_INTERVAL) {
             m_autoSaveTimer = 0.0f;
-            if (!m_chunkManager.GetDirtyChunks().empty())
-                SaveGame();
+            if (!m_chunkManager.GetDirtyChunks().empty()) SaveGame();
         }
 
         // Save/load message fade
-        if (m_saveMessageTimer > 0.0f)
-            m_saveMessageTimer -= deltaTime;
+        if (m_saveMessageTimer > 0.0f) m_saveMessageTimer -= deltaTime;
 
         if (m_showCrosshair) {
             float cx = UI::GetViewportWidth() * 0.5f;
             float cy = UI::GetViewportHeight() * 0.5f;
             constexpr float arm = 10.0f;
-            UI::DrawLine(cx - arm, cy, cx + arm, cy, 1.0f, 1.0f, 1.0f, 0.8f, 2.0f);
-            UI::DrawLine(cx, cy - arm, cx, cy + arm, 1.0f, 1.0f, 1.0f, 0.8f, 2.0f);
+            UI::DrawLine(cx - arm, cy, cx + arm, cy, 1.0f, 1.0f, 1.0f, 0.8f,
+                         2.0f);
+            UI::DrawLine(cx, cy - arm, cx, cy + arm, 1.0f, 1.0f, 1.0f, 0.8f,
+                         2.0f);
         }
 
-        if (m_showUI)
-            RenderUI();
+        if (m_showUI) RenderUI();
 
         RenderHotbar();
     }
 }
 
-
 bool castShadow = true;
 float bias = 0.0005f;
 float nbias = 0.05;
 float shadowfrustum = 160.0f;
-float shadowdistance = 160.0f;
+float shadowdistance = 560.0f;
 float shadownear = 0.1f;
 float shadowfar = 500.0f;
 
@@ -422,10 +502,8 @@ void MainScene::RenderUI() {
 
     // --- HUD panel (top-left) ---
     UI::BeginPanel("HUD", 0, 0, 0.4f,
-                    UI::PanelFlags_NoTitleBar |
-                    UI::PanelFlags_AutoResize |
-                    UI::PanelFlags_NoMove |
-                    UI::PanelFlags_NoFocusOnAppear);
+                   UI::PanelFlags_NoTitleBar | UI::PanelFlags_AutoResize |
+                       UI::PanelFlags_NoMove | UI::PanelFlags_NoFocusOnAppear);
 
     UI::Text("Selected: %s [%d]", GetBlockName(m_selectedBlock),
              static_cast<int>(m_selectedBlock));
@@ -433,8 +511,7 @@ void MainScene::RenderUI() {
     auto dir = cam->GetDirection();
     auto rayHit = m_chunkManager.VoxelRaycast(cam->GetPosition(), dir, 6.0f);
     if (rayHit.hit) {
-        UI::Text("Looking at: %s (%d, %d, %d)",
-                 GetBlockName(rayHit.blockType),
+        UI::Text("Looking at: %s (%d, %d, %d)", GetBlockName(rayHit.blockType),
                  rayHit.blockX, rayHit.blockY, rayHit.blockZ);
     } else {
         UI::Text("Looking at: ---");
@@ -452,7 +529,8 @@ void MainScene::RenderUI() {
 
     // --- Save/load feedback ---
     if (m_saveMessageTimer > 0.0f) {
-        float alpha = (m_saveMessageTimer < 0.5f) ? m_saveMessageTimer * 2.0f : 1.0f;
+        float alpha =
+            (m_saveMessageTimer < 0.5f) ? m_saveMessageTimer * 2.0f : 1.0f;
         float centerX = UI::GetViewportWidth() * 0.5f - 60.0f;
         UI::BeginPanel("SaveMsg", centerX, 40, 0.5f);
         UI::TextColored(0.2f, 1.0f, 0.2f, alpha, "%s", m_saveMessage.c_str());
@@ -460,8 +538,7 @@ void MainScene::RenderUI() {
     }
 
     // --- Performance panel (top-right) ---
-    UI::BeginPanel("Performance", UI::GetViewportWidth() - 200, 0,
-                   0.3f);
+    UI::BeginPanel("Performance", UI::GetViewportWidth() - 200, 0, 0.3f);
 
     float r, g, b;
     app->GetRendererTypeColor(r, g, b);
@@ -489,27 +566,43 @@ void MainScene::RenderUI() {
     if (vramBudget > 0) {
         float usedMB = static_cast<float>(vramUsed) / (1024.0f * 1024.0f);
         float budgetMB = static_cast<float>(vramBudget) / (1024.0f * 1024.0f);
-        float pct = (static_cast<float>(vramUsed) / static_cast<float>(vramBudget)) * 100.0f;
+        float pct =
+            (static_cast<float>(vramUsed) / static_cast<float>(vramBudget)) *
+            100.0f;
         UI::Text("VRAM: %.0f / %.0f MB (%.0f%%)", usedMB, budgetMB, pct);
     }
 
     UI::EndPanel();
 
     // --- Settings panel (below HUD) ---
-    int settingsFlags = UI::PanelFlags_NoTitleBar |
-                        UI::PanelFlags_AutoResize |
-                        UI::PanelFlags_NoMove |
-                        UI::PanelFlags_NoFocusOnAppear;
+    int settingsFlags = UI::PanelFlags_NoTitleBar | UI::PanelFlags_AutoResize |
+                        UI::PanelFlags_NoMove | UI::PanelFlags_NoFocusOnAppear;
     if (inGameMode) settingsFlags |= UI::PanelFlags_NoInput;
     UI::BeginPanel("Settings", 0, 180, 0.4f, settingsFlags);
 
     UI::Checkbox("Show Crosshair", &m_showCrosshair);
 
-    if (UI::Checkbox("VSync", &m_vsync))
-        app->SetVSync(m_vsync);
+    if (UI::Checkbox("VSync", &m_vsync)) app->SetVSync(m_vsync);
 
     if (UI::Checkbox("Multithreaded Loading", &m_multithreadedLoading))
         m_chunkManager.SetMultithreaded(m_multithreadedLoading);
+
+    UI::Separator();
+    UI::Text("-- Culling --");
+    if (UI::Checkbox("Frustum Culling", &m_frustumCulling))
+        m_chunkManager.SetCullingEnabled(m_frustumCulling, m_occlusionCulling);
+    if (UI::Checkbox("Occlusion Culling", &m_occlusionCulling))
+        m_chunkManager.SetCullingEnabled(m_frustumCulling, m_occlusionCulling);
+    {
+        const auto& cs = Sleak::CullingSystem::GetStats();
+        UI::Text("Tested %u  Frustum %u  Occ %u", cs.tested,
+                 cs.frustumCulled, cs.occlusionCulled);
+        if (cs.occlusionSkipped)
+            UI::Text("Occlusion idle (adaptive)");
+        else
+            UI::Text("Occluders %u rast  %.2f ms", cs.occludersRasterized,
+                     cs.rasterizeMs);
+    }
 
     UI::Separator();
     UI::Text("Anti-Aliasing");
@@ -522,7 +615,8 @@ void MainScene::RenderUI() {
             if (static_cast<uint32_t>(values[i]) <= maxMSAA) count = i + 1;
         int current = 0;
         for (int i = 0; i < count; i++)
-            if (static_cast<uint32_t>(values[i]) == app->GetMSAASampleCount()) current = i;
+            if (static_cast<uint32_t>(values[i]) == app->GetMSAASampleCount())
+                current = i;
         if (UI::Combo("MSAA", &current, labels, count))
             app->SetMSAASampleCount(values[current]);
     }
@@ -533,8 +627,7 @@ void MainScene::RenderUI() {
         m_chunkManager.SetRenderDistance(static_cast<int>(rd));
         float drawDist = m_chunkManager.GetDrawDistance();
         auto* lm = GetLightManager();
-        if (lm)
-            lm->SetFogDistances(drawDist * 0.9f, drawDist);
+        if (lm) lm->SetFogDistances(drawDist * 0.9f, drawDist);
         // Shadow frustum stays fixed — not tied to draw distance
         // (scaling it causes low-res shadows and disappearing issues)
     }
@@ -544,19 +637,20 @@ void MainScene::RenderUI() {
     UI::Text("-- Sun --");
 
     bool sunDirChanged = false;
-    sunDirChanged |= UI::DragFloat("Elevation",  &m_sunElevation, 0.5f, -10.0f,  90.0f);
-    sunDirChanged |= UI::DragFloat("Azimuth",    &m_sunAzimuth,   1.0f,   0.0f, 360.0f);
+    sunDirChanged |=
+        UI::DragFloat("Elevation", &m_sunElevation, 0.5f, -10.0f, 90.0f);
+    sunDirChanged |=
+        UI::DragFloat("Azimuth", &m_sunAzimuth, 1.0f, 0.0f, 360.0f);
     if (sunDirChanged && m_sun) {
         const float deg2rad = 0.01745329f;
         float eRad = m_sunElevation * deg2rad;
-        float aRad = m_sunAzimuth   * deg2rad;
-        m_sun->SetDirection(Vector3D(
-            -cosf(eRad) * sinf(aRad),
-            -sinf(eRad),
-            -cosf(eRad) * cosf(aRad)));
+        float aRad = m_sunAzimuth * deg2rad;
+        m_sun->SetDirection(Vector3D(-cosf(eRad) * sinf(aRad), -sinf(eRad),
+                                     -cosf(eRad) * cosf(aRad)));
     }
 
-    if (UI::DragFloat("Sun Intensity", &m_sunIntensity, 0.01f, 0.0f, 5.0f) && m_sun)
+    if (UI::DragFloat("Sun Intensity", &m_sunIntensity, 0.01f, 0.0f, 5.0f) &&
+        m_sun)
         m_sun->SetIntensity(m_sunIntensity);
 
     bool sunColorChanged = false;
@@ -570,13 +664,18 @@ void MainScene::RenderUI() {
     UI::Text("-- Ambient --");
 
     auto* lm = GetLightManager();
-    if (UI::DragFloat("Amb Intensity", &m_ambientIntensity, 0.005f, 0.0f, 2.0f) && lm)
+    if (UI::DragFloat("Amb Intensity", &m_ambientIntensity, 0.005f, 0.0f,
+                      2.0f) &&
+        lm)
         lm->SetAmbientIntensity(m_ambientIntensity);
 
     bool ambColorChanged = false;
-    ambColorChanged |= UI::DragFloat("Amb R", &m_ambientColorR, 0.005f, 0.0f, 1.0f);
-    ambColorChanged |= UI::DragFloat("Amb G", &m_ambientColorG, 0.005f, 0.0f, 1.0f);
-    ambColorChanged |= UI::DragFloat("Amb B", &m_ambientColorB, 0.005f, 0.0f, 1.0f);
+    ambColorChanged |=
+        UI::DragFloat("Amb R", &m_ambientColorR, 0.005f, 0.0f, 1.0f);
+    ambColorChanged |=
+        UI::DragFloat("Amb G", &m_ambientColorG, 0.005f, 0.0f, 1.0f);
+    ambColorChanged |=
+        UI::DragFloat("Amb B", &m_ambientColorB, 0.005f, 0.0f, 1.0f);
     if (ambColorChanged && lm)
         lm->SetAmbientColor(m_ambientColorR, m_ambientColorG, m_ambientColorB);
 
@@ -587,45 +686,56 @@ void MainScene::RenderUI() {
         lm->SetFogEnabled(m_fogEnabled);
 
     bool horizonChanged = false;
-    horizonChanged |= UI::DragFloat("Horizon R", &m_fogHorizonR, 0.005f, 0.0f, 1.0f);
-    horizonChanged |= UI::DragFloat("Horizon G", &m_fogHorizonG, 0.005f, 0.0f, 1.0f);
-    horizonChanged |= UI::DragFloat("Horizon B", &m_fogHorizonB, 0.005f, 0.0f, 1.0f);
+    horizonChanged |=
+        UI::DragFloat("Horizon R", &m_fogHorizonR, 0.005f, 0.0f, 1.0f);
+    horizonChanged |=
+        UI::DragFloat("Horizon G", &m_fogHorizonG, 0.005f, 0.0f, 1.0f);
+    horizonChanged |=
+        UI::DragFloat("Horizon B", &m_fogHorizonB, 0.005f, 0.0f, 1.0f);
     if (horizonChanged && lm)
         lm->SetFogColor(m_fogHorizonR, m_fogHorizonG, m_fogHorizonB);
 
     bool zenithChanged = false;
-    zenithChanged |= UI::DragFloat("Zenith R", &m_fogZenithR, 0.005f, 0.0f, 1.0f);
-    zenithChanged |= UI::DragFloat("Zenith G", &m_fogZenithG, 0.005f, 0.0f, 1.0f);
-    zenithChanged |= UI::DragFloat("Zenith B", &m_fogZenithB, 0.005f, 0.0f, 1.0f);
+    zenithChanged |=
+        UI::DragFloat("Zenith R", &m_fogZenithR, 0.005f, 0.0f, 1.0f);
+    zenithChanged |=
+        UI::DragFloat("Zenith G", &m_fogZenithG, 0.005f, 0.0f, 1.0f);
+    zenithChanged |=
+        UI::DragFloat("Zenith B", &m_fogZenithB, 0.005f, 0.0f, 1.0f);
     if (zenithChanged && lm)
         lm->SetFogZenithColor(m_fogZenithR, m_fogZenithG, m_fogZenithB);
 
     if (UI::Checkbox("Height Fog", &m_heightFogEnabled) && lm)
         lm->SetHeightFogEnabled(m_heightFogEnabled);
 
-    if (UI::DragFloat("Height Top",     &m_heightFogTop,     0.5f,  -64.0f, 256.0f) && lm)
+    if (UI::DragFloat("Height Top", &m_heightFogTop, 0.5f, -64.0f, 256.0f) &&
+        lm)
         lm->SetHeightFogTop(m_heightFogTop);
-    if (UI::DragFloat("Height Density", &m_heightFogDensity, 0.005f,  0.0f,   1.0f) && lm)
+    if (UI::DragFloat("Height Density", &m_heightFogDensity, 0.005f, 0.0f,
+                      1.0f) &&
+        lm)
         lm->SetHeightFogDensity(m_heightFogDensity);
-    if (UI::DragFloat("Height Falloff", &m_heightFogFalloff, 0.001f,  0.0f,   1.0f) && lm)
+    if (UI::DragFloat("Height Falloff", &m_heightFogFalloff, 0.001f, 0.0f,
+                      1.0f) &&
+        lm)
         lm->SetHeightFogFalloff(m_heightFogFalloff);
 
     // ---- SSAO ----
     UI::Separator();
     UI::Text("-- SSAO --");
     if (auto* app = Sleak::Application::GetInstance()) {
-        bool  ssaoEnabled = app->IsSSAOEnabled();
-        float ssaoRadius  = app->GetSSAORadius();
-        float ssaoBias    = app->GetSSAOBias();
-        float ssaoPower   = app->GetSSAOPower();
+        bool ssaoEnabled = app->IsSSAOEnabled();
+        float ssaoRadius = app->GetSSAORadius();
+        float ssaoBias = app->GetSSAOBias();
+        float ssaoPower = app->GetSSAOPower();
         if (UI::Checkbox("SSAO Enabled", &ssaoEnabled))
             app->SetSSAOEnabled(ssaoEnabled);
         if (ssaoEnabled) {
             if (UI::DragFloat("SSAO Radius", &ssaoRadius, 0.01f, 0.05f, 4.0f))
                 app->SetSSAORadius(ssaoRadius);
-            if (UI::DragFloat("SSAO Bias",   &ssaoBias,   0.001f, 0.0f, 0.2f))
+            if (UI::DragFloat("SSAO Bias", &ssaoBias, 0.001f, 0.0f, 0.2f))
                 app->SetSSAOBias(ssaoBias);
-            if (UI::DragFloat("SSAO Power",  &ssaoPower,  0.05f, 0.1f, 8.0f))
+            if (UI::DragFloat("SSAO Power", &ssaoPower, 0.05f, 0.1f, 8.0f))
                 app->SetSSAOPower(ssaoPower);
         }
     }
@@ -634,12 +744,13 @@ void MainScene::RenderUI() {
     UI::Separator();
     UI::Text("-- IBL --");
     if (auto* app = Sleak::Application::GetInstance()) {
-        bool  iblEnabled   = app->IsIBLEnabled();
+        bool iblEnabled = app->IsIBLEnabled();
         float iblIntensity = app->GetIBLIntensity();
         if (UI::Checkbox("IBL Enabled", &iblEnabled))
             app->SetIBLEnabled(iblEnabled);
         if (iblEnabled) {
-            if (UI::DragFloat("IBL Intensity", &iblIntensity, 0.05f, 0.0f, 5.0f))
+            if (UI::DragFloat("IBL Intensity", &iblIntensity, 0.05f, 0.0f,
+                              5.0f))
                 app->SetIBLIntensity(iblIntensity);
         }
     }
@@ -649,29 +760,33 @@ void MainScene::RenderUI() {
     UI::Text("-- Texture --");
 
     {
-        const char* filterLabels[] = {
-            "Nearest", "Bilinear", "Trilinear",
-            "Aniso 2x", "Aniso 4x", "Aniso 8x", "Aniso 16x"
-        };
+        const char* filterLabels[] = {"Nearest",  "Bilinear", "Trilinear",
+                                      "Aniso 2x", "Aniso 4x", "Aniso 8x",
+                                      "Aniso 16x"};
         const TextureFilter filterValues[] = {
-            TextureFilter::Nearest, TextureFilter::Bilinear, TextureFilter::Trilinear,
-            TextureFilter::Anisotropic2x, TextureFilter::Anisotropic4x,
-            TextureFilter::Anisotropic8x, TextureFilter::Anisotropic16x
-        };
+            TextureFilter::Nearest,       TextureFilter::Bilinear,
+            TextureFilter::Trilinear,     TextureFilter::Anisotropic2x,
+            TextureFilter::Anisotropic4x, TextureFilter::Anisotropic8x,
+            TextureFilter::Anisotropic16x};
         constexpr int filterCount = 7;
         int currentFilter = 0;
         for (int i = 0; i < filterCount; i++)
-            if (filterValues[i] == m_texFilter) { currentFilter = i; break; }
+            if (filterValues[i] == m_texFilter) {
+                currentFilter = i;
+                break;
+            }
 
         if (UI::Combo("Filter", &currentFilter, filterLabels, filterCount)) {
             m_texFilter = filterValues[currentFilter];
-            auto* tex = m_blockMaterial ? m_blockMaterial->GetDiffuseTexture() : nullptr;
+            auto* tex = m_blockMaterial ? m_blockMaterial->GetDiffuseTexture()
+                                        : nullptr;
             if (tex) tex->SetFilter(m_texFilter);
         }
     }
 
     if (UI::DragFloat("LOD Bias", &m_texLodBias, 0.05f, -4.0f, 4.0f)) {
-        auto* tex = m_blockMaterial ? m_blockMaterial->GetDiffuseTexture() : nullptr;
+        auto* tex =
+            m_blockMaterial ? m_blockMaterial->GetDiffuseTexture() : nullptr;
         if (tex) tex->SetLodBias(m_texLodBias);
     }
 
@@ -741,15 +856,15 @@ void MainScene::LoadGame() {
     // Restore player state
     auto* cam = GetActiveCamera();
     if (cam) {
-        cam->SetPosition({meta.player.posX, meta.player.posY, meta.player.posZ});
+        cam->SetPosition(
+            {meta.player.posX, meta.player.posY, meta.player.posZ});
         auto* fpc = cam->GetComponent<FirstPersonController>();
         if (fpc) {
             fpc->SetPitch(meta.player.pitch);
             fpc->SetYaw(meta.player.yaw);
         }
         auto* rb = cam->GetComponent<RigidbodyComponent>();
-        if (rb)
-            rb->SetVelocity({0.0f, 0.0f, 0.0f});
+        if (rb) rb->SetVelocity({0.0f, 0.0f, 0.0f});
     }
 
     m_selectedBlock = static_cast<BlockType>(meta.player.selectedBlock);
@@ -767,7 +882,8 @@ void MainScene::LoadGame() {
     {
         const std::string rdStr = Sleak::CommandLine::GetValue("-rd");
         int cliRD = rdStr.empty() ? 0 : std::stoi(rdStr);
-        int rd = cliRD > 0 ? cliRD : static_cast<int>(meta.player.renderDistance);
+        int rd =
+            cliRD > 0 ? cliRD : static_cast<int>(meta.player.renderDistance);
         if (rd < 4) rd = 4;
         if (rd > 16) rd = 16;
         m_chunkManager.SetRenderDistance(rd);
@@ -778,22 +894,36 @@ void MainScene::LoadGame() {
     m_saveMessageTimer = 2.0f;
 }
 
-// Helper: get the representative texture path for a block type (front/side face)
+// Helper: get the representative texture path for a block type (front/side
+// face)
 static const char* GetBlockTexturePath(BlockType type) {
     switch (type) {
-        case BlockType::Grass:       return "assets/textures/blocks/grass_block_side.png";
-        case BlockType::Dirt:        return "assets/textures/blocks/dirt.png";
-        case BlockType::Stone:       return "assets/textures/blocks/stone.png";
-        case BlockType::Cobblestone: return "assets/textures/blocks/cobblestone.png";
-        case BlockType::OakLog:      return "assets/textures/blocks/oak_log.png";
-        case BlockType::DarkOakLog:  return "assets/textures/blocks/dark_oak_log.png";
-        case BlockType::SpruceLog:   return "assets/textures/blocks/spruce_log.png";
-        case BlockType::OakPlanks:   return "assets/textures/blocks/oak_planks.png";
-        case BlockType::Bricks:      return "assets/textures/blocks/brick.png";
-        case BlockType::Sand:        return "assets/textures/blocks/sand.png";
-        case BlockType::Gravel:      return "assets/textures/blocks/gravel.png";
-        case BlockType::OakLeaves:   return "assets/textures/blocks/oak_leaves.png";
-        default:                     return "assets/textures/blocks/stone.png";
+        case BlockType::Grass:
+            return "assets/textures/blocks/grass_block_side.png";
+        case BlockType::Dirt:
+            return "assets/textures/blocks/dirt.png";
+        case BlockType::Stone:
+            return "assets/textures/blocks/stone.png";
+        case BlockType::Cobblestone:
+            return "assets/textures/blocks/cobblestone.png";
+        case BlockType::OakLog:
+            return "assets/textures/blocks/oak_log.png";
+        case BlockType::DarkOakLog:
+            return "assets/textures/blocks/dark_oak_log.png";
+        case BlockType::SpruceLog:
+            return "assets/textures/blocks/spruce_log.png";
+        case BlockType::OakPlanks:
+            return "assets/textures/blocks/oak_planks.png";
+        case BlockType::Bricks:
+            return "assets/textures/blocks/brick.png";
+        case BlockType::Sand:
+            return "assets/textures/blocks/sand.png";
+        case BlockType::Gravel:
+            return "assets/textures/blocks/gravel.png";
+        case BlockType::OakLeaves:
+            return "assets/textures/blocks/oak_leaves.png";
+        default:
+            return "assets/textures/blocks/stone.png";
     }
 }
 
@@ -801,7 +931,8 @@ void MainScene::RenderHotbar() {
     // Lazy-load block textures for UI display
     if (!m_hotbarTexturesLoaded) {
         for (int i = 0; i < HOTBAR_SLOTS; i++)
-            m_hotbarTextures[i] = UI::LoadTextureForUI(GetBlockTexturePath(m_hotbar[i]));
+            m_hotbarTextures[i] =
+                UI::LoadTextureForUI(GetBlockTexturePath(m_hotbar[i]));
         m_hotbarTexturesLoaded = true;
     }
 
@@ -811,14 +942,14 @@ void MainScene::RenderHotbar() {
     constexpr float borderWidth = 2.0f;
     constexpr float bottomMargin = 20.0f;
 
-    float totalWidth = HOTBAR_SLOTS * slotSize + (HOTBAR_SLOTS - 1) * slotPadding;
+    float totalWidth =
+        HOTBAR_SLOTS * slotSize + (HOTBAR_SLOTS - 1) * slotPadding;
     float startX = (UI::GetViewportWidth() - totalWidth) * 0.5f;
     float startY = UI::GetViewportHeight() - slotSize - bottomMargin;
 
     // Background bar
-    UI::DrawFilledRect(startX - 6.0f, startY - 6.0f,
-                       totalWidth + 12.0f, slotSize + 12.0f,
-                       0.0f, 0.0f, 0.0f, 0.45f, 6.0f);
+    UI::DrawFilledRect(startX - 6.0f, startY - 6.0f, totalWidth + 12.0f,
+                       slotSize + 12.0f, 0.0f, 0.0f, 0.0f, 0.45f, 6.0f);
 
     for (int i = 0; i < HOTBAR_SLOTS; i++) {
         float x = startX + i * (slotSize + slotPadding);
@@ -828,18 +959,18 @@ void MainScene::RenderHotbar() {
 
         // Slot background
         if (selected) {
-            UI::DrawFilledRect(x, y, slotSize, slotSize,
-                               1.0f, 1.0f, 1.0f, 0.25f, 4.0f);
+            UI::DrawFilledRect(x, y, slotSize, slotSize, 1.0f, 1.0f, 1.0f,
+                               0.25f, 4.0f);
         } else {
-            UI::DrawFilledRect(x, y, slotSize, slotSize,
-                               0.2f, 0.2f, 0.2f, 0.5f, 4.0f);
+            UI::DrawFilledRect(x, y, slotSize, slotSize, 0.2f, 0.2f, 0.2f, 0.5f,
+                               4.0f);
         }
 
         // Block texture
         if (m_hotbarTextures[i] != 0) {
-            UI::DrawImage(m_hotbarTextures[i],
-                          x + iconPadding, y + iconPadding,
-                          slotSize - iconPadding * 2, slotSize - iconPadding * 2);
+            UI::DrawImage(m_hotbarTextures[i], x + iconPadding, y + iconPadding,
+                          slotSize - iconPadding * 2,
+                          slotSize - iconPadding * 2);
         }
 
         // Selection border
@@ -847,12 +978,12 @@ void MainScene::RenderHotbar() {
             UI::DrawRect(x - 1.0f, y - 1.0f, slotSize + 2.0f, slotSize + 2.0f,
                          1.0f, 1.0f, 1.0f, 0.9f, borderWidth, 4.0f);
         } else {
-            UI::DrawRect(x, y, slotSize, slotSize,
-                         0.5f, 0.5f, 0.5f, 0.3f, 1.0f, 4.0f);
+            UI::DrawRect(x, y, slotSize, slotSize, 0.5f, 0.5f, 0.5f, 0.3f, 1.0f,
+                         4.0f);
         }
 
         // Slot number
-        char num[2] = { static_cast<char>('1' + i), '\0' };
+        char num[2] = {static_cast<char>('1' + i), '\0'};
         UI::DrawText(num, x + 3.0f, y + 1.0f, 0.7f, 0.7f, 0.7f, 0.7f);
     }
 }
@@ -912,7 +1043,7 @@ void MainScene::SetupLighting() {
     // Convert elevation/azimuth angles to a world-space direction vector
     const float deg2rad = 0.01745329f;
     float eRad = m_sunElevation * deg2rad;
-    float aRad = m_sunAzimuth   * deg2rad;
+    float aRad = m_sunAzimuth * deg2rad;
     float dx = -cosf(eRad) * sinf(aRad);
     float dy = -sinf(eRad);
     float dz = -cosf(eRad) * cosf(aRad);
@@ -929,19 +1060,33 @@ void MainScene::SetupLighting() {
     cfg.ssaoEnabled = false;
     cfg.ssrEnabled = false;
     cfg.iblEnabled = false;
-    cfg.bloomEnabled = false;          // match OpenGL ref (no post-FX bloom chain)
-    cfg.shadowFrustumSize = 96.0f;     // tight frustum → crisp 2048-map texels
-    cfg.shadowCasterDistance = 96.0f;
-    cfg.shadowDistance = 160.0f;
+    cfg.bloomEnabled = false;  // match OpenGL ref (no post-FX bloom chain)
+    cfg.shadowFrustumSize = 256.0f;  // half-extent → 512m shadowed area
+    cfg.shadowCasterDistance = 256.0f;
+    cfg.shadowDistance =
+        400.0f;  // pull-back > frustum, else near-clip eats shadows
+    cfg.frustumCullingEnabled = m_frustumCulling;
+    cfg.occlusionCullingEnabled = m_occlusionCulling;
+    cfg.occlusionBufferWidth = 256;
+    cfg.occlusionBufferHeight = 144;
+    cfg.maxOccluders = 192;
 
     auto* app = Sleak::Application::GetInstance();
     if (app) app->ApplyGraphicsConfig(cfg);
+
+    // Apply culling settings directly (not carried by ApplyGraphicsConfig).
+    Sleak::CullingSystem::SetOcclusionBufferSize(cfg.occlusionBufferWidth,
+                                                 cfg.occlusionBufferHeight);
+    Sleak::CullingSystem::SetMaxOccluders(cfg.maxOccluders);
+    m_chunkManager.SetCullingEnabled(cfg.frustumCullingEnabled,
+                                     cfg.occlusionCullingEnabled);
     cfg.ApplyShadows(*m_sun);
+    m_chunkManager.SetShadowCasterDistance(cfg.shadowCasterDistance);
 
     // Settings not carried by the config — applied directly.
     m_sun->SetShadowNormalBias(0.05f);
     m_sun->SetShadowNearPlane(0.1f);
-    m_sun->SetShadowFarPlane(500.0f);
+    m_sun->SetShadowFarPlane(900.0f);
     AddObject(m_sun);
 
     auto* lm = GetLightManager();

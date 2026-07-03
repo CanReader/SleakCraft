@@ -1,6 +1,7 @@
 #include "World/ChunkManager.hpp"
 #include <Camera/Camera.hpp>
 #include <Core/SceneBase.hpp>
+#include <Culling/CullingSystem.hpp>
 #include <Logger.hpp>
 #include <Runtime/Material.hpp>
 #include <Runtime/MeshBatch.hpp>
@@ -600,6 +601,11 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
         }
     }
 
+    // Exact mesh Y extents — tight bounds are what let occlusion culling
+    // reject columns whose full-band AABB would always poke into the sky.
+    float meshMinY = 1e30f;
+    float meshMaxY = -1e30f;
+
     for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
         Chunk* chunk = GetChunk(cx, cy, cz);
         // Skip chunks not ready (in-flight or not yet generated)
@@ -616,8 +622,11 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
             if (md.vertices.GetSize() > 0) {
                 uint32_t baseVertex = static_cast<uint32_t>(mergedVerts.GetSize());
                 const Sleak::VoxelVertex* vdata = md.vertices.GetData();
-                for (size_t i = 0; i < md.vertices.GetSize(); ++i)
+                for (size_t i = 0; i < md.vertices.GetSize(); ++i) {
                     mergedVerts.AddVertex(vdata[i]);
+                    if (vdata[i].py < meshMinY) meshMinY = vdata[i].py;
+                    if (vdata[i].py > meshMaxY) meshMaxY = vdata[i].py;
+                }
                 const uint32_t* idata = md.indices.GetData();
                 for (size_t i = 0; i < md.indices.GetSize(); ++i)
                     mergedIndices.add(idata[i] + baseVertex);
@@ -634,8 +643,11 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
             if (wd.vertices.GetSize() > 0) {
                 uint32_t baseVertex = static_cast<uint32_t>(mergedWaterVerts.GetSize());
                 const Sleak::VoxelVertex* vdata = wd.vertices.GetData();
-                for (size_t i = 0; i < wd.vertices.GetSize(); ++i)
+                for (size_t i = 0; i < wd.vertices.GetSize(); ++i) {
                     mergedWaterVerts.AddVertex(vdata[i]);
+                    if (vdata[i].py < meshMinY) meshMinY = vdata[i].py;
+                    if (vdata[i].py > meshMaxY) meshMaxY = vdata[i].py;
+                }
                 const uint32_t* idata = wd.indices.GetData();
                 for (size_t i = 0; i < wd.indices.GetSize(); ++i)
                     mergedWaterIndices.add(idata[i] + baseVertex);
@@ -666,6 +678,55 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
     if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) {
         m_oomThisFrame = true;
         return;
+    }
+
+    // Column world AABB (16x16 XZ footprint, exact mesh Y extent).
+    float minX = static_cast<float>(cx * Chunk::SIZE);
+    float minZ = static_cast<float>(cz * Chunk::SIZE);
+    float footMinY = meshMinY;
+    float footMaxY = meshMaxY;
+    col.bounds = Sleak::Math::AABB(
+        Sleak::Math::Vector3D(minX, footMinY, minZ),
+        Sleak::Math::Vector3D(minX + Chunk::SIZE, footMaxY,
+                              minZ + Chunk::SIZE));
+
+    // Occluder boxes: per 8x8 quadrant, merge contiguous opaque runs
+    // across chunk boundaries.
+    col.occluders.clear();
+    for (int q = 0; q < 4; ++q) {
+        float qMinX = minX + (q & 1) * 8.0f;
+        float qMinZ = minZ + ((q >> 1) & 1) * 8.0f;
+        bool haveRun = false;
+        float accMinY = 0.0f, accMaxY = 0.0f;
+        auto flush = [&]() {
+            Sleak::Math::AABB box(
+                Sleak::Math::Vector3D(qMinX, accMinY, qMinZ),
+                Sleak::Math::Vector3D(qMinX + 8.0f, accMaxY, qMinZ + 8.0f));
+            box.Expand(-0.05f);
+            col.occluders.push_back(box);
+        };
+        for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
+            Chunk* chunk = GetChunk(cx, cy, cz);
+            if (!chunk || chunk->IsInFlight() || chunk->NeedsGeneration())
+                continue;
+            int8_t rMin[Chunk::OCC_MAX_RUNS];
+            int8_t rMax[Chunk::OCC_MAX_RUNS];
+            int runs = chunk->GetOccluderRuns(q, rMin, rMax);
+            int base = cy * Chunk::SIZE;
+            for (int i = 0; i < runs; ++i) {
+                float wMin = static_cast<float>(base + rMin[i]);
+                float wMax = static_cast<float>(base + rMax[i] + 1);
+                if (haveRun && wMin == accMaxY) {
+                    accMaxY = wMax;
+                } else {
+                    if (haveRun) flush();
+                    accMinY = wMin;
+                    accMaxY = wMax;
+                    haveRun = true;
+                }
+            }
+        }
+        if (haveRun) flush();
     }
 
     col.visible = true;
@@ -1110,7 +1171,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         }
     }
 
-    FrustumCull();
+    UpdateVisibility();
 }
 
 void ChunkManager::FlushPendingChunks() {
@@ -1221,72 +1282,105 @@ void ChunkManager::ForceReload() {
     if (wasMultithreaded) StartWorkers();
 }
 
-void ChunkManager::FrustumCull() {
-    const auto& frustum = Sleak::Camera::GetMainViewFrustum();
+void ChunkManager::UpdateVisibility() {
     const auto& camPos = Sleak::Camera::GetMainCameraPosition();
     float camX = camPos.GetX();
-    float camY = camPos.GetY();
     float camZ = camPos.GetZ();
 
-    for (auto& [key, col] : m_columns) {
-        if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) { col.visible = false; continue; }
+    // Force-render columns near the player regardless of camera frustum, so
+    // terrain above caves/enclosed spaces stays in the shadow map.
+    constexpr float SHADOW_FORCE_DIST = 48.0f;
 
-        float minX = static_cast<float>(key.x * Chunk::SIZE);
-        float minY = static_cast<float>(key.yBand * BAND_SIZE * Chunk::SIZE);
-        float minZ = static_cast<float>(key.z * Chunk::SIZE);
-        float maxX = minX + Chunk::SIZE;
-        float maxY = minY + BAND_SIZE * Chunk::SIZE;
-        float maxZ = minZ + Chunk::SIZE;
+    // Pass A: distance cull, shadow flag, occluder submission.
+    m_cullCandidates.clear();
+    for (auto& [key, col] : m_columns) {
+        if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) {
+            col.visible = false;
+            continue;
+        }
+
+        float minX = col.bounds.min.GetX();
+        float maxX = col.bounds.max.GetX();
+        float minZ = col.bounds.min.GetZ();
+        float maxZ = col.bounds.max.GetZ();
 
         // Horizontal-only distance check (XZ cylinder) so columns stay visible
         // when the player is high above the terrain
         float dx = (camX < minX) ? (minX - camX) : (camX > maxX) ? (camX - maxX) : 0.0f;
         float dz = (camZ < minZ) ? (minZ - camZ) : (camZ > maxZ) ? (camZ - maxZ) : 0.0f;
-        float distSq = dx * dx + dz * dz;
+        col.distSq = dx * dx + dz * dz;
 
-        // Shadow-caster cull: only columns within SHADOW_CASTER_DIST cast into
-        // the shadow map. Distant terrain still renders to the camera at full
-        // draw distance, but its shadows are imperceptible — skipping them
-        // removes most of the (very expensive) second geometry pass.
-        constexpr float SHADOW_CASTER_DIST = 96.0f;
-        col.castsShadow = (distSq <= SHADOW_CASTER_DIST * SHADOW_CASTER_DIST);
+        // Shadow-caster cull: only columns within the configured caster
+        // distance render into the shadow map.
+        col.castsShadow = (col.distSq <= m_shadowCasterDistSq);
 
-        if (distSq > m_drawDistSq) {
+        if (col.distSq > m_drawDistSq) {
             col.visible = false;
             continue;
         }
 
-        // Force-render columns near the player regardless of camera frustum.
-        // This ensures terrain above caves/enclosed spaces is always in the
-        // shadow map, preventing sunlight from leaking through terrain.
-        constexpr float SHADOW_FORCE_DIST = 48.0f;
-        if (distSq <= SHADOW_FORCE_DIST * SHADOW_FORCE_DIST) {
-            col.visible = true;
+        // Near columns act as occluders — beyond half draw distance an
+        // occluder hides almost nothing but still costs raster time.
+        float occDist = m_drawDistance * 0.5f;
+        if (col.distSq <= occDist * occDist) {
+            for (const auto& occ : col.occluders)
+                Sleak::CullingSystem::SubmitOccluderBox(occ);
+        }
+
+        if (col.distSq <= SHADOW_FORCE_DIST * SHADOW_FORCE_DIST) {
+            col.visible = true;  // force-visible, skip occlusion test
             continue;
         }
 
-        col.visible = frustum.IsAABBVisible(
-            Sleak::Math::Vector3D(minX, minY, minZ),
-            Sleak::Math::Vector3D(maxX, maxY, maxZ));
+        col.visible = false;  // decided in Pass B
+        m_cullCandidates.push_back(&col);
     }
+
+    Sleak::CullingSystem::FinalizeOccluders();
+
+    // Pass B: frustum + occlusion query for remaining candidates.
+    for (ColumnMesh* col : m_cullCandidates)
+        col->visible = Sleak::CullingSystem::IsVisible(col->bounds);
+}
+
+void ChunkManager::SetCullingEnabled(bool frustum, bool occlusion) {
+    Sleak::CullingSystem::SetFrustumCullingEnabled(frustum);
+    Sleak::CullingSystem::SetOcclusionCullingEnabled(occlusion);
 }
 
 void ChunkManager::RenderColumns() {
-    Sleak::MeshBatch::BeginBatch(m_material.get());
-    for (auto& [key, col] : m_columns) {
+    // Front-to-back draw order for better early-z / less overdraw.
+    m_renderScratch.clear();
+    for (auto& [key, col] : m_columns)
         if (col.visible && col.mesh.IsValid())
-            Sleak::MeshBatch::Draw(col.mesh, col.castsShadow);
-    }
+            m_renderScratch.push_back(&col);
+    std::sort(m_renderScratch.begin(), m_renderScratch.end(),
+              [](const ColumnMesh* a, const ColumnMesh* b) {
+                  return a->distSq < b->distSq;
+              });
+
+    Sleak::MeshBatch::BeginBatch(m_material.get());
+    for (ColumnMesh* col : m_renderScratch)
+        Sleak::MeshBatch::Draw(col->mesh, col->castsShadow);
     Sleak::MeshBatch::EndBatch();
 }
 
 void ChunkManager::RenderWater() {
     if (!m_waterMaterial) return;
-    Sleak::MeshBatch::BeginBatch(m_waterMaterial.get());
-    for (auto& [key, col] : m_columns) {
+    // Back-to-front draw order for correct transparency.
+    m_waterScratch.clear();
+    for (auto& [key, col] : m_columns)
         if (col.visible && col.waterMesh.IsValid())
-            Sleak::MeshBatch::Draw(col.waterMesh, col.castsShadow);
-    }
+            m_waterScratch.push_back(&col);
+    std::sort(m_waterScratch.begin(), m_waterScratch.end(),
+              [](const ColumnMesh* a, const ColumnMesh* b) {
+                  return a->distSq > b->distSq;
+              });
+
+    // Water never casts shadows — keeps ~200 meshes out of the shadow map.
+    Sleak::MeshBatch::BeginBatch(m_waterMaterial.get());
+    for (ColumnMesh* col : m_waterScratch)
+        Sleak::MeshBatch::Draw(col->waterMesh, false);
     Sleak::MeshBatch::EndBatch();
 }
 
