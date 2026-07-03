@@ -3,6 +3,7 @@
 
 #include "Chunk.hpp"
 #include "WorldGenerator.hpp"
+#include <Math/AABB.hpp>
 #include <Math/Vector.hpp>
 #include <Memory/RefPtr.h>
 #include <Runtime/MeshBatch.hpp>
@@ -70,6 +71,8 @@ public:
     void SetDrawDistance(float dist) { m_drawDistance = dist; m_drawDistSq = dist * dist; }
     float GetDrawDistance() const { return m_drawDistance; }
 
+    void SetShadowCasterDistance(float dist) { m_shadowCasterDistSq = dist * dist; }
+
     void SetSeed(uint32_t seed) { m_generator.SetSeed(seed); }
     uint32_t GetSeed() const { return m_generator.GetSeed(); }
     const WorldGenerator& GetGenerator() const { return m_generator; }
@@ -77,6 +80,9 @@ public:
     // Render all visible column meshes via MeshBatch (call from scene Update)
     void RenderColumns();
     void RenderWater();
+
+    // Forwards to CullingSystem frustum/occlusion toggles (used by UI).
+    void SetCullingEnabled(bool frustum, bool occlusion);
 
     void SetWaterMaterial(const Sleak::RefPtr<Sleak::Material>& material) { m_waterMaterial = material; }
 
@@ -135,6 +141,9 @@ private:
         Sleak::MeshHandle waterMesh;
         bool visible = true;
         bool castsShadow = true;  // false for distant columns (skip shadow pass)
+        Sleak::Math::AABB bounds;
+        std::vector<Sleak::Math::AABB> occluders;
+        float distSq = 0.0f;
     };
     void RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer = true);
     // Max number of column meshes before we consider VRAM exhausted.
@@ -151,8 +160,13 @@ private:
     std::unordered_set<ColumnKey, ColumnKeyHash> m_dirtyColumns;
     std::unordered_set<ChunkCoord, ChunkCoordHash> m_chunksNeedingRemesh;
 
-    void FrustumCull();
+    void UpdateVisibility();
     void BuildLoadSpiral();
+
+    // Scratch buffers reused each frame (no per-frame allocation growth).
+    std::vector<ColumnMesh*> m_cullCandidates;
+    std::vector<ColumnMesh*> m_renderScratch;
+    std::vector<ColumnMesh*> m_waterScratch;
     void ForceUnloadChunk(Chunk* chunk);
 
     std::vector<Chunk*> m_chunkGrid;
@@ -183,6 +197,7 @@ private:
     int m_uploadsPerFrame = 16;   // column mesh rebuilds (GPU uploads) per frame
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
+    float m_shadowCasterDistSq = 96.0f * 96.0f;
     int m_lastCenterX = INT_MAX;
     int m_lastCenterY = INT_MAX;
     int m_lastCenterZ = INT_MAX;

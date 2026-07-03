@@ -119,6 +119,47 @@ void Chunk::GenerateMeshData() {
         }
     }
 
+    // Occluder extraction: per-8x8-quadrant, ALL runs (>= 4 layers) of
+    // fully-opaque horizontal layers, ascending. Keeping every run (not
+    // just the longest) preserves the cave-to-surface shell that blocks
+    // sightlines when the player is underground.
+    int8_t occRunMinY[4][OCC_MAX_RUNS];
+    int8_t occRunMaxY[4][OCC_MAX_RUNS];
+    for (int q = 0; q < 4; ++q)
+        for (int i = 0; i < OCC_MAX_RUNS; ++i)
+            occRunMinY[q][i] = occRunMaxY[q][i] = -1;
+    {
+        int runCount[4] = {0, 0, 0, 0};
+        int curStart[4] = {-1, -1, -1, -1};
+        auto closeRun = [&](int q, int endY) {
+            int len = endY - curStart[q] + 1;
+            if (len >= 4 && runCount[q] < OCC_MAX_RUNS) {
+                occRunMinY[q][runCount[q]] = static_cast<int8_t>(curStart[q]);
+                occRunMaxY[q][runCount[q]] = static_cast<int8_t>(endY);
+                ++runCount[q];
+            }
+            curStart[q] = -1;
+        };
+        for (int y = 0; y < SIZE; ++y) {
+            bool full[4] = {true, true, true, true};
+            for (int z = 0; z < SIZE; ++z) {
+                for (int x = 0; x < SIZE; ++x) {
+                    if (!opaque[y+1][z+1][x+1])
+                        full[(x >= 8) + 2 * (z >= 8)] = false;
+                }
+            }
+            for (int q = 0; q < 4; ++q) {
+                if (full[q]) {
+                    if (curStart[q] < 0) curStart[q] = y;
+                } else if (curStart[q] >= 0) {
+                    closeRun(q, y - 1);
+                }
+            }
+        }
+        for (int q = 0; q < 4; ++q)
+            if (curStart[q] >= 0) closeRun(q, SIZE - 1);
+    }
+
     auto fastCalcAO = [](bool side1, bool side2, bool corner) {
         if (side1 && side2) return 0;
         return 3 - (static_cast<int>(side1) + static_cast<int>(side2) + static_cast<int>(corner));
@@ -371,6 +412,14 @@ void Chunk::GenerateMeshData() {
     m_pendingWaterMesh.vertices = std::move(waterVertices);
     m_pendingWaterMesh.indices = std::move(waterIndices);
     m_hasPendingWaterMesh = true;
+
+    // Publish occluder runs alongside the mesh data
+    for (int q = 0; q < 4; ++q) {
+        for (int i = 0; i < OCC_MAX_RUNS; ++i) {
+            m_occRunMinY[q][i] = occRunMinY[q][i];
+            m_occRunMaxY[q][i] = occRunMaxY[q][i];
+        }
+    }
 
     m_meshBuilt = true;
 }

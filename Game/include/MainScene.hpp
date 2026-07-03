@@ -66,6 +66,8 @@ private:
     bool m_hotbarTexturesLoaded = false;
     bool m_multithreadedLoading = true;
     bool m_vsync = false;
+    bool m_frustumCulling = true;
+    bool m_occlusionCulling = true;
 
     // UI state
     bool m_showUI = true;
