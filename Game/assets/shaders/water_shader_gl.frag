@@ -79,7 +79,7 @@ float CalcShadow(vec4 sc) {
     p.z  = p.z  * 0.5 + 0.5;   // GL depth [-1,1] -> [0,1]
     if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0 || p.z > 1.0) return 1.0;
     vec2 fc = smoothstep(vec2(0.0), vec2(0.05), p.xy) * smoothstep(vec2(0.0), vec2(0.05), vec2(1.0) - p.xy);
-    float angle = InterleavedGradientNoise(gl_FragCoord.xy) * 6.28318530;
+    float angle = InterleavedGradientNoise(p.xy / ShadowTexelSize) * 6.28318530;
     float sa = sin(angle), ca = cos(angle);
     mat2  rot = mat2(ca, sa, -sa, ca);
     float rad = ShadowTexelSize * ShadowLightSize * 6.0;

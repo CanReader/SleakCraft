@@ -130,12 +130,12 @@ vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
 }
 
 // ---- Shadow ----
-// ndc: screen NDC + depth (w=1). Shadow coords use the CPU-composed
-// NdcToShadow — never the reconstructed world position (shimmer).
-float CalcShadowPCF(vec4 ndc, float NdotL) {
+// World-space projection via the texel-snapped ShadowLightVP (the
+// NdcToShadow composition shimmered under camera motion).
+float CalcShadowPCF(vec3 worldPos, float NdotL) {
     if (ShadowMapEnabled == 0u) return 1.0;
 
-    vec4 sc = NdcToShadow * ndc;
+    vec4 sc = ShadowLightVP * vec4(worldPos, 1.0);
     vec3 proj = sc.xyz / sc.w;
     proj.xy   = proj.xy * 0.5 + 0.5;
     proj.z    = proj.z  * 0.5 + 0.5;   // remap [-1,1]->  [0,1] for OpenGL
@@ -256,7 +256,7 @@ void main() {
 
         float shadow = 1.0;
         if (light.Type == 0u) {
-            shadow = CalcShadowPCF(ndcPos, max(rawNdotL, 0.0));
+            shadow = CalcShadowPCF(worldPos, max(rawNdotL, 0.0));
             // Fade shadow for back-facing surfaces (prevents cave light leak)
             shadow *= smoothstep(0.0, 0.15, rawNdotL);
         }
