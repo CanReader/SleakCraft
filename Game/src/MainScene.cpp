@@ -145,8 +145,7 @@ bool MainScene::Initialize() {
                    100.0f;
         });
         app->GetBenchmark()->RegisterMetric("Cull_Tested", []() {
-            return static_cast<float>(
-                Sleak::CullingSystem::GetStats().tested);
+            return static_cast<float>(Sleak::CullingSystem::GetStats().tested);
         });
         app->GetBenchmark()->RegisterMetric("Cull_Frustum", []() {
             return static_cast<float>(
@@ -595,8 +594,8 @@ void MainScene::RenderUI() {
         m_chunkManager.SetCullingEnabled(m_frustumCulling, m_occlusionCulling);
     {
         const auto& cs = Sleak::CullingSystem::GetStats();
-        UI::Text("Tested %u  Frustum %u  Occ %u", cs.tested,
-                 cs.frustumCulled, cs.occlusionCulled);
+        UI::Text("Tested %u  Frustum %u  Occ %u", cs.tested, cs.frustumCulled,
+                 cs.occlusionCulled);
         if (cs.occlusionSkipped)
             UI::Text("Occlusion idle (adaptive)");
         else
@@ -1061,6 +1060,7 @@ void MainScene::SetupLighting() {
     cfg.ssrEnabled = false;
     cfg.iblEnabled = false;
     cfg.bloomEnabled = false;  // match OpenGL ref (no post-FX bloom chain)
+    cfg.taaEnabled = true;     // smooths shadow-edge aliasing (VK only for now)
     cfg.shadowMapResolution = 3072;  // BSL ULTRA tier; 4096 spiked VK frames
     cfg.shadowFrustumSize = 256.0f;  // half-extent → 512m shadowed area
     cfg.shadowCasterDistance = 256.0f;
