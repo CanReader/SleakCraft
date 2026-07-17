@@ -139,6 +139,12 @@ Rules:
   shadow-resolution unification (bug fix); SkyUBO/ToD plumbing + game
   TimeOfDayController; GL HDR target + PostProcessChain skeleton (GL, VK
   re-plumb); velocity buffer. *No new look yet — everything depends on this.*
+  ⚠️ 2026-07-17: first GL HDR attempt (RGBA16F scene FBO + tonemap pass)
+  REVERTED — nondeterministic ~1.4s/frame NVIDIA driver stall once the world
+  loads (water-heavy forward blending into the FP16 target; glTextureBarrier
+  only intermittently curative). Retry requires Nsight/apitrace attribution,
+  single-variable experiments (RGBA8 vs 16F, blend off, barrier placement),
+  and fixing the shadow-sampler/unit-0 UB warning first. VK path unaffected.
 - **Phase 2 (BSL identity, GL+VK)**: procedural gradient sky + sun/moon/stars;
   bloom parity on GL + BSL strength/radius semantics; volumetric light shafts;
   TAA w/ velocity + FXAA + sharpen; BSL tonemap/exposure/vignette/grain;
