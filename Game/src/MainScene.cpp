@@ -1061,7 +1061,7 @@ void MainScene::SetupLighting() {
     cfg.ssrEnabled = false;
     cfg.iblEnabled = false;
     cfg.bloomEnabled = false;  // match OpenGL ref (no post-FX bloom chain)
-    cfg.shadowMapResolution = 4096;  // GL applies at lazy creation; VK queues
+    cfg.shadowMapResolution = 3072;  // BSL ULTRA tier; 4096 spiked VK frames
     cfg.shadowFrustumSize = 256.0f;  // half-extent → 512m shadowed area
     cfg.shadowCasterDistance = 256.0f;
     cfg.shadowDistance =
