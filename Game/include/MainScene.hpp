@@ -6,6 +6,7 @@
 #include <Memory/RefPtr.h>
 #include <Events/MouseEvent.h>
 #include <Events/KeyboardEvent.h>
+#include <Events/ApplicationEvent.h>
 #include <array>
 #include <Debug/SystemMetrics.hpp>
 #include "World/ChunkManager.hpp"
@@ -40,6 +41,7 @@ private:
     void OnMouseScrolled(const Sleak::Events::Input::MouseScrolledEvent& e);
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
     void OnKeyReleased(const Sleak::Events::Input::KeyReleasedEvent& e);
+    void OnWindowClose(const Sleak::Events::WindowCloseEvent& e);
     void RenderHotbar();
 
     void LoadGame();
@@ -79,6 +81,9 @@ private:
     // Save/load UI feedback
     float m_saveMessageTimer = 0.0f;
     std::string m_saveMessage;
+    // Never save over a save that failed to load
+    bool m_saveLocked = false;
+    float m_loadConfirmTimer = 0.0f;
 
     // Auto-save
     float m_autoSaveTimer = 0.0f;
@@ -95,6 +100,7 @@ private:
     bool m_shiftHeld = false;
     bool m_ctrlHeld = false;
 
+    std::string m_windowCloseHandlerId;
     std::string m_mousePressedHandlerId;
     std::string m_mouseScrolledHandlerId;
     std::string m_keyPressedHandlerId;

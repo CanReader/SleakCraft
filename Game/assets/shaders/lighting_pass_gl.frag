@@ -150,7 +150,7 @@ float CalcShadowPCF(vec3 worldPos, float NdotL) {
     float shadow = 0.0;
     for (int i = 0; i < 16; ++i) {
         shadow += texture(shadowMap,
-            vec3(proj.xy + poissonDisk[i] * ShadowTexelSize * 2.5,
+            vec3(proj.xy + poissonDisk[i] * ShadowTexelSize * 5.0,
                  proj.z - ShadowBias));
     }
     shadow /= 16.0;

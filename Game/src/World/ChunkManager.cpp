@@ -55,15 +55,23 @@ void ChunkManager::StopWorkers() {
         w.join();
     m_workers.clear();
 
+    // Release in-flight tokens or the chunks can never unload/remesh again
     {
         std::lock_guard<std::mutex> lock(m_taskMutex);
+        for (Chunk* c : m_taskQueue) c->SetInFlight(false);
         m_taskQueue.clear();
     }
+    // Workers drain the task queue before exiting; requeue their results
     {
         std::lock_guard<std::mutex> lock(m_readyMutex);
+        for (Chunk* c : m_readyQueue) {
+            c->SetInFlight(false);
+            c->SetNeedsMeshRebuild(true);
+            m_chunksNeedingRemesh.insert(
+                {c->GetChunkX(), c->GetChunkY(), c->GetChunkZ()});
+        }
         m_readyQueue.clear();
     }
-    m_chunksNeedingRemesh.clear();
 }
 
 void ChunkManager::WorkerThread() {
@@ -321,7 +329,7 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
 }
 
 void ChunkManager::FlushPendingEdits() {
-    // Force-apply deferred edits for save/exit; visuals refresh via remesh
+    // Apply deferred edits for save/exit; visuals refresh via remesh
     std::vector<PendingBlockEdit> edits;
     edits.swap(m_pendingEdits);
     for (auto& e : edits) {
@@ -330,6 +338,12 @@ void ChunkManager::FlushPendingEdits() {
         int cz = floorDiv(e.z, Chunk::SIZE);
         Chunk* chunk = GetChunk(cx, cy, cz);
         if (!chunk) continue;
+        // Still owned by a worker — keep deferred, lands in the next save
+        if (chunk->IsInFlight() || chunk->NeedsGeneration() ||
+            IsNeighborOfInFlight({cx, cy, cz})) {
+            m_pendingEdits.push_back(e);
+            continue;
+        }
         chunk->SetBlock(floorMod(e.x, Chunk::SIZE), floorMod(e.y, Chunk::SIZE),
                         floorMod(e.z, Chunk::SIZE), e.type);
         chunk->SetDirty(true);
@@ -612,7 +626,14 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
         if (!chunk || chunk->IsInFlight() || chunk->NeedsGeneration()) continue;
 
         // Mesh data was consumed — regenerate it (sync fallback).
-        if (!chunk->HasPendingMesh()) chunk->GenerateMeshData();
+        // A worker may be generating a neighbor: re-queue instead of racing.
+        if (!chunk->HasPendingMesh()) {
+            if (IsNeighborOfInFlight({cx, cy, cz})) {
+                m_dirtyColumns.insert(key);
+                continue;
+            }
+            chunk->GenerateMeshData();
+        }
 
         // Merge opaque mesh
         {
@@ -858,9 +879,12 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                 std::abs(coord.z - centerZ) <= m_renderDistance)
                 continue;
 
-            // Busy — RE-QUEUE for next frame, never drop (VRAM leak otherwise)
+            // Busy — RE-QUEUE for next frame, never drop (VRAM leak otherwise).
+            // Charge the budget so a deferred backlog can't grow the scan
+            // unbounded within one frame.
             if (chunk->IsInFlight() || IsNeighborOfInFlight(coord)) {
                 deferredUnloads.push_back(coord);
+                ++unloaded;
                 continue;
             }
 
@@ -870,7 +894,8 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             delete chunk;
             ++unloaded;
         }
-        m_pendingUnload.insert(m_pendingUnload.end(), deferredUnloads.begin(),
+        // Front insert: busy entries retry AFTER fresh ones, not before
+        m_pendingUnload.insert(m_pendingUnload.begin(), deferredUnloads.begin(),
                                deferredUnloads.end());
 
         // Free column meshes whose bands lost all chunks.  For columns
@@ -1175,6 +1200,11 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
 }
 
 void ChunkManager::FlushPendingChunks() {
+    // Bulk synchronous load: drain workers first — the unguarded deletes
+    // and meshing below must not run concurrently with generation.
+    bool restartWorkers = m_multithreaded && !m_workers.empty();
+    if (restartWorkers) StopWorkers();
+
     // Pass 1: Generate all chunks and link neighbors
     std::vector<ChunkCoord> generated;
     while (!m_pendingLoad.empty()) {
@@ -1224,6 +1254,8 @@ void ChunkManager::FlushPendingChunks() {
     // Pass 3: Build column meshes
     for (auto& col : flushDirtyColumns)
         RebuildColumnMesh(col.x, col.yBand, col.z);
+
+    if (restartWorkers) StartWorkers();
 }
 
 int64_t ChunkManager::PackCoord(int32_t cx, int32_t cy, int32_t cz) {

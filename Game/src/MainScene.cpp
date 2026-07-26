@@ -160,6 +160,8 @@ bool MainScene::Initialize() {
         });
     }
 
+    m_windowCloseHandlerId =
+        EventDispatcher::RegisterEventHandler(this, &MainScene::OnWindowClose);
     m_mousePressedHandlerId =
         EventDispatcher::RegisterEventHandler(this, &MainScene::OnMousePressed);
     m_mouseScrolledHandlerId = EventDispatcher::RegisterEventHandler(
@@ -174,6 +176,8 @@ bool MainScene::Initialize() {
 
 MainScene::~MainScene() {
     // Unregister anything that OnDeactivate may not have caught
+    EventDispatcher::UnregisterEvent(EventType::WindowClose,
+                                     m_windowCloseHandlerId);
     EventDispatcher::UnregisterEvent(EventType::MousePressed,
                                      m_mousePressedHandlerId);
     EventDispatcher::UnregisterEvent(EventType::MouseScrolled,
@@ -187,6 +191,8 @@ MainScene::~MainScene() {
 
 void MainScene::OnDeactivate() {
     Scene::OnDeactivate();
+    EventDispatcher::UnregisterEvent(EventType::WindowClose,
+                                     m_windowCloseHandlerId);
     EventDispatcher::UnregisterEvent(EventType::MousePressed,
                                      m_mousePressedHandlerId);
     EventDispatcher::UnregisterEvent(EventType::MouseScrolled,
@@ -195,6 +201,7 @@ void MainScene::OnDeactivate() {
                                      m_keyPressedHandlerId);
     EventDispatcher::UnregisterEvent(EventType::KeyReleased,
                                      m_keyReleasedHandlerId);
+    m_windowCloseHandlerId.clear();
     m_mousePressedHandlerId.clear();
     m_mouseScrolledHandlerId.clear();
     m_keyPressedHandlerId.clear();
@@ -346,7 +353,18 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
     }
     if_key_press(KEY__F3) { m_showUI = !m_showUI; }
     if_key_press(KEY__F5) { SaveGame(); }
-    if_key_press(KEY__F6) { LoadGame(); }
+    if_key_press(KEY__F6) {
+        // Double-press confirm: F6 sits next to F5 and discards unsaved edits
+        if (m_loadConfirmTimer > 0.0f ||
+            m_chunkManager.GetDirtyChunks().empty()) {
+            m_loadConfirmTimer = 0.0f;
+            LoadGame();
+        } else {
+            m_saveMessage = "Unsaved changes! Press F6 again to reload.";
+            m_saveMessageTimer = 3.0f;
+            m_loadConfirmTimer = 3.0f;
+        }
+    }
 }
 
 void MainScene::OnKeyReleased(const Events::Input::KeyReleasedEvent& e) {
@@ -466,6 +484,7 @@ void MainScene::Update(float deltaTime) {
 
         // Save/load message fade
         if (m_saveMessageTimer > 0.0f) m_saveMessageTimer -= deltaTime;
+        if (m_loadConfirmTimer > 0.0f) m_loadConfirmTimer -= deltaTime;
 
         if (m_showCrosshair) {
             float cx = UI::GetViewportWidth() * 0.5f;
@@ -792,7 +811,17 @@ void MainScene::RenderUI() {
     UI::EndPanel();
 }
 
+void MainScene::OnWindowClose(const Sleak::Events::WindowCloseEvent&) {
+    // Renderer is still alive here — last safe point to persist the world
+    if (!m_chunkManager.GetDirtyChunks().empty()) SaveGame();
+}
+
 void MainScene::SaveGame() {
+    if (m_saveLocked) {
+        m_saveMessage = "Saving disabled: save on disk is corrupted!";
+        m_saveMessageTimer = 3.0f;
+        return;
+    }
     auto* cam = GetActiveCamera();
     if (!cam) return;
 
@@ -847,8 +876,16 @@ void MainScene::LoadGame() {
     std::unordered_map<int64_t, std::array<uint8_t, 4096>> chunkData;
 
     if (!m_saveManager.LoadWorld(meta, chunkData)) {
-        m_saveMessage = "No Save Found!";
-        m_saveMessageTimer = 2.0f;
+        if (m_saveManager.HasSave()) {
+            // Unreadable save: never overwrite it with a fresh seed-0 world
+            m_saveLocked = true;
+            SLEAK_ERROR("Load: save exists but is unreadable — saving locked");
+            m_saveMessage = "Save corrupted! Saving disabled.";
+            m_saveMessageTimer = 6.0f;
+        } else {
+            m_saveMessage = "No Save Found!";
+            m_saveMessageTimer = 2.0f;
+        }
         return;
     }
 
@@ -868,11 +905,11 @@ void MainScene::LoadGame() {
 
     m_selectedBlock = static_cast<BlockType>(meta.player.selectedBlock);
 
-    // Restore seed and reload all chunks
+    // ForceReload first: drains workers so reseed/data swap can't race Generate
+    m_chunkManager.ForceReload();
     m_chunkManager.SetSeed(meta.seed);
     m_chunkManager.LoadChunkData(chunkData);
     m_chunkManager.LoadHeightmapCache(m_savePath + "/heightmap.cache");
-    m_chunkManager.ForceReload();
 
     // Load a small area synchronously, let the rest stream in
     m_chunkManager.SetRenderDistance(3);
@@ -1062,7 +1099,7 @@ void MainScene::SetupLighting() {
     cfg.bloomEnabled = false;  // match OpenGL ref (no post-FX bloom chain)
     cfg.taaEnabled = true;     // smooths shadow-edge aliasing (VK only for now)
     cfg.shadowMapResolution = 3072;  // BSL ULTRA tier; 4096 spiked VK frames
-    cfg.shadowFrustumSize = 256.0f;  // half-extent → 512m shadowed area
+    cfg.shadowFrustumSize = 128.0f;  // half-extent → 256m ≈ fog range; 2x texel density
     cfg.shadowCasterDistance = 256.0f;
     cfg.shadowDistance =
         400.0f;  // pull-back > frustum, else near-clip eats shadows
@@ -1085,7 +1122,7 @@ void MainScene::SetupLighting() {
     m_chunkManager.SetShadowCasterDistance(cfg.shadowCasterDistance);
 
     // Settings not carried by the config — applied directly.
-    m_sun->SetShadowNormalBias(0.05f);
+    m_sun->SetShadowNormalBias(0.25f);  // ~3 texels at 3072/256m — covers 5-texel PCF
     m_sun->SetShadowNearPlane(0.1f);
     m_sun->SetShadowFarPlane(900.0f);
     AddObject(m_sun);
