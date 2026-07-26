@@ -32,6 +32,7 @@ public:
 
 private:
     bool EnsureDirectories() const;
+    std::vector<std::pair<int, int>> ScanRegionDir() const;
     bool WriteWorldDat(const WorldMeta& meta,
                        const std::vector<ChunkSaveData>& dirtyChunks) const;
     bool ReadWorldDat(WorldMeta& meta) const;

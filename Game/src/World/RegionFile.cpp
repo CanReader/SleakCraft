@@ -194,7 +194,9 @@ bool RegionFile::Save(const std::string& path, const std::vector<ChunkSaveData>&
 
 // ── Load ─────────────────────────────────────────────────────────────
 
-bool RegionFile::Load(const std::string& path, std::vector<ChunkSaveData>& chunks) {
+bool RegionFile::Load(const std::string& path, std::vector<ChunkSaveData>& chunks,
+                      size_t* droppedChunks) {
+    if (droppedChunks) *droppedChunks = 0;
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) return false;
 
@@ -260,11 +262,13 @@ bool RegionFile::Load(const std::string& path, std::vector<ChunkSaveData>& chunk
         if (!decoded) {
             SLEAK_WARN("Region load: RLE decode failed for chunk ({},{},{}) in {}",
                        c.cx, c.cy, c.cz, path);
+            if (droppedChunks) ++*droppedChunks;
             continue;
         }
         if (CRC32(c.blocks.data(), 4096) != crc) {
             SLEAK_WARN("Region load: CRC mismatch for chunk ({},{},{}) in {}",
                        c.cx, c.cy, c.cz, path);
+            if (droppedChunks) ++*droppedChunks;
             continue;
         }
         chunks.push_back(std::move(c));

@@ -21,7 +21,8 @@ public:
     static std::string RegionFileName(int rx, int rz);
 
     static bool Save(const std::string& path, const std::vector<ChunkSaveData>& chunks);
-    static bool Load(const std::string& path, std::vector<ChunkSaveData>& chunks);
+    static bool Load(const std::string& path, std::vector<ChunkSaveData>& chunks,
+                     size_t* droppedChunks = nullptr);
 
     static std::vector<uint8_t> RLEEncode(const uint8_t* data, size_t size);
     static bool RLEDecode(const uint8_t* encoded, size_t encodedSize,
