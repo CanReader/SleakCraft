@@ -2,7 +2,7 @@
 #include <Camera/Camera.hpp>
 #include <Core/SceneBase.hpp>
 #include <Culling/CullingSystem.hpp>
-#include <Logger.hpp>
+#include <Core/Logger.hpp>
 #include <Runtime/Material.hpp>
 #include <Runtime/MeshBatch.hpp>
 #include <algorithm>

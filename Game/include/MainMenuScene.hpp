@@ -2,7 +2,7 @@
 #define _MAIN_MENU_SCENE_HPP_
 
 #include <Core/Scene.hpp>
-#include <Events/KeyboardEvent.h>
+#include <Events/KeyboardEvent.hpp>
 #include <string>
 #include <vector>
 #include <cstdint>

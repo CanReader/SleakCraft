@@ -1,7 +1,7 @@
 #ifndef _GAME_H_
 #define _GAME_H_
 
-#include <GameBase.hpp>
+#include <Core/GameBase.hpp>
 #include <Core/OSDef.hpp>
 #include <string>
 #include <cstdint>

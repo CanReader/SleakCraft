@@ -1,7 +1,7 @@
 #include "MainScene.hpp"
 
-#include <Events/Event.h>
-#include <Input/KeyCodes.h>
+#include <Events/Event.hpp>
+#include <Input/KeyCodes.hpp>
 
 #include <Camera/Camera.hpp>
 #include <Core/Application.hpp>

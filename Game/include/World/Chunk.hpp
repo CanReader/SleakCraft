@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <Runtime/MeshData.hpp>
-#include <Memory/RefPtr.h>
+#include <Memory/RefPtr.hpp>
 
 namespace Sleak {
     class Material;

@@ -1,7 +1,7 @@
 #include <Core/Application.hpp>
 #include <Core/CommandLine.hpp>
 #include <Game.hpp>
-#include <Logger.hpp>
+#include <Core/Logger.hpp>
 #include <filesystem>
 #include <iostream>
 

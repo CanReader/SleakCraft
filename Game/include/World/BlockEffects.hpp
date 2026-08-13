@@ -3,7 +3,7 @@
 
 #include "Block.hpp"
 #include <Math/Vector.hpp>
-#include <Memory/RefPtr.h>
+#include <Memory/RefPtr.hpp>
 #include <vector>
 
 namespace Sleak {

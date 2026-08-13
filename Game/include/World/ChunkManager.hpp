@@ -5,7 +5,7 @@
 #include "WorldGenerator.hpp"
 #include <Math/AABB.hpp>
 #include <Math/Vector.hpp>
-#include <Memory/RefPtr.h>
+#include <Memory/RefPtr.hpp>
 #include <Runtime/MeshBatch.hpp>
 #include <unordered_map>
 #include <unordered_set>

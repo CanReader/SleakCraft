@@ -3,10 +3,10 @@
 
 #include <Core/Scene.hpp>
 #include <Runtime/Texture.hpp>
-#include <Memory/RefPtr.h>
-#include <Events/MouseEvent.h>
-#include <Events/KeyboardEvent.h>
-#include <Events/ApplicationEvent.h>
+#include <Memory/RefPtr.hpp>
+#include <Events/MouseEvent.hpp>
+#include <Events/KeyboardEvent.hpp>
+#include <Events/ApplicationEvent.hpp>
 #include <array>
 #include <Debug/SystemMetrics.hpp>
 #include "World/ChunkManager.hpp"

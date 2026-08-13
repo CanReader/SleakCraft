@@ -1,7 +1,7 @@
 #include "MainMenuScene.hpp"
 #include "Game.hpp"
 #include <Core/Application.hpp>
-#include <Events/KeyboardEvent.h>
+#include <Events/KeyboardEvent.hpp>
 #include <UI/UI.hpp>
 #include "World/SaveManager.hpp"
 #include <ctime>
