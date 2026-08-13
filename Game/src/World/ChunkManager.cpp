@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <fstream>
 #include <vector>
 
 ChunkManager::ChunkManager() {}
@@ -357,173 +356,14 @@ VoxelRaycastResult ChunkManager::VoxelRaycast(
     const Sleak::Math::Vector3D& direction,
     float maxDist) const
 {
-    VoxelRaycastResult result;
-
-    float ox = origin.GetX(), oy = origin.GetY(), oz = origin.GetZ();
-    float dx = direction.GetX(), dy = direction.GetY(), dz = direction.GetZ();
-
-    int x = static_cast<int>(std::floor(ox));
-    int y = static_cast<int>(std::floor(oy));
-    int z = static_cast<int>(std::floor(oz));
-
-    int stepX = (dx >= 0) ? 1 : -1;
-    int stepY = (dy >= 0) ? 1 : -1;
-    int stepZ = (dz >= 0) ? 1 : -1;
-
-    float tDeltaX = (dx != 0.0f) ? std::abs(1.0f / dx) : 1e30f;
-    float tDeltaY = (dy != 0.0f) ? std::abs(1.0f / dy) : 1e30f;
-    float tDeltaZ = (dz != 0.0f) ? std::abs(1.0f / dz) : 1e30f;
-
-    float tMaxX = (dx != 0.0f) ? ((stepX > 0 ? (x + 1.0f - ox) : (ox - x)) * tDeltaX) : 1e30f;
-    float tMaxY = (dy != 0.0f) ? ((stepY > 0 ? (y + 1.0f - oy) : (oy - y)) * tDeltaY) : 1e30f;
-    float tMaxZ = (dz != 0.0f) ? ((stepZ > 0 ? (z + 1.0f - oz) : (oz - z)) * tDeltaZ) : 1e30f;
-
-    int prevX = x, prevY = y, prevZ = z;
-    float t = 0.0f;
-
-    for (int i = 0; i < static_cast<int>(maxDist * 3.0f) + 1; ++i) {
-        BlockType block = GetBlockAt(x, y, z);
-        if (IsBlockSolid(block)) {
-            result.hit = true;
-            result.blockX = x;
-            result.blockY = y;
-            result.blockZ = z;
-            result.placeX = prevX;
-            result.placeY = prevY;
-            result.placeZ = prevZ;
-            result.blockType = block;
-            return result;
-        }
-
-        prevX = x; prevY = y; prevZ = z;
-
-        if (tMaxX < tMaxY) {
-            if (tMaxX < tMaxZ) {
-                t = tMaxX;
-                x += stepX;
-                tMaxX += tDeltaX;
-            } else {
-                t = tMaxZ;
-                z += stepZ;
-                tMaxZ += tDeltaZ;
-            }
-        } else {
-            if (tMaxY < tMaxZ) {
-                t = tMaxY;
-                y += stepY;
-                tMaxY += tDeltaY;
-            } else {
-                t = tMaxZ;
-                z += stepZ;
-                tMaxZ += tDeltaZ;
-            }
-        }
-
-        if (t > maxDist) break;
-    }
-
-    return result;
+    return m_queries.VoxelRaycast(origin, direction, maxDist);
 }
 
 VoxelCollisionResult ChunkManager::ResolveVoxelCollision(
     const Sleak::Math::Vector3D& eyePos,
     float halfWidth, float height, float eyeOffset) const
 {
-    using namespace Sleak::Math;
-    VoxelCollisionResult result;
-
-    float feetY = eyePos.GetY() - eyeOffset;
-    float posX = eyePos.GetX();
-    float posZ = eyePos.GetZ();
-
-    auto computeAABB = [&](float fx, float fy, float fz,
-                           float& minX, float& minY, float& minZ,
-                           float& maxX, float& maxY, float& maxZ) {
-        minX = fx - halfWidth;
-        maxX = fx + halfWidth;
-        minY = fy;
-        maxY = fy + height;
-        minZ = fz - halfWidth;
-        maxZ = fz + halfWidth;
-    };
-
-    for (int iter = 0; iter < 16; ++iter) {
-        float minX, minY, minZ, maxX, maxY, maxZ;
-        computeAABB(posX, feetY, posZ, minX, minY, minZ, maxX, maxY, maxZ);
-
-        int bx0 = static_cast<int>(std::floor(minX));
-        int bx1 = static_cast<int>(std::floor(maxX - 0.0001f));
-        int by0 = static_cast<int>(std::floor(minY));
-        int by1 = static_cast<int>(std::floor(maxY - 0.0001f));
-        int bz0 = static_cast<int>(std::floor(minZ));
-        int bz1 = static_cast<int>(std::floor(maxZ - 0.0001f));
-
-        bool corrected = false;
-        for (int by = by0; by <= by1; ++by) {
-            for (int bz = bz0; bz <= bz1; ++bz) {
-                for (int bx = bx0; bx <= bx1; ++bx) {
-                    if (!IsBlockSolid(GetBlockAt(bx, by, bz))) continue;
-
-                    float blockMinX = static_cast<float>(bx);
-                    float blockMaxX = static_cast<float>(bx + 1);
-                    float blockMinY = static_cast<float>(by);
-                    float blockMaxY = static_cast<float>(by + 1);
-                    float blockMinZ = static_cast<float>(bz);
-                    float blockMaxZ = static_cast<float>(bz + 1);
-
-                    computeAABB(posX, feetY, posZ, minX, minY, minZ, maxX, maxY, maxZ);
-
-                    if (minX >= blockMaxX || maxX <= blockMinX ||
-                        minY >= blockMaxY || maxY <= blockMinY ||
-                        minZ >= blockMaxZ || maxZ <= blockMinZ)
-                        continue;
-
-                    float pushXPos = blockMaxX - minX;
-                    float pushXNeg = maxX - blockMinX;
-                    float penX = std::min(pushXPos, pushXNeg);
-
-                    float pushYPos = blockMaxY - minY;
-                    float pushYNeg = maxY - blockMinY;
-                    float penY = std::min(pushYPos, pushYNeg);
-
-                    float pushZPos = blockMaxZ - minZ;
-                    float pushZNeg = maxZ - blockMinZ;
-                    float penZ = std::min(pushZPos, pushZNeg);
-
-                    if (penY <= penX && penY <= penZ) {
-                        if (pushYPos < pushYNeg) {
-                            feetY += pushYPos;
-                            result.onGround = true;
-                        } else {
-                            feetY -= pushYNeg;
-                            result.hitCeiling = true;
-                        }
-                    } else if (penX <= penZ) {
-                        if (pushXPos < pushXNeg)
-                            posX += pushXPos;
-                        else
-                            posX -= pushXNeg;
-                        result.hitWall = true;
-                    } else {
-                        if (pushZPos < pushZNeg)
-                            posZ += pushZPos;
-                        else
-                            posZ -= pushZNeg;
-                        result.hitWall = true;
-                    }
-                    corrected = true;
-                }
-            }
-        }
-        if (!corrected) break;
-    }
-
-    float newEyeY = feetY + eyeOffset;
-    result.correction = Vector3D(posX - eyePos.GetX(),
-                                  newEyeY - eyePos.GetY(),
-                                  posZ - eyePos.GetZ());
-
-    return result;
+    return m_queries.ResolveVoxelCollision(eyePos, halfWidth, height, eyeOffset);
 }
 
 void ChunkManager::LinkNeighbors(const ChunkCoord& coord, Chunk* chunk) {
@@ -1422,60 +1262,10 @@ void ChunkManager::RenderWater() {
     Sleak::MeshBatch::EndBatch();
 }
 
-// ── Heightmap cache ──────────────────────────────────────────────────────────
-// Format: magic(4) seed(4) count(4) [cx(4) cz(4) maxCy(4)] * count
-// Tied to seed — if seed mismatches the file is silently ignored.
-
-static constexpr uint32_t HEIGHTMAP_MAGIC = 0x484D4348; // "HMCH"
-
 void ChunkManager::SaveHeightmapCache(const std::string& path) const {
-    if (m_columnMaxCyCache.empty()) return;
-
-    std::ofstream f(path, std::ios::binary);
-    if (!f.is_open()) return;
-
-    uint32_t count = static_cast<uint32_t>(m_columnMaxCyCache.size());
-    uint32_t seed  = m_generator.GetSeed();
-
-    f.write(reinterpret_cast<const char*>(&HEIGHTMAP_MAGIC), 4);
-    f.write(reinterpret_cast<const char*>(&seed),  4);
-    f.write(reinterpret_cast<const char*>(&count), 4);
-
-    for (const auto& [packed, maxCy] : m_columnMaxCyCache) {
-        // Unpack cx/cz from the uint64 key (same packing as PackColumnXZ)
-        int32_t cx = static_cast<int32_t>(static_cast<uint32_t>(packed >> 32));
-        int32_t cz = static_cast<int32_t>(static_cast<uint32_t>(packed & 0xFFFFFFFF));
-        int32_t mc = static_cast<int32_t>(maxCy);
-        f.write(reinterpret_cast<const char*>(&cx), 4);
-        f.write(reinterpret_cast<const char*>(&cz), 4);
-        f.write(reinterpret_cast<const char*>(&mc), 4);
-    }
+    HeightmapCache::Save(path, m_columnMaxCyCache, m_generator.GetSeed());
 }
 
 void ChunkManager::LoadHeightmapCache(const std::string& path) {
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f.is_open()) return;
-
-    auto fileSize = static_cast<size_t>(f.tellg());
-    if (fileSize < 12) return;
-    f.seekg(0);
-
-    uint32_t magic, seed, count;
-    f.read(reinterpret_cast<char*>(&magic), 4);
-    f.read(reinterpret_cast<char*>(&seed),  4);
-    f.read(reinterpret_cast<char*>(&count), 4);
-
-    if (magic != HEIGHTMAP_MAGIC) return;
-    if (seed  != m_generator.GetSeed()) return;  // stale cache — different seed
-    if (fileSize < 12 + static_cast<size_t>(count) * 12) return;  // truncated
-
-    m_columnMaxCyCache.reserve(m_columnMaxCyCache.size() + count);
-    for (uint32_t i = 0; i < count; ++i) {
-        int32_t cx, cz, maxCy;
-        f.read(reinterpret_cast<char*>(&cx),    4);
-        f.read(reinterpret_cast<char*>(&cz),    4);
-        f.read(reinterpret_cast<char*>(&maxCy), 4);
-        uint64_t key = PackColumnXZ(cx, cz);
-        m_columnMaxCyCache.emplace(key, static_cast<int>(maxCy));
-    }
+    HeightmapCache::Load(path, m_columnMaxCyCache, m_generator.GetSeed());
 }

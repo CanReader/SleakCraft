@@ -2,6 +2,8 @@
 #define _CHUNK_MANAGER_HPP_
 
 #include "Chunk.hpp"
+#include "HeightmapCache.hpp"
+#include "VoxelQueries.hpp"
 #include "WorldGenerator.hpp"
 #include <Math/AABB.hpp>
 #include <Math/Vector.hpp>
@@ -26,20 +28,6 @@ namespace Sleak {
 struct ChunkCoord {
     int x, y, z;
     bool operator==(const ChunkCoord& o) const { return x == o.x && y == o.y && z == o.z; }
-};
-
-struct VoxelCollisionResult {
-    Sleak::Math::Vector3D correction{0.0f, 0.0f, 0.0f};
-    bool onGround = false;
-    bool hitCeiling = false;
-    bool hitWall = false;
-};
-
-struct VoxelRaycastResult {
-    bool hit = false;
-    int blockX = 0, blockY = 0, blockZ = 0;
-    int placeX = 0, placeY = 0, placeZ = 0;
-    BlockType blockType = BlockType::Air;
 };
 
 struct ChunkCoordHash {
@@ -220,12 +208,10 @@ private:
 
     // Per-column max filled chunk-Y cache. Terrain is deterministic so entries
     // never go stale. Eliminates repeated noise evaluation for the same column.
-    std::unordered_map<uint64_t, int> m_columnMaxCyCache;
+    ColumnMaxCyMap m_columnMaxCyCache;
     int GetCachedColumnMaxCy(int cx, int cz);
-    static uint64_t PackColumnXZ(int cx, int cz) {
-        return (static_cast<uint64_t>(static_cast<uint32_t>(cx)) << 32)
-             |  static_cast<uint64_t>(static_cast<uint32_t>(cz));
-    }
+
+    VoxelQueries m_queries{*this};
 };
 
 #endif
