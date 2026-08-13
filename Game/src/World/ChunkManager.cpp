@@ -585,9 +585,9 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
     int bandMinY = yBand * BAND_SIZE;
     int bandMaxY = bandMinY + BAND_SIZE - 1;
 
-    Sleak::VoxelVertexGroup mergedVerts;
+    VoxelVertexBuffer mergedVerts;
     Sleak::IndexGroup mergedIndices;
-    Sleak::VoxelVertexGroup mergedWaterVerts;
+    VoxelVertexBuffer mergedWaterVerts;
     Sleak::IndexGroup mergedWaterIndices;
 
     // Dispatch ALL consumed-mesh siblings in one batch so workers re-mesh
@@ -642,7 +642,7 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
 
             if (md.vertices.GetSize() > 0) {
                 uint32_t baseVertex = static_cast<uint32_t>(mergedVerts.GetSize());
-                const Sleak::VoxelVertex* vdata = md.vertices.GetData();
+                const ::VoxelVertex* vdata = md.vertices.GetData();
                 for (size_t i = 0; i < md.vertices.GetSize(); ++i) {
                     mergedVerts.AddVertex(vdata[i]);
                     if (vdata[i].py < meshMinY) meshMinY = vdata[i].py;
@@ -663,7 +663,7 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
 
             if (wd.vertices.GetSize() > 0) {
                 uint32_t baseVertex = static_cast<uint32_t>(mergedWaterVerts.GetSize());
-                const Sleak::VoxelVertex* vdata = wd.vertices.GetData();
+                const ::VoxelVertex* vdata = wd.vertices.GetData();
                 for (size_t i = 0; i < wd.vertices.GetSize(); ++i) {
                     mergedWaterVerts.AddVertex(vdata[i]);
                     if (vdata[i].py < meshMinY) meshMinY = vdata[i].py;
@@ -692,9 +692,15 @@ void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer)
 
     ColumnMesh col;
     if (mergedVerts.GetSize() > 0)
-        col.mesh = Sleak::MeshBatch::CreateVoxelMesh(mergedVerts, mergedIndices);
+        col.mesh = Sleak::MeshBatch::CreateMesh(
+            GetVoxelVertexFormat(), mergedVerts.GetData(),
+            mergedVerts.GetSizeInBytes(), mergedIndices.GetData(),
+            mergedIndices.GetSize());
     if (mergedWaterVerts.GetSize() > 0)
-        col.waterMesh = Sleak::MeshBatch::CreateVoxelMesh(mergedWaterVerts, mergedWaterIndices);
+        col.waterMesh = Sleak::MeshBatch::CreateMesh(
+            GetVoxelVertexFormat(), mergedWaterVerts.GetData(),
+            mergedWaterVerts.GetSizeInBytes(), mergedWaterIndices.GetData(),
+            mergedWaterIndices.GetSize());
 
     if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) {
         m_oomThisFrame = true;

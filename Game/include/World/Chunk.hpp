@@ -2,6 +2,7 @@
 #define _CHUNK_HPP_
 
 #include "Block.hpp"
+#include "VoxelVertex.hpp"
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -15,7 +16,7 @@ namespace Sleak {
 }
 
 struct ChunkMeshData {
-    Sleak::VoxelVertexGroup vertices;
+    VoxelVertexBuffer vertices;
     Sleak::IndexGroup indices;
 };
 
@@ -32,9 +33,7 @@ public:
 
     void SetNeighbor(BlockFace face, Chunk* chunk);
 
-    void BuildMesh(const Sleak::RefPtr<Sleak::Material>& material);
     void GenerateMeshData();
-    void UploadMesh(const Sleak::RefPtr<Sleak::Material>& material);
     void AddToScene(Sleak::SceneBase* scene);
     void RemoveFromScene(Sleak::SceneBase* scene);
 

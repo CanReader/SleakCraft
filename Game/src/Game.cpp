@@ -4,6 +4,7 @@
 #include <Core/Application.hpp>
 #include <Core/CommandLine.hpp>
 #include "World/SaveManager.hpp"
+#include "World/VoxelVertex.hpp"
 #include <random>
 
 Game::Game() {
@@ -15,6 +16,9 @@ Game::~Game() {
 }
 
 bool Game::Initialize() {
+    // Register the voxel vertex layout before any chunk mesh is created
+    GetVoxelVertexFormat();
+
     m_menuScene = new MainMenuScene("MainMenuScene");
     AddScene(m_menuScene);
     SetActiveScene(m_menuScene);
