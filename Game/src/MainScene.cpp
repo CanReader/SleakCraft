@@ -502,14 +502,6 @@ void MainScene::Update(float deltaTime) {
     }
 }
 
-bool castShadow = true;
-float bias = 0.0005f;
-float nbias = 0.05;
-float shadowfrustum = 160.0f;
-float shadowdistance = 560.0f;
-float shadownear = 0.1f;
-float shadowfar = 500.0f;
-
 void MainScene::RenderUI() {
     auto* cam = GetActiveCamera();
     auto* app = Application::GetInstance();
