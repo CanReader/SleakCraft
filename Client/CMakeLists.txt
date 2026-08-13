@@ -48,7 +48,7 @@ endfunction()
 
 set(SLEAK_ASSET_OUTPUTS "")
 sleak_track_asset_dir("${CMAKE_SOURCE_DIR}/Game/assets"          "game")
-sleak_track_asset_dir("${CMAKE_SOURCE_DIR}/Engine/Engine/assets" "engine")
+sleak_track_asset_dir("${CMAKE_SOURCE_DIR}/Engine/assets" "engine")
 
 add_custom_target(CopyAssets ALL DEPENDS ${SLEAK_ASSET_OUTPUTS})
 add_dependencies(SleakCraft CopyAssets)

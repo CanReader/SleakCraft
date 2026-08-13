@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SHADER_DIRS=(
-  "$ROOT_DIR/Engine/Engine/assets/shaders"
+  "$ROOT_DIR/Engine/assets/shaders"
   "$ROOT_DIR/Game/assets/shaders"
 )
 
