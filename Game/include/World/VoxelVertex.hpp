@@ -93,6 +93,7 @@ inline Sleak::VertexFormatHandle GetVoxelVertexFormat() {
         desc.shaderStem = "flat_shader";
         desc.shadowShaderStem = "shadow_depth_voxel";
         desc.gbufferShaderStem = "gbuffer_voxel";
+        desc.transparentShaderStem = "water_shader";
         return Sleak::VertexFormatRegistry::Register(desc);
     }();
     return handle;
