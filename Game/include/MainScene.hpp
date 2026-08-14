@@ -7,8 +7,6 @@
 #include <Events/MouseEvent.hpp>
 #include <Events/KeyboardEvent.hpp>
 #include <Events/ApplicationEvent.hpp>
-#include <array>
-#include <Debug/SystemMetrics.hpp>
 #include "World/ChunkManager.hpp"
 #include "World/Block.hpp"
 #include "World/SaveManager.hpp"
@@ -16,6 +14,9 @@
 #include "World/WorldPersistence.hpp"
 #include "Player/PlayerController.hpp"
 #include "Player/BlockInteraction.hpp"
+#include "UI/HudPanel.hpp"
+#include "UI/SettingsPanel.hpp"
+#include "UI/Hotbar.hpp"
 
 namespace Sleak { class Material; class DirectionalLight; }
 
@@ -46,11 +47,32 @@ public:
     bool IsSaveLocked() const { return m_saveLocked; }
     void SetSaveLocked(bool locked) { m_saveLocked = locked; }
     bool IsMultithreadedLoading() const { return m_multithreadedLoading; }
+    void SetMultithreadedLoading(bool enabled) {
+        m_multithreadedLoading = enabled;
+    }
     void SetSaveMessage(const std::string& message, float timer) {
         m_saveMessage = message;
         m_saveMessageTimer = timer;
     }
+    float GetSaveMessageTimer() const { return m_saveMessageTimer; }
+    const std::string& GetSaveMessage() const { return m_saveMessage; }
     float GetGameTime() const { return m_gameTime; }
+
+    // Accessors for HudPanel/SettingsPanel (toggles that engine setup code
+    // in MainScene also reads at Initialize time)
+    bool IsShowCrosshair() const { return m_showCrosshair; }
+    void SetShowCrosshair(bool show) { m_showCrosshair = show; }
+    bool IsVSyncEnabled() const { return m_vsync; }
+    void SetVSyncEnabled(bool enabled) { m_vsync = enabled; }
+    bool IsFrustumCullingEnabled() const { return m_frustumCulling; }
+    void SetFrustumCullingEnabled(bool enabled) { m_frustumCulling = enabled; }
+    bool IsOcclusionCullingEnabled() const { return m_occlusionCulling; }
+    void SetOcclusionCullingEnabled(bool enabled) {
+        m_occlusionCulling = enabled;
+    }
+    Sleak::RefPtr<Sleak::Material> GetBlockMaterial() const {
+        return m_blockMaterial;
+    }
 
 private:
     void SetupMaterial();
@@ -63,7 +85,6 @@ private:
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
     void OnKeyReleased(const Sleak::Events::Input::KeyReleasedEvent& e);
     void OnWindowClose(const Sleak::Events::WindowCloseEvent& e);
-    void RenderHotbar();
 
     void LoadGame();
 
@@ -80,9 +101,9 @@ private:
     WorldPersistence m_worldPersistence;
     PlayerController m_playerController;
     BlockInteraction m_blockInteraction;
-    std::array<uint64_t, BlockInteraction::HOTBAR_SLOTS> m_hotbarTextures =
-        {};
-    bool m_hotbarTexturesLoaded = false;
+    HudPanel m_hudPanel;
+    SettingsPanel m_settingsPanel;
+    Hotbar m_hotbar;
     bool m_multithreadedLoading = true;
     bool m_vsync = false;
     bool m_frustumCulling = true;
@@ -92,8 +113,6 @@ private:
     bool m_showUI = true;
     bool m_showCrosshair = true;
     bool m_showColliders = false;
-    Sleak::SystemMetricsData m_cachedMetrics;
-    float m_metricTimer = 0.0f;
 
     // Save/load UI feedback
     float m_saveMessageTimer = 0.0f;
@@ -114,38 +133,9 @@ private:
     std::string m_keyPressedHandlerId;
     std::string m_keyReleasedHandlerId;
 
-    // Lighting state (live-editable via settings panel)
+    // Sun light created here (needs Scene::AddObject/shadow config); live
+    // elevation/azimuth/color/intensity edits live on SettingsPanel.
     Sleak::DirectionalLight* m_sun = nullptr;
-    float m_sunElevation  = 65.0f;   // degrees above horizon (0=sunrise, 90=noon)
-    float m_sunAzimuth    = 255.0f;  // degrees clockwise from north
-    float m_sunIntensity  = 0.69f;
-    float m_sunColorR     = 1.00f;
-    float m_sunColorG     = 0.96f;
-    float m_sunColorB     = 0.88f;
-    float m_ambientIntensity = 0.725f;
-    float m_ambientColorR    = 0.45f;
-    float m_ambientColorG    = 0.62f;
-    float m_ambientColorB    = 1.00f;
-
-    // Texture quality state
-    Sleak::TextureFilter m_texFilter = Sleak::TextureFilter::Nearest;
-    float m_texLodBias = 0.0f;
-
-    // Fog state (live-editable). Defaults align with LightManager defaults so
-    // toggling the fog UI without touching sliders matches the engine's idle
-    // state. Horizon RGB is overridden by SetupLighting() to a slightly
-    // bluer tint that matches the skybox.
-    bool  m_fogEnabled        = true;
-    float m_fogHorizonR       = 0.62f;
-    float m_fogHorizonG       = 0.78f;
-    float m_fogHorizonB       = 1.00f;
-    float m_fogZenithR        = 0.42f;
-    float m_fogZenithG        = 0.58f;
-    float m_fogZenithB        = 0.86f;
-    bool  m_heightFogEnabled  = true;
-    float m_heightFogTop      = 64.0f;
-    float m_heightFogDensity  = 0.25f;
-    float m_heightFogFalloff  = 0.05f;
 };
 
 #endif

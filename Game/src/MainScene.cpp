@@ -39,7 +39,10 @@ MainScene::MainScene(const std::string& name, const std::string& savePath,
       m_worldPersistence(m_chunkManager, m_saveManager, m_blockEffects,
                           *this),
       m_playerController(m_chunkManager, *this),
-      m_blockInteraction(m_chunkManager, m_blockEffects, *this) {}
+      m_blockInteraction(m_chunkManager, m_blockEffects, *this),
+      m_hudPanel(m_chunkManager, *this),
+      m_settingsPanel(m_chunkManager, *this),
+      m_hotbar(m_blockInteraction) {}
 
 bool MainScene::Initialize() {
     SetupMaterial();
@@ -264,12 +267,7 @@ void MainScene::Update(float deltaTime) {
 
     Scene::Update(deltaTime);
 
-    // Refresh cached metrics
-    m_metricTimer += deltaTime;
-    if (m_metricTimer >= 0.5f) {
-        m_cachedMetrics = SystemMetrics::Query();
-        m_metricTimer = 0.0f;
-    }
+    m_hudPanel.Update(deltaTime);
 
     if (cam) {
         auto pos = cam->GetPosition();
@@ -298,321 +296,17 @@ void MainScene::Update(float deltaTime) {
         if (m_saveMessageTimer > 0.0f) m_saveMessageTimer -= deltaTime;
         if (m_loadConfirmTimer > 0.0f) m_loadConfirmTimer -= deltaTime;
 
-        if (m_showCrosshair) {
-            float cx = UI::GetViewportWidth() * 0.5f;
-            float cy = UI::GetViewportHeight() * 0.5f;
-            constexpr float arm = 10.0f;
-            UI::DrawLine(cx - arm, cy, cx + arm, cy, 1.0f, 1.0f, 1.0f, 0.8f,
-                         2.0f);
-            UI::DrawLine(cx, cy - arm, cx, cy + arm, 1.0f, 1.0f, 1.0f, 0.8f,
-                         2.0f);
-        }
+        m_hudPanel.RenderCrosshair();
 
         if (m_showUI) RenderUI();
 
-        RenderHotbar();
+        m_hotbar.Render();
     }
 }
 
 void MainScene::RenderUI() {
-    auto* cam = GetActiveCamera();
-    auto* app = Application::GetInstance();
-    if (!cam || !app) return;
-
-    auto* fpc = cam->GetComponent<FirstPersonController>();
-    bool inGameMode = fpc && fpc->IsEnabled();
-
-    // --- HUD panel (top-left) ---
-    UI::BeginPanel("HUD", 0, 0, 0.4f,
-                   UI::PanelFlags_NoTitleBar | UI::PanelFlags_AutoResize |
-                       UI::PanelFlags_NoMove | UI::PanelFlags_NoFocusOnAppear);
-
-    UI::Text("Selected: %s [%d]", GetBlockName(GetSelectedBlock()),
-             static_cast<int>(GetSelectedBlock()));
-
-    auto dir = cam->GetDirection();
-    auto rayHit = m_chunkManager.VoxelRaycast(cam->GetPosition(), dir, 6.0f);
-    if (rayHit.hit) {
-        UI::Text("Looking at: %s (%d, %d, %d)", GetBlockName(rayHit.blockType),
-                 rayHit.blockX, rayHit.blockY, rayHit.blockZ);
-    } else {
-        UI::Text("Looking at: ---");
-    }
-
-    UI::Separator();
-    UI::Text("Position:  %s", cam->GetPosition().ToString().c_str());
-    UI::Text("Direction: %s", cam->GetDirection().ToString().c_str());
-
-    float fov = cam->GetFieldOfView();
-    if (UI::DragFloat("FOV", &fov, 1.0f, 30.0f, 125.0f))
-        cam->SetFieldOfView(fov);
-
-    UI::EndPanel();
-
-    // --- Save/load feedback ---
-    if (m_saveMessageTimer > 0.0f) {
-        float alpha =
-            (m_saveMessageTimer < 0.5f) ? m_saveMessageTimer * 2.0f : 1.0f;
-        float centerX = UI::GetViewportWidth() * 0.5f - 60.0f;
-        UI::BeginPanel("SaveMsg", centerX, 40, 0.5f);
-        UI::TextColored(0.2f, 1.0f, 0.2f, alpha, "%s", m_saveMessage.c_str());
-        UI::EndPanel();
-    }
-
-    // --- Performance panel (top-right) ---
-    UI::BeginPanel("Performance", UI::GetViewportWidth() - 200, 0, 0.3f);
-
-    float r, g, b;
-    app->GetRendererTypeColor(r, g, b);
-    UI::TextColored(r, g, b, 1.0f, "%s", app->GetRendererTypeStr());
-
-    UI::Separator();
-    UI::Text("FPS: %d", app->GetFPS());
-    UI::Text("Frame Time: %.2f ms", app->GetFrameTime());
-
-    UI::Separator();
-    UI::Text("Vertices:  %d", app->GetVertices());
-    UI::Text("Triangles: %d", app->GetTriangles());
-
-    UI::Separator();
-    UI::Text("CPU: %.1f%%", m_cachedMetrics.CpuUsagePercent);
-    UI::Text("RAM: %.1f MB", m_cachedMetrics.RamUsageMB);
-
-    if (m_cachedMetrics.GpuUsagePercent > 0.0f)
-        UI::Text("GPU: %.1f%%", m_cachedMetrics.GpuUsagePercent);
-    else
-        UI::TextDisabled("GPU: N/A");
-
-    size_t vramUsed = app->GetGPUMemoryUsed();
-    size_t vramBudget = app->GetGPUMemoryBudget();
-    if (vramBudget > 0) {
-        float usedMB = static_cast<float>(vramUsed) / (1024.0f * 1024.0f);
-        float budgetMB = static_cast<float>(vramBudget) / (1024.0f * 1024.0f);
-        float pct =
-            (static_cast<float>(vramUsed) / static_cast<float>(vramBudget)) *
-            100.0f;
-        UI::Text("VRAM: %.0f / %.0f MB (%.0f%%)", usedMB, budgetMB, pct);
-    }
-
-    UI::EndPanel();
-
-    // --- Settings panel (below HUD) ---
-    int settingsFlags = UI::PanelFlags_NoTitleBar | UI::PanelFlags_AutoResize |
-                        UI::PanelFlags_NoMove | UI::PanelFlags_NoFocusOnAppear;
-    if (inGameMode) settingsFlags |= UI::PanelFlags_NoInput;
-    UI::BeginPanel("Settings", 0, 180, 0.4f, settingsFlags);
-
-    UI::Checkbox("Show Crosshair", &m_showCrosshair);
-
-    if (UI::Checkbox("VSync", &m_vsync)) app->SetVSync(m_vsync);
-
-    if (UI::Checkbox("Multithreaded Loading", &m_multithreadedLoading))
-        m_chunkManager.SetMultithreaded(m_multithreadedLoading);
-
-    UI::Separator();
-    UI::Text("-- Culling --");
-    if (UI::Checkbox("Frustum Culling", &m_frustumCulling))
-        m_chunkManager.SetCullingEnabled(m_frustumCulling, m_occlusionCulling);
-    if (UI::Checkbox("Occlusion Culling", &m_occlusionCulling))
-        m_chunkManager.SetCullingEnabled(m_frustumCulling, m_occlusionCulling);
-    {
-        const auto& cs = Sleak::CullingSystem::GetStats();
-        UI::Text("Tested %u  Frustum %u  Occ %u", cs.tested, cs.frustumCulled,
-                 cs.occlusionCulled);
-        if (cs.occlusionSkipped)
-            UI::Text("Occlusion idle (adaptive)");
-        else
-            UI::Text("Occluders %u rast  %.2f ms", cs.occludersRasterized,
-                     cs.rasterizeMs);
-    }
-
-    UI::Separator();
-    UI::Text("Anti-Aliasing");
-    {
-        const char* labels[] = {"Off", "2x", "4x", "8x"};
-        int values[] = {1, 2, 4, 8};
-        int count = 1;
-        uint32_t maxMSAA = app->GetMaxMSAASampleCount();
-        for (int i = 1; i < 4; i++)
-            if (static_cast<uint32_t>(values[i]) <= maxMSAA) count = i + 1;
-        int current = 0;
-        for (int i = 0; i < count; i++)
-            if (static_cast<uint32_t>(values[i]) == app->GetMSAASampleCount())
-                current = i;
-        if (UI::Combo("MSAA", &current, labels, count))
-            app->SetMSAASampleCount(values[current]);
-    }
-
-    UI::Separator();
-    float rd = static_cast<float>(m_chunkManager.GetRenderDistance());
-    if (UI::DragFloat("Render Distance", &rd, 1.0f, 2.0f, 16.0f)) {
-        m_chunkManager.SetRenderDistance(static_cast<int>(rd));
-        float drawDist = m_chunkManager.GetDrawDistance();
-        auto* lm = GetLightManager();
-        if (lm) lm->SetFogDistances(drawDist * 0.9f, drawDist);
-        // Shadow frustum stays fixed — not tied to draw distance
-        // (scaling it causes low-res shadows and disappearing issues)
-    }
-
-    // ---- Lighting ----
-    UI::Separator();
-    UI::Text("-- Sun --");
-
-    bool sunDirChanged = false;
-    sunDirChanged |=
-        UI::DragFloat("Elevation", &m_sunElevation, 0.5f, -10.0f, 90.0f);
-    sunDirChanged |=
-        UI::DragFloat("Azimuth", &m_sunAzimuth, 1.0f, 0.0f, 360.0f);
-    if (sunDirChanged && m_sun) {
-        const float deg2rad = 0.01745329f;
-        float eRad = m_sunElevation * deg2rad;
-        float aRad = m_sunAzimuth * deg2rad;
-        m_sun->SetDirection(Vector3D(-cosf(eRad) * sinf(aRad), -sinf(eRad),
-                                     -cosf(eRad) * cosf(aRad)));
-    }
-
-    if (UI::DragFloat("Sun Intensity", &m_sunIntensity, 0.01f, 0.0f, 5.0f) &&
-        m_sun)
-        m_sun->SetIntensity(m_sunIntensity);
-
-    bool sunColorChanged = false;
-    sunColorChanged |= UI::DragFloat("Sun R", &m_sunColorR, 0.005f, 0.0f, 1.0f);
-    sunColorChanged |= UI::DragFloat("Sun G", &m_sunColorG, 0.005f, 0.0f, 1.0f);
-    sunColorChanged |= UI::DragFloat("Sun B", &m_sunColorB, 0.005f, 0.0f, 1.0f);
-    if (sunColorChanged && m_sun)
-        m_sun->SetColor(m_sunColorR, m_sunColorG, m_sunColorB);
-
-    UI::Separator();
-    UI::Text("-- Ambient --");
-
-    auto* lm = GetLightManager();
-    if (UI::DragFloat("Amb Intensity", &m_ambientIntensity, 0.005f, 0.0f,
-                      2.0f) &&
-        lm)
-        lm->SetAmbientIntensity(m_ambientIntensity);
-
-    bool ambColorChanged = false;
-    ambColorChanged |=
-        UI::DragFloat("Amb R", &m_ambientColorR, 0.005f, 0.0f, 1.0f);
-    ambColorChanged |=
-        UI::DragFloat("Amb G", &m_ambientColorG, 0.005f, 0.0f, 1.0f);
-    ambColorChanged |=
-        UI::DragFloat("Amb B", &m_ambientColorB, 0.005f, 0.0f, 1.0f);
-    if (ambColorChanged && lm)
-        lm->SetAmbientColor(m_ambientColorR, m_ambientColorG, m_ambientColorB);
-
-    UI::Separator();
-    UI::Text("-- Fog --");
-
-    if (UI::Checkbox("Fog Enabled", &m_fogEnabled) && lm)
-        lm->SetFogEnabled(m_fogEnabled);
-
-    bool horizonChanged = false;
-    horizonChanged |=
-        UI::DragFloat("Horizon R", &m_fogHorizonR, 0.005f, 0.0f, 1.0f);
-    horizonChanged |=
-        UI::DragFloat("Horizon G", &m_fogHorizonG, 0.005f, 0.0f, 1.0f);
-    horizonChanged |=
-        UI::DragFloat("Horizon B", &m_fogHorizonB, 0.005f, 0.0f, 1.0f);
-    if (horizonChanged && lm)
-        lm->SetFogColor(m_fogHorizonR, m_fogHorizonG, m_fogHorizonB);
-
-    bool zenithChanged = false;
-    zenithChanged |=
-        UI::DragFloat("Zenith R", &m_fogZenithR, 0.005f, 0.0f, 1.0f);
-    zenithChanged |=
-        UI::DragFloat("Zenith G", &m_fogZenithG, 0.005f, 0.0f, 1.0f);
-    zenithChanged |=
-        UI::DragFloat("Zenith B", &m_fogZenithB, 0.005f, 0.0f, 1.0f);
-    if (zenithChanged && lm)
-        lm->SetFogZenithColor(m_fogZenithR, m_fogZenithG, m_fogZenithB);
-
-    if (UI::Checkbox("Height Fog", &m_heightFogEnabled) && lm)
-        lm->SetHeightFogEnabled(m_heightFogEnabled);
-
-    if (UI::DragFloat("Height Top", &m_heightFogTop, 0.5f, -64.0f, 256.0f) &&
-        lm)
-        lm->SetHeightFogTop(m_heightFogTop);
-    if (UI::DragFloat("Height Density", &m_heightFogDensity, 0.005f, 0.0f,
-                      1.0f) &&
-        lm)
-        lm->SetHeightFogDensity(m_heightFogDensity);
-    if (UI::DragFloat("Height Falloff", &m_heightFogFalloff, 0.001f, 0.0f,
-                      1.0f) &&
-        lm)
-        lm->SetHeightFogFalloff(m_heightFogFalloff);
-
-    // ---- SSAO ----
-    UI::Separator();
-    UI::Text("-- SSAO --");
-    if (auto* app = Sleak::Application::GetInstance()) {
-        bool ssaoEnabled = app->IsSSAOEnabled();
-        float ssaoRadius = app->GetSSAORadius();
-        float ssaoBias = app->GetSSAOBias();
-        float ssaoPower = app->GetSSAOPower();
-        if (UI::Checkbox("SSAO Enabled", &ssaoEnabled))
-            app->SetSSAOEnabled(ssaoEnabled);
-        if (ssaoEnabled) {
-            if (UI::DragFloat("SSAO Radius", &ssaoRadius, 0.01f, 0.05f, 4.0f))
-                app->SetSSAORadius(ssaoRadius);
-            if (UI::DragFloat("SSAO Bias", &ssaoBias, 0.001f, 0.0f, 0.2f))
-                app->SetSSAOBias(ssaoBias);
-            if (UI::DragFloat("SSAO Power", &ssaoPower, 0.05f, 0.1f, 8.0f))
-                app->SetSSAOPower(ssaoPower);
-        }
-    }
-
-    // ---- IBL ----
-    UI::Separator();
-    UI::Text("-- IBL --");
-    if (auto* app = Sleak::Application::GetInstance()) {
-        bool iblEnabled = app->IsIBLEnabled();
-        float iblIntensity = app->GetIBLIntensity();
-        if (UI::Checkbox("IBL Enabled", &iblEnabled))
-            app->SetIBLEnabled(iblEnabled);
-        if (iblEnabled) {
-            if (UI::DragFloat("IBL Intensity", &iblIntensity, 0.05f, 0.0f,
-                              5.0f))
-                app->SetIBLIntensity(iblIntensity);
-        }
-    }
-
-    // ---- Texture Quality ----
-    UI::Separator();
-    UI::Text("-- Texture --");
-
-    {
-        const char* filterLabels[] = {"Nearest",  "Bilinear", "Trilinear",
-                                      "Aniso 2x", "Aniso 4x", "Aniso 8x",
-                                      "Aniso 16x"};
-        const TextureFilter filterValues[] = {
-            TextureFilter::Nearest,       TextureFilter::Bilinear,
-            TextureFilter::Trilinear,     TextureFilter::Anisotropic2x,
-            TextureFilter::Anisotropic4x, TextureFilter::Anisotropic8x,
-            TextureFilter::Anisotropic16x};
-        constexpr int filterCount = 7;
-        int currentFilter = 0;
-        for (int i = 0; i < filterCount; i++)
-            if (filterValues[i] == m_texFilter) {
-                currentFilter = i;
-                break;
-            }
-
-        if (UI::Combo("Filter", &currentFilter, filterLabels, filterCount)) {
-            m_texFilter = filterValues[currentFilter];
-            auto* tex = m_blockMaterial ? m_blockMaterial->GetDiffuseTexture()
-                                        : nullptr;
-            if (tex) tex->SetFilter(m_texFilter);
-        }
-    }
-
-    if (UI::DragFloat("LOD Bias", &m_texLodBias, 0.05f, -4.0f, 4.0f)) {
-        auto* tex =
-            m_blockMaterial ? m_blockMaterial->GetDiffuseTexture() : nullptr;
-        if (tex) tex->SetLodBias(m_texLodBias);
-    }
-
-    UI::EndPanel();
+    m_hudPanel.Render();
+    m_settingsPanel.Render();
 }
 
 void MainScene::OnWindowClose(const Sleak::Events::WindowCloseEvent&) {
@@ -624,114 +318,22 @@ void MainScene::SaveGame() { m_worldPersistence.SaveGame(); }
 
 void MainScene::LoadGame() { m_worldPersistence.LoadGame(); }
 
-// Helper: get the representative texture path for a block type (front/side
-// face)
-static const char* GetBlockTexturePath(BlockType type) {
-    switch (type) {
-        case BlockType::Grass:
-            return "assets/textures/blocks/grass_block_side.png";
-        case BlockType::Dirt:
-            return "assets/textures/blocks/dirt.png";
-        case BlockType::Stone:
-            return "assets/textures/blocks/stone.png";
-        case BlockType::Cobblestone:
-            return "assets/textures/blocks/cobblestone.png";
-        case BlockType::OakLog:
-            return "assets/textures/blocks/oak_log.png";
-        case BlockType::DarkOakLog:
-            return "assets/textures/blocks/dark_oak_log.png";
-        case BlockType::SpruceLog:
-            return "assets/textures/blocks/spruce_log.png";
-        case BlockType::OakPlanks:
-            return "assets/textures/blocks/oak_planks.png";
-        case BlockType::Bricks:
-            return "assets/textures/blocks/brick.png";
-        case BlockType::Sand:
-            return "assets/textures/blocks/sand.png";
-        case BlockType::Gravel:
-            return "assets/textures/blocks/gravel.png";
-        case BlockType::OakLeaves:
-            return "assets/textures/blocks/oak_leaves.png";
-        default:
-            return "assets/textures/blocks/stone.png";
-    }
-}
-
-void MainScene::RenderHotbar() {
-    // Lazy-load block textures for UI display
-    if (!m_hotbarTexturesLoaded) {
-        for (int i = 0; i < BlockInteraction::HOTBAR_SLOTS; i++)
-            m_hotbarTextures[i] = UI::LoadTextureForUI(
-                GetBlockTexturePath(m_blockInteraction.GetHotbarSlot(i)));
-        m_hotbarTexturesLoaded = true;
-    }
-
-    constexpr float slotSize = 48.0f;
-    constexpr float slotPadding = 4.0f;
-    constexpr float iconPadding = 4.0f;
-    constexpr float borderWidth = 2.0f;
-    constexpr float bottomMargin = 20.0f;
-
-    float totalWidth = BlockInteraction::HOTBAR_SLOTS * slotSize +
-                       (BlockInteraction::HOTBAR_SLOTS - 1) * slotPadding;
-    float startX = (UI::GetViewportWidth() - totalWidth) * 0.5f;
-    float startY = UI::GetViewportHeight() - slotSize - bottomMargin;
-
-    // Background bar
-    UI::DrawFilledRect(startX - 6.0f, startY - 6.0f, totalWidth + 12.0f,
-                       slotSize + 12.0f, 0.0f, 0.0f, 0.0f, 0.45f, 6.0f);
-
-    for (int i = 0; i < BlockInteraction::HOTBAR_SLOTS; i++) {
-        float x = startX + i * (slotSize + slotPadding);
-        float y = startY;
-
-        bool selected = (i == m_blockInteraction.GetSelectedSlot());
-
-        // Slot background
-        if (selected) {
-            UI::DrawFilledRect(x, y, slotSize, slotSize, 1.0f, 1.0f, 1.0f,
-                               0.25f, 4.0f);
-        } else {
-            UI::DrawFilledRect(x, y, slotSize, slotSize, 0.2f, 0.2f, 0.2f, 0.5f,
-                               4.0f);
-        }
-
-        // Block texture
-        if (m_hotbarTextures[i] != 0) {
-            UI::DrawImage(m_hotbarTextures[i], x + iconPadding, y + iconPadding,
-                          slotSize - iconPadding * 2,
-                          slotSize - iconPadding * 2);
-        }
-
-        // Selection border
-        if (selected) {
-            UI::DrawRect(x - 1.0f, y - 1.0f, slotSize + 2.0f, slotSize + 2.0f,
-                         1.0f, 1.0f, 1.0f, 0.9f, borderWidth, 4.0f);
-        } else {
-            UI::DrawRect(x, y, slotSize, slotSize, 0.5f, 0.5f, 0.5f, 0.3f, 1.0f,
-                         4.0f);
-        }
-
-        // Slot number
-        char num[2] = {static_cast<char>('1' + i), '\0'};
-        UI::DrawText(num, x + 3.0f, y + 1.0f, 0.7f, 0.7f, 0.7f, 0.7f);
-    }
-}
-
 void MainScene::SetupMaterial() {
     auto* mat = new Material();
     mat->SetShader("assets/shaders/flat_shader.hlsl");
 
+    Sleak::TextureFilter texFilter = m_settingsPanel.GetTextureFilter();
+
     // Build runtime atlas from individual block textures
     auto* atlasTex = TextureAtlas::BuildAtlas();
     if (atlasTex) {
-        atlasTex->SetFilter(m_texFilter);
+        atlasTex->SetFilter(texFilter);
         atlasTex->SetWrapMode(TextureWrapMode::ClampToEdge);
         mat->SetDiffuseTexture(atlasTex);
     } else {
         // Fallback to old atlas file
         mat->SetDiffuseTexture("assets/textures/block_atlas.png");
-        mat->GetDiffuseTexture()->SetFilter(m_texFilter);
+        mat->GetDiffuseTexture()->SetFilter(texFilter);
         mat->GetDiffuseTexture()->SetWrapMode(TextureWrapMode::ClampToEdge);
     }
     mat->SetDiffuseColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
@@ -749,7 +351,7 @@ void MainScene::SetupMaterial() {
     waterMat->SetShader("assets/shaders/water_shader.hlsl");
     auto* waterAtlasTex = TextureAtlas::BuildAtlas();
     if (waterAtlasTex) {
-        waterAtlasTex->SetFilter(m_texFilter);
+        waterAtlasTex->SetFilter(texFilter);
         waterAtlasTex->SetWrapMode(TextureWrapMode::ClampToEdge);
         waterMat->SetDiffuseTexture(waterAtlasTex);
     }
@@ -770,19 +372,14 @@ void MainScene::SetupSkybox() {
 }
 
 void MainScene::SetupLighting() {
-    // Convert elevation/azimuth angles to a world-space direction vector
-    const float deg2rad = 0.01745329f;
-    float eRad = m_sunElevation * deg2rad;
-    float aRad = m_sunAzimuth * deg2rad;
-    float dx = -cosf(eRad) * sinf(aRad);
-    float dy = -sinf(eRad);
-    float dz = -cosf(eRad) * cosf(aRad);
-
     m_sun = new DirectionalLight("Sun");
-    m_sun->SetDirection(Vector3D(dx, dy, dz));
-    m_sun->SetColor(m_sunColorR, m_sunColorG, m_sunColorB);
-    m_sun->SetIntensity(m_sunIntensity);
+    m_sun->SetDirection(m_settingsPanel.ComputeSunDirection());
+    float sunR, sunG, sunB;
+    m_settingsPanel.GetSunColor(sunR, sunG, sunB);
+    m_sun->SetColor(sunR, sunG, sunB);
+    m_sun->SetIntensity(m_settingsPanel.GetSunIntensity());
     m_sun->SetLightSize(4.0f);
+    m_settingsPanel.AttachSun(m_sun);
 
     // Voxel-tuned graphics config: shadows on, no SSAO/SSR/IBL/bloom.
     Sleak::GraphicsConfig cfg =
@@ -823,18 +420,24 @@ void MainScene::SetupLighting() {
 
     auto* lm = GetLightManager();
     if (lm) {
-        lm->SetAmbientColor(m_ambientColorR, m_ambientColorG, m_ambientColorB);
-        lm->SetAmbientIntensity(m_ambientIntensity);
+        float ambR, ambG, ambB;
+        m_settingsPanel.GetAmbientColor(ambR, ambG, ambB);
+        lm->SetAmbientColor(ambR, ambG, ambB);
+        lm->SetAmbientIntensity(m_settingsPanel.GetAmbientIntensity());
 
-        lm->SetFogColor(m_fogHorizonR, m_fogHorizonG, m_fogHorizonB);
-        lm->SetFogZenithColor(m_fogZenithR, m_fogZenithG, m_fogZenithB);
+        float horizonR, horizonG, horizonB;
+        m_settingsPanel.GetFogHorizonColor(horizonR, horizonG, horizonB);
+        lm->SetFogColor(horizonR, horizonG, horizonB);
+        float zenithR, zenithG, zenithB;
+        m_settingsPanel.GetFogZenithColor(zenithR, zenithG, zenithB);
+        lm->SetFogZenithColor(zenithR, zenithG, zenithB);
         float fogDist = m_chunkManager.GetDrawDistance();
         lm->SetFogDistances(fogDist * 0.9f, fogDist);
-        lm->SetFogEnabled(m_fogEnabled);
+        lm->SetFogEnabled(m_settingsPanel.IsFogEnabled());
 
-        lm->SetHeightFogEnabled(m_heightFogEnabled);
-        lm->SetHeightFogTop(m_heightFogTop);
-        lm->SetHeightFogDensity(m_heightFogDensity);
-        lm->SetHeightFogFalloff(m_heightFogFalloff);
+        lm->SetHeightFogEnabled(m_settingsPanel.IsHeightFogEnabled());
+        lm->SetHeightFogTop(m_settingsPanel.GetHeightFogTop());
+        lm->SetHeightFogDensity(m_settingsPanel.GetHeightFogDensity());
+        lm->SetHeightFogFalloff(m_settingsPanel.GetHeightFogFalloff());
     }
 }
