@@ -14,6 +14,8 @@
 #include "World/SaveManager.hpp"
 #include "World/BlockEffects.hpp"
 #include "World/WorldPersistence.hpp"
+#include "Player/PlayerController.hpp"
+#include "Player/BlockInteraction.hpp"
 
 namespace Sleak { class Material; class DirectionalLight; }
 
@@ -32,10 +34,15 @@ public:
     void UnregisterBenchmarkMetrics();
     bool HasUnsavedChanges() const;
 
-    // Accessors for WorldPersistence (player/scene state it drives)
+    // Accessors for WorldPersistence/PlayerController/BlockInteraction
+    // (player/scene state they drive)
     const std::string& GetWorldName() const { return m_worldName; }
-    BlockType GetSelectedBlock() const { return m_selectedBlock; }
-    void SetSelectedBlock(BlockType type) { m_selectedBlock = type; }
+    BlockType GetSelectedBlock() const {
+        return m_blockInteraction.GetSelectedBlock();
+    }
+    void SetSelectedBlock(BlockType type) {
+        m_blockInteraction.SetSelectedBlock(type);
+    }
     bool IsSaveLocked() const { return m_saveLocked; }
     void SetSaveLocked(bool locked) { m_saveLocked = locked; }
     bool IsMultithreadedLoading() const { return m_multithreadedLoading; }
@@ -43,6 +50,7 @@ public:
         m_saveMessage = message;
         m_saveMessageTimer = timer;
     }
+    float GetGameTime() const { return m_gameTime; }
 
 private:
     void SetupMaterial();
@@ -70,15 +78,10 @@ private:
     BlockEffects m_blockEffects;
     SaveManager m_saveManager;
     WorldPersistence m_worldPersistence;
-    BlockType m_selectedBlock = BlockType::Grass;
-    int m_selectedSlot = 0;
-    static constexpr int HOTBAR_SLOTS = 9;
-    std::array<BlockType, HOTBAR_SLOTS> m_hotbar = {{
-        BlockType::Grass, BlockType::Dirt, BlockType::Stone,
-        BlockType::Cobblestone, BlockType::OakLog, BlockType::DarkOakLog,
-        BlockType::SpruceLog, BlockType::OakPlanks, BlockType::Bricks
-    }};
-    std::array<uint64_t, HOTBAR_SLOTS> m_hotbarTextures = {};
+    PlayerController m_playerController;
+    BlockInteraction m_blockInteraction;
+    std::array<uint64_t, BlockInteraction::HOTBAR_SLOTS> m_hotbarTextures =
+        {};
     bool m_hotbarTexturesLoaded = false;
     bool m_multithreadedLoading = true;
     bool m_vsync = false;
@@ -103,16 +106,7 @@ private:
     float m_autoSaveTimer = 0.0f;
     static constexpr float AUTO_SAVE_INTERVAL = 120.0f;
 
-    // Minecraft-style double-tap space to toggle fly
-    bool m_flying = false;
-    float m_lastSpacePressTime = -1.0f;
     float m_gameTime = 0.0f;
-    float m_flySpeed = 10.0f;
-    float m_flySprintMultiplier = 2.5f;
-    static constexpr float DOUBLE_TAP_WINDOW = 0.3f;
-    bool m_spaceHeld = false;
-    bool m_shiftHeld = false;
-    bool m_ctrlHeld = false;
 
     std::string m_windowCloseHandlerId;
     std::string m_mousePressedHandlerId;

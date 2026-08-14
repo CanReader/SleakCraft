@@ -8,7 +8,6 @@
 #include <Core/CommandLine.hpp>
 #include <Core/GameObject.hpp>
 #include <Culling/CullingSystem.hpp>
-#include <Debug/DebugLineRenderer.hpp>
 #include <ECS/Components/FirstPersonController.hpp>
 #include <Lighting/DirectionalLight.hpp>
 #include <Lighting/LightManager.hpp>
@@ -38,7 +37,9 @@ MainScene::MainScene(const std::string& name, const std::string& savePath,
       m_worldSeed(seed),
       m_isNewWorld(isNewWorld),
       m_worldPersistence(m_chunkManager, m_saveManager, m_blockEffects,
-                          *this) {}
+                          *this),
+      m_playerController(m_chunkManager, *this),
+      m_blockInteraction(m_chunkManager, m_blockEffects, *this) {}
 
 bool MainScene::Initialize() {
     SetupMaterial();
@@ -61,23 +62,7 @@ bool MainScene::Initialize() {
     cam->Initialize();
     SetActiveCamera(cam);
 
-    auto* fpc = cam->GetComponent<FirstPersonController>();
-    if (fpc) {
-        // Walk + sprint
-        fpc->SetMaxWalkSpeed(4.317f);
-        fpc->SetSprintSpeedMultiplier(1.3f);
-        fpc->SetMaxAcceleration(35.0f);
-        fpc->SetBrakingDeceleration(20.0f);
-        fpc->SetGroundFriction(6.0f);
-        fpc->SetAirControl(0.2f);
-        fpc->SetJumpZVelocity(8.4f);
-        // Fly
-        fpc->SetMaxFlySpeed(m_flySpeed);
-        fpc->SetFlySprintMultiplier(m_flySprintMultiplier);
-        fpc->SetPitch(0.0f);
-        fpc->SetYaw(0.0f);
-        fpc->SetEnabled(true);
-    }
+    m_playerController.ApplyTuning();
 
     SetupLighting();
 
@@ -228,123 +213,17 @@ bool MainScene::HasUnsavedChanges() const {
 
 void MainScene::OnMousePressed(
     const Events::Input::MouseButtonPressedEvent& e) {
-    auto* cam = GetActiveCamera();
-    if (!cam) return;
-
-    // Only interact with the world when the mouse is captured (FPC active)
-    auto* fpc = cam->GetComponent<FirstPersonController>();
-    if (!fpc || !fpc->IsEnabled()) return;
-
-    auto pos = cam->GetPosition();
-    auto dir = cam->GetDirection();
-    auto hit = m_chunkManager.VoxelRaycast(pos, dir, 6.0f);
-    if (!hit.hit) return;
-
-    MouseCode button = e.GetMouseButton();
-    if (button == MouseCode::ButtonLeft) {
-        BlockType broken = hit.blockType;
-        m_chunkManager.SetBlockAt(hit.blockX, hit.blockY, hit.blockZ,
-                                  BlockType::Air);
-        if (broken != BlockType::Air)
-            m_blockEffects.SpawnBreakEffect(hit.blockX, hit.blockY, hit.blockZ,
-                                            broken);
-    } else if (button == MouseCode::ButtonRight) {
-        // Prevent placing a block inside the player's bounding box
-        float feetY = pos.GetY() - 1.62f;
-        bool overlaps = (hit.placeX + 1 > pos.GetX() - 0.3f &&
-                         hit.placeX < pos.GetX() + 0.3f) &&
-                        (hit.placeY + 1 > feetY && hit.placeY < feetY + 1.8f) &&
-                        (hit.placeZ + 1 > pos.GetZ() - 0.3f &&
-                         hit.placeZ < pos.GetZ() + 0.3f);
-        if (!overlaps)
-            m_blockEffects.SpawnPlaceEffect(hit.placeX, hit.placeY, hit.placeZ,
-                                            m_selectedBlock);
-    }
+    m_blockInteraction.OnMousePressed(e);
 }
 
 void MainScene::OnMouseScrolled(const Events::Input::MouseScrolledEvent& e) {
-    float y = e.GetYOffset();
-    if (y > 0.0f) {
-        m_selectedSlot--;
-        if (m_selectedSlot < 0) m_selectedSlot = HOTBAR_SLOTS - 1;
-    } else if (y < 0.0f) {
-        m_selectedSlot++;
-        if (m_selectedSlot >= HOTBAR_SLOTS) m_selectedSlot = 0;
-    }
-    m_selectedBlock = m_hotbar[m_selectedSlot];
+    m_blockInteraction.OnMouseScrolled(e);
 }
 
 void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
-    // Minecraft-style: double-tap space toggles fly on/off
-    if (e.GetKeyCode() == Input::KEY_CODE::KEY__SPACE) {
-        m_spaceHeld = true;
-        if (!e.IsRepeat()) {
-            float now = m_gameTime;
-            if ((now - m_lastSpacePressTime) < DOUBLE_TAP_WINDOW) {
-                m_flying = !m_flying;
-                auto* cam = GetActiveCamera();
-                auto* rb =
-                    cam ? cam->GetComponent<RigidbodyComponent>() : nullptr;
-                auto* fpc =
-                    cam ? cam->GetComponent<FirstPersonController>() : nullptr;
-                if (rb) {
-                    rb->SetUseGravity(!m_flying);
-                    if (m_flying) rb->SetVelocity({0.0f, 0.0f, 0.0f});
-                }
-                if (fpc) fpc->SetFlying(m_flying);
-                m_lastSpacePressTime =
-                    -1.0f;  // reset so triple-tap doesn't re-toggle
-            } else {
-                m_lastSpacePressTime = now;
-            }
-        }
-    }
+    m_playerController.OnKeyPressed(e);
+    m_blockInteraction.OnKeyPressed(e);
 
-    if (e.GetKeyCode() == Input::KEY_CODE::KEY__LCTRL ||
-        e.GetKeyCode() == Input::KEY_CODE::KEY__RCTRL) {
-        m_ctrlHeld = true;
-    }
-    if (e.GetKeyCode() == Input::KEY_CODE::KEY__LSHIFT ||
-        e.GetKeyCode() == Input::KEY_CODE::KEY__RSHIFT) {
-        m_shiftHeld = true;
-    }
-
-    if_key_press(KEY__1) {
-        m_selectedSlot = 0;
-        m_selectedBlock = m_hotbar[0];
-    }
-    if_key_press(KEY__2) {
-        m_selectedSlot = 1;
-        m_selectedBlock = m_hotbar[1];
-    }
-    if_key_press(KEY__3) {
-        m_selectedSlot = 2;
-        m_selectedBlock = m_hotbar[2];
-    }
-    if_key_press(KEY__4) {
-        m_selectedSlot = 3;
-        m_selectedBlock = m_hotbar[3];
-    }
-    if_key_press(KEY__5) {
-        m_selectedSlot = 4;
-        m_selectedBlock = m_hotbar[4];
-    }
-    if_key_press(KEY__6) {
-        m_selectedSlot = 5;
-        m_selectedBlock = m_hotbar[5];
-    }
-    if_key_press(KEY__7) {
-        m_selectedSlot = 6;
-        m_selectedBlock = m_hotbar[6];
-    }
-    if_key_press(KEY__8) {
-        m_selectedSlot = 7;
-        m_selectedBlock = m_hotbar[7];
-    }
-    if_key_press(KEY__9) {
-        m_selectedSlot = 8;
-        m_selectedBlock = m_hotbar[8];
-    }
     if_key_press(KEY__ESCAPE) {
         auto* app = Application::GetInstance();
         if (app) {
@@ -370,13 +249,7 @@ void MainScene::OnKeyPressed(const Events::Input::KeyPressedEvent& e) {
 }
 
 void MainScene::OnKeyReleased(const Events::Input::KeyReleasedEvent& e) {
-    if (e.GetKeyCode() == Input::KEY_CODE::KEY__SPACE) m_spaceHeld = false;
-    if (e.GetKeyCode() == Input::KEY_CODE::KEY__LCTRL ||
-        e.GetKeyCode() == Input::KEY_CODE::KEY__RCTRL)
-        m_ctrlHeld = false;
-    if (e.GetKeyCode() == Input::KEY_CODE::KEY__LSHIFT ||
-        e.GetKeyCode() == Input::KEY_CODE::KEY__RSHIFT)
-        m_shiftHeld = false;
+    m_playerController.OnKeyReleased(e);
 }
 
 void MainScene::Update(float deltaTime) {
@@ -386,9 +259,7 @@ void MainScene::Update(float deltaTime) {
     auto* cam = GetActiveCamera();
     if (cam) {
         m_blockEffects.Update(deltaTime, cam->GetPosition());
-        for (auto& completed : m_blockEffects.PopCompletedPlacements())
-            m_chunkManager.SetBlockAt(completed.x, completed.y, completed.z,
-                                      completed.type);
+        m_blockInteraction.DrainCompletedPlacements();
     }
 
     Scene::Update(deltaTime);
@@ -403,56 +274,7 @@ void MainScene::Update(float deltaTime) {
     if (cam) {
         auto pos = cam->GetPosition();
 
-        // Fly: space=up, ctrl=down, shift=sprint
-        if (m_flying) {
-            auto* rb = cam->GetComponent<RigidbodyComponent>();
-            auto* fpc = cam->GetComponent<FirstPersonController>();
-            float v = 0.0f;
-            if (m_spaceHeld) v += 1.0f;
-            if (m_ctrlHeld) v -= 1.0f;
-            if (fpc) fpc->SetVerticalFlyInput(v);
-            if (rb) {
-                rb->SetVelocity({0.0f, 0.0f, 0.0f});
-                rb->SetGrounded(false);
-            }
-        } else {
-            auto* fpc = cam->GetComponent<FirstPersonController>();
-            if (fpc) fpc->SetVerticalFlyInput(0.0f);
-        }
-
-        // Collision resolution (always active)
-        {
-            auto curPos = cam->GetPosition();
-            auto collision =
-                m_chunkManager.ResolveVoxelCollision(curPos, 0.3f, 1.8f, 1.62f);
-            if (collision.onGround || collision.hitCeiling ||
-                collision.hitWall) {
-                cam->SetPosition({curPos.GetX() + collision.correction.GetX(),
-                                  curPos.GetY() + collision.correction.GetY(),
-                                  curPos.GetZ() + collision.correction.GetZ()});
-                if (!m_flying) {
-                    auto* rb = cam->GetComponent<RigidbodyComponent>();
-                    if (rb) {
-                        auto vel = rb->GetVelocity();
-                        if (collision.onGround && vel.GetY() < 0.0f) {
-                            rb->SetVelocity({vel.GetX(), 0.0f, vel.GetZ()});
-                            rb->SetGrounded(true);
-                        }
-                        if (collision.hitCeiling && vel.GetY() > 0.0f)
-                            rb->SetVelocity({vel.GetX(), 0.0f, vel.GetZ()});
-                        if (collision.hitWall) {
-                            float vx = (collision.correction.GetX() != 0.0f)
-                                           ? 0.0f
-                                           : vel.GetX();
-                            float vz = (collision.correction.GetZ() != 0.0f)
-                                           ? 0.0f
-                                           : vel.GetZ();
-                            rb->SetVelocity({vx, vel.GetY(), vz});
-                        }
-                    }
-                }
-            }
-        }
+        m_playerController.Update();
 
         m_chunkManager.Update(pos.GetX(), pos.GetY(), pos.GetZ());
         m_chunkManager.RenderColumns();
@@ -463,19 +285,7 @@ void MainScene::Update(float deltaTime) {
         }
         m_chunkManager.RenderWater();
 
-        // Block outline always visible
-        auto dir = cam->GetDirection();
-        auto rayHit =
-            m_chunkManager.VoxelRaycast(cam->GetPosition(), dir, 6.0f);
-        if (rayHit.hit) {
-            constexpr float E = 0.002f;
-            Physics::AABB blockAABB(
-                Vector3D(rayHit.blockX - E, rayHit.blockY - E,
-                         rayHit.blockZ - E),
-                Vector3D(rayHit.blockX + 1.0f + E, rayHit.blockY + 1.0f + E,
-                         rayHit.blockZ + 1.0f + E));
-            DebugLineRenderer::DrawAABB(blockAABB, 0.0f, 0.0f, 0.0f);
-        }
+        m_blockInteraction.RenderOutline();
 
         // Auto-save
         m_autoSaveTimer += deltaTime;
@@ -517,8 +327,8 @@ void MainScene::RenderUI() {
                    UI::PanelFlags_NoTitleBar | UI::PanelFlags_AutoResize |
                        UI::PanelFlags_NoMove | UI::PanelFlags_NoFocusOnAppear);
 
-    UI::Text("Selected: %s [%d]", GetBlockName(m_selectedBlock),
-             static_cast<int>(m_selectedBlock));
+    UI::Text("Selected: %s [%d]", GetBlockName(GetSelectedBlock()),
+             static_cast<int>(GetSelectedBlock()));
 
     auto dir = cam->GetDirection();
     auto rayHit = m_chunkManager.VoxelRaycast(cam->GetPosition(), dir, 6.0f);
@@ -850,9 +660,9 @@ static const char* GetBlockTexturePath(BlockType type) {
 void MainScene::RenderHotbar() {
     // Lazy-load block textures for UI display
     if (!m_hotbarTexturesLoaded) {
-        for (int i = 0; i < HOTBAR_SLOTS; i++)
-            m_hotbarTextures[i] =
-                UI::LoadTextureForUI(GetBlockTexturePath(m_hotbar[i]));
+        for (int i = 0; i < BlockInteraction::HOTBAR_SLOTS; i++)
+            m_hotbarTextures[i] = UI::LoadTextureForUI(
+                GetBlockTexturePath(m_blockInteraction.GetHotbarSlot(i)));
         m_hotbarTexturesLoaded = true;
     }
 
@@ -862,8 +672,8 @@ void MainScene::RenderHotbar() {
     constexpr float borderWidth = 2.0f;
     constexpr float bottomMargin = 20.0f;
 
-    float totalWidth =
-        HOTBAR_SLOTS * slotSize + (HOTBAR_SLOTS - 1) * slotPadding;
+    float totalWidth = BlockInteraction::HOTBAR_SLOTS * slotSize +
+                       (BlockInteraction::HOTBAR_SLOTS - 1) * slotPadding;
     float startX = (UI::GetViewportWidth() - totalWidth) * 0.5f;
     float startY = UI::GetViewportHeight() - slotSize - bottomMargin;
 
@@ -871,11 +681,11 @@ void MainScene::RenderHotbar() {
     UI::DrawFilledRect(startX - 6.0f, startY - 6.0f, totalWidth + 12.0f,
                        slotSize + 12.0f, 0.0f, 0.0f, 0.0f, 0.45f, 6.0f);
 
-    for (int i = 0; i < HOTBAR_SLOTS; i++) {
+    for (int i = 0; i < BlockInteraction::HOTBAR_SLOTS; i++) {
         float x = startX + i * (slotSize + slotPadding);
         float y = startY;
 
-        bool selected = (i == m_selectedSlot);
+        bool selected = (i == m_blockInteraction.GetSelectedSlot());
 
         // Slot background
         if (selected) {
