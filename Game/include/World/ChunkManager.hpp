@@ -2,6 +2,8 @@
 #define _CHUNK_MANAGER_HPP_
 
 #include "Chunk.hpp"
+#include "ChunkMesher.hpp"
+#include "ChunkRenderer.hpp"
 #include "HeightmapCache.hpp"
 #include "VoxelQueries.hpp"
 #include "WorldGenerator.hpp"
@@ -99,11 +101,29 @@ public:
     void SaveHeightmapCache(const std::string& path) const;
     void LoadHeightmapCache(const std::string& path);
 
+    // Collaborator access — used by ChunkMesher and ChunkRenderer.
+    /// Loaded chunk at a chunk coordinate, or nullptr.
+    Chunk* GetChunk(int cx, int cy, int cz);
+    /// True while any of the six neighbors is owned by a worker thread.
+    bool IsNeighborOfInFlight(const ChunkCoord& coord) const;
+    /// Column meshes keyed by band: written by the mesher, read by the renderer.
+    ColumnMeshMap& GetColumns() { return m_columns; }
+    /// Bands awaiting a rebuild; the mesher re-inserts deferred keys here.
+    ColumnKeySet& GetDirtyColumns() { return m_dirtyColumns; }
+    /// Worker task queue and its guards, for batch mesh dispatch.
+    std::mutex& GetTaskMutex() { return m_taskMutex; }
+    std::vector<Chunk*>& GetTaskQueue() { return m_taskQueue; }
+    std::condition_variable& GetTaskCV() { return m_taskCV; }
+    /// Records a failed GPU mesh allocation so Update re-queues the column.
+    void SetOOMThisFrame(bool oom) { m_oomThisFrame = oom; }
+    float GetDrawDistSq() const { return m_drawDistSq; }
+    float GetShadowCasterDistSq() const { return m_shadowCasterDistSq; }
+    const Sleak::RefPtr<Sleak::Material>& GetMaterial() const { return m_material; }
+    const Sleak::RefPtr<Sleak::Material>& GetWaterMaterial() const { return m_waterMaterial; }
+
 private:
     void LinkNeighbors(const ChunkCoord& coord, Chunk* chunk);
     void UnlinkNeighbors(const ChunkCoord& coord, Chunk* chunk);
-    bool IsNeighborOfInFlight(const ChunkCoord& coord) const;
-    Chunk* GetChunk(int cx, int cy, int cz);
     const Chunk* GetChunk(int cx, int cy, int cz) const;
 
     void StartWorkers();
@@ -111,28 +131,6 @@ private:
     void WorkerThread();
 
     // Column mesh management — merges all Y chunks per XZ column into one mesh
-    static constexpr int BAND_SIZE = 8; // chunks per band (full Y column)
-    struct ColumnKey {
-        int x, yBand, z;
-        bool operator==(const ColumnKey& o) const { return x == o.x && yBand == o.yBand && z == o.z; }
-    };
-    struct ColumnKeyHash {
-        size_t operator()(const ColumnKey& c) const {
-            size_t h = std::hash<int>()(c.x);
-            h ^= std::hash<int>()(c.yBand) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            h ^= std::hash<int>()(c.z) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            return h;
-        }
-    };
-    struct ColumnMesh {
-        Sleak::MeshHandle mesh;
-        Sleak::MeshHandle waterMesh;
-        bool visible = true;
-        bool castsShadow = true;  // false for distant columns (skip shadow pass)
-        Sleak::Math::AABB bounds;
-        std::vector<Sleak::Math::AABB> occluders;
-        float distSq = 0.0f;
-    };
     void RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer = true);
     // Max number of column meshes before we consider VRAM exhausted.
     // At ~1.1 MB per column (96 bytes/vertex * ~12000 vertices), 800
@@ -140,21 +138,13 @@ private:
     // other allocations (textures, framebuffers, etc.).
     static constexpr int MAX_COLUMN_MESHES = 800;
 
-    // Floor-division: negative cy must map downward (e.g. cy=-1 → band -1, not 0)
-    static int ChunkYToBand(int cy) {
-        return (cy >= 0) ? cy / BAND_SIZE : (cy - BAND_SIZE + 1) / BAND_SIZE;
-    }
-    std::unordered_map<ColumnKey, ColumnMesh, ColumnKeyHash> m_columns;
-    std::unordered_set<ColumnKey, ColumnKeyHash> m_dirtyColumns;
+    ColumnMeshMap m_columns;
+    ColumnKeySet m_dirtyColumns;
     std::unordered_set<ChunkCoord, ChunkCoordHash> m_chunksNeedingRemesh;
 
     void UpdateVisibility();
     void BuildLoadSpiral();
 
-    // Scratch buffers reused each frame (no per-frame allocation growth).
-    std::vector<ColumnMesh*> m_cullCandidates;
-    std::vector<ColumnMesh*> m_renderScratch;
-    std::vector<ColumnMesh*> m_waterScratch;
     void ForceUnloadChunk(Chunk* chunk);
 
     std::vector<Chunk*> m_chunkGrid;
@@ -212,6 +202,8 @@ private:
     int GetCachedColumnMaxCy(int cx, int cz);
 
     VoxelQueries m_queries{*this};
+    ChunkMesher m_mesher{*this};
+    ChunkRenderer m_renderer{*this};
 };
 
 #endif

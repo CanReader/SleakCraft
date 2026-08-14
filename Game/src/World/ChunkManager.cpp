@@ -1,10 +1,7 @@
 #include "World/ChunkManager.hpp"
-#include <Camera/Camera.hpp>
 #include <Core/SceneBase.hpp>
-#include <Culling/CullingSystem.hpp>
 #include <Core/Logger.hpp>
 #include <Runtime/Material.hpp>
-#include <Runtime/MeshBatch.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -420,184 +417,7 @@ bool ChunkManager::IsNeighborOfInFlight(const ChunkCoord& coord) const {
 }
 
 void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) {
-    ColumnKey key{cx, yBand, cz};
-
-    int bandMinY = yBand * BAND_SIZE;
-    int bandMaxY = bandMinY + BAND_SIZE - 1;
-
-    VoxelVertexBuffer mergedVerts;
-    Sleak::IndexGroup mergedIndices;
-    VoxelVertexBuffer mergedWaterVerts;
-    Sleak::IndexGroup mergedWaterIndices;
-
-    // Dispatch ALL consumed-mesh siblings in one batch so workers re-mesh
-    // the band in parallel; dispatching one per attempt serialized a column
-    // refresh across ~8 frames.
-    if (m_multithreaded && allowDefer) {
-        std::vector<Chunk*> stale;
-        for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
-            Chunk* chunk = GetChunk(cx, cy, cz);
-            if (!chunk || chunk->IsInFlight() || chunk->NeedsGeneration())
-                continue;
-            if (!chunk->HasPendingMesh()) stale.push_back(chunk);
-        }
-        if (!stale.empty()) {
-            {
-                std::lock_guard<std::mutex> lock(m_taskMutex);
-                for (auto* ch : stale) {
-                    ch->SetInFlight(true);
-                    m_taskQueue.push_back(ch);
-                }
-            }
-            m_taskCV.notify_all();
-            m_dirtyColumns.insert(key);
-            return;
-        }
-    }
-
-    // Exact mesh Y extents — tight bounds are what let occlusion culling
-    // reject columns whose full-band AABB would always poke into the sky.
-    float meshMinY = 1e30f;
-    float meshMaxY = -1e30f;
-
-    for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
-        Chunk* chunk = GetChunk(cx, cy, cz);
-        // Skip chunks not ready (in-flight or not yet generated)
-        if (!chunk || chunk->IsInFlight() || chunk->NeedsGeneration()) continue;
-
-        // Mesh data was consumed — regenerate it (sync fallback).
-        // A worker may be generating a neighbor: re-queue instead of racing.
-        if (!chunk->HasPendingMesh()) {
-            if (IsNeighborOfInFlight({cx, cy, cz})) {
-                m_dirtyColumns.insert(key);
-                continue;
-            }
-            chunk->GenerateMeshData();
-        }
-
-        // Merge opaque mesh
-        {
-            auto& md = chunk->GetPendingMeshData();
-            chunk->ClearPendingMesh();
-
-            if (md.vertices.GetSize() > 0) {
-                uint32_t baseVertex = static_cast<uint32_t>(mergedVerts.GetSize());
-                const ::VoxelVertex* vdata = md.vertices.GetData();
-                for (size_t i = 0; i < md.vertices.GetSize(); ++i) {
-                    mergedVerts.AddVertex(vdata[i]);
-                    if (vdata[i].py < meshMinY) meshMinY = vdata[i].py;
-                    if (vdata[i].py > meshMaxY) meshMaxY = vdata[i].py;
-                }
-                const uint32_t* idata = md.indices.GetData();
-                for (size_t i = 0; i < md.indices.GetSize(); ++i)
-                    mergedIndices.add(idata[i] + baseVertex);
-            }
-            md.vertices.release();
-            md.indices.release();
-        }
-
-        // Merge water mesh
-        {
-            auto& wd = chunk->GetPendingWaterMeshData();
-            chunk->ClearPendingWaterMesh();
-
-            if (wd.vertices.GetSize() > 0) {
-                uint32_t baseVertex = static_cast<uint32_t>(mergedWaterVerts.GetSize());
-                const ::VoxelVertex* vdata = wd.vertices.GetData();
-                for (size_t i = 0; i < wd.vertices.GetSize(); ++i) {
-                    mergedWaterVerts.AddVertex(vdata[i]);
-                    if (vdata[i].py < meshMinY) meshMinY = vdata[i].py;
-                    if (vdata[i].py > meshMaxY) meshMaxY = vdata[i].py;
-                }
-                const uint32_t* idata = wd.indices.GetData();
-                for (size_t i = 0; i < wd.indices.GetSize(); ++i)
-                    mergedWaterIndices.add(idata[i] + baseVertex);
-            }
-            wd.vertices.release();
-            wd.indices.release();
-        }
-    }
-
-    if (mergedVerts.GetSize() == 0 && mergedWaterVerts.GetSize() == 0) {
-        m_columns.erase(key);
-        return;
-    }
-
-    // Release old GPU buffers BEFORE allocating new ones to reduce peak VRAM.
-    auto existingIt = m_columns.find(key);
-    if (existingIt != m_columns.end()) {
-        existingIt->second.mesh = {};
-        existingIt->second.waterMesh = {};
-    }
-
-    ColumnMesh col;
-    if (mergedVerts.GetSize() > 0)
-        col.mesh = Sleak::MeshBatch::CreateMesh(
-            GetVoxelVertexFormat(), mergedVerts.GetData(),
-            mergedVerts.GetSizeInBytes(), mergedIndices.GetData(),
-            mergedIndices.GetSize());
-    if (mergedWaterVerts.GetSize() > 0)
-        col.waterMesh = Sleak::MeshBatch::CreateMesh(
-            GetVoxelVertexFormat(), mergedWaterVerts.GetData(),
-            mergedWaterVerts.GetSizeInBytes(), mergedWaterIndices.GetData(),
-            mergedWaterIndices.GetSize());
-
-    if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) {
-        m_oomThisFrame = true;
-        return;
-    }
-
-    // Column world AABB (16x16 XZ footprint, exact mesh Y extent).
-    float minX = static_cast<float>(cx * Chunk::SIZE);
-    float minZ = static_cast<float>(cz * Chunk::SIZE);
-    float footMinY = meshMinY;
-    float footMaxY = meshMaxY;
-    col.bounds = Sleak::Math::AABB(
-        Sleak::Math::Vector3D(minX, footMinY, minZ),
-        Sleak::Math::Vector3D(minX + Chunk::SIZE, footMaxY,
-                              minZ + Chunk::SIZE));
-
-    // Occluder boxes: per 8x8 quadrant, merge contiguous opaque runs
-    // across chunk boundaries.
-    col.occluders.clear();
-    for (int q = 0; q < 4; ++q) {
-        float qMinX = minX + (q & 1) * 8.0f;
-        float qMinZ = minZ + ((q >> 1) & 1) * 8.0f;
-        bool haveRun = false;
-        float accMinY = 0.0f, accMaxY = 0.0f;
-        auto flush = [&]() {
-            Sleak::Math::AABB box(
-                Sleak::Math::Vector3D(qMinX, accMinY, qMinZ),
-                Sleak::Math::Vector3D(qMinX + 8.0f, accMaxY, qMinZ + 8.0f));
-            box.Expand(-0.05f);
-            col.occluders.push_back(box);
-        };
-        for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
-            Chunk* chunk = GetChunk(cx, cy, cz);
-            if (!chunk || chunk->IsInFlight() || chunk->NeedsGeneration())
-                continue;
-            int8_t rMin[Chunk::OCC_MAX_RUNS];
-            int8_t rMax[Chunk::OCC_MAX_RUNS];
-            int runs = chunk->GetOccluderRuns(q, rMin, rMax);
-            int base = cy * Chunk::SIZE;
-            for (int i = 0; i < runs; ++i) {
-                float wMin = static_cast<float>(base + rMin[i]);
-                float wMax = static_cast<float>(base + rMax[i] + 1);
-                if (haveRun && wMin == accMaxY) {
-                    accMaxY = wMax;
-                } else {
-                    if (haveRun) flush();
-                    accMinY = wMin;
-                    accMaxY = wMax;
-                    haveRun = true;
-                }
-            }
-        }
-        if (haveRun) flush();
-    }
-
-    col.visible = true;
-    m_columns[key] = std::move(col);
+    m_mesher.RebuildColumnMesh(cx, yBand, cz, allowDefer);
 }
 
 void ChunkManager::StashIfDirty(Chunk* chunk) {
@@ -1160,107 +980,15 @@ void ChunkManager::ForceReload() {
     if (wasMultithreaded) StartWorkers();
 }
 
-void ChunkManager::UpdateVisibility() {
-    const auto& camPos = Sleak::Camera::GetMainCameraPosition();
-    float camX = camPos.GetX();
-    float camZ = camPos.GetZ();
-
-    // Force-render columns near the player regardless of camera frustum, so
-    // terrain above caves/enclosed spaces stays in the shadow map.
-    constexpr float SHADOW_FORCE_DIST = 48.0f;
-
-    // Pass A: distance cull, shadow flag, occluder submission.
-    m_cullCandidates.clear();
-    for (auto& [key, col] : m_columns) {
-        if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) {
-            col.visible = false;
-            continue;
-        }
-
-        float minX = col.bounds.min.GetX();
-        float maxX = col.bounds.max.GetX();
-        float minZ = col.bounds.min.GetZ();
-        float maxZ = col.bounds.max.GetZ();
-
-        // Horizontal-only distance check (XZ cylinder) so columns stay visible
-        // when the player is high above the terrain
-        float dx = (camX < minX) ? (minX - camX) : (camX > maxX) ? (camX - maxX) : 0.0f;
-        float dz = (camZ < minZ) ? (minZ - camZ) : (camZ > maxZ) ? (camZ - maxZ) : 0.0f;
-        col.distSq = dx * dx + dz * dz;
-
-        // Shadow-caster cull: only columns within the configured caster
-        // distance render into the shadow map.
-        col.castsShadow = (col.distSq <= m_shadowCasterDistSq);
-
-        if (col.distSq > m_drawDistSq) {
-            col.visible = false;
-            continue;
-        }
-
-        // Near columns act as occluders — beyond half draw distance an
-        // occluder hides almost nothing but still costs raster time.
-        float occDist = m_drawDistance * 0.5f;
-        if (col.distSq <= occDist * occDist) {
-            for (const auto& occ : col.occluders)
-                Sleak::CullingSystem::SubmitOccluderBox(occ);
-        }
-
-        if (col.distSq <= SHADOW_FORCE_DIST * SHADOW_FORCE_DIST) {
-            col.visible = true;  // force-visible, skip occlusion test
-            continue;
-        }
-
-        col.visible = false;  // decided in Pass B
-        m_cullCandidates.push_back(&col);
-    }
-
-    Sleak::CullingSystem::FinalizeOccluders();
-
-    // Pass B: frustum + occlusion query for remaining candidates.
-    for (ColumnMesh* col : m_cullCandidates)
-        col->visible = Sleak::CullingSystem::IsVisible(col->bounds);
-}
+void ChunkManager::UpdateVisibility() { m_renderer.UpdateVisibility(); }
 
 void ChunkManager::SetCullingEnabled(bool frustum, bool occlusion) {
-    Sleak::CullingSystem::SetFrustumCullingEnabled(frustum);
-    Sleak::CullingSystem::SetOcclusionCullingEnabled(occlusion);
+    m_renderer.SetCullingEnabled(frustum, occlusion);
 }
 
-void ChunkManager::RenderColumns() {
-    // Front-to-back draw order for better early-z / less overdraw.
-    m_renderScratch.clear();
-    for (auto& [key, col] : m_columns)
-        if (col.visible && col.mesh.IsValid())
-            m_renderScratch.push_back(&col);
-    std::sort(m_renderScratch.begin(), m_renderScratch.end(),
-              [](const ColumnMesh* a, const ColumnMesh* b) {
-                  return a->distSq < b->distSq;
-              });
+void ChunkManager::RenderColumns() { m_renderer.RenderColumns(); }
 
-    Sleak::MeshBatch::BeginBatch(m_material.get());
-    for (ColumnMesh* col : m_renderScratch)
-        Sleak::MeshBatch::Draw(col->mesh, col->castsShadow);
-    Sleak::MeshBatch::EndBatch();
-}
-
-void ChunkManager::RenderWater() {
-    if (!m_waterMaterial) return;
-    // Back-to-front draw order for correct transparency.
-    m_waterScratch.clear();
-    for (auto& [key, col] : m_columns)
-        if (col.visible && col.waterMesh.IsValid())
-            m_waterScratch.push_back(&col);
-    std::sort(m_waterScratch.begin(), m_waterScratch.end(),
-              [](const ColumnMesh* a, const ColumnMesh* b) {
-                  return a->distSq > b->distSq;
-              });
-
-    // Water never casts shadows — keeps ~200 meshes out of the shadow map.
-    Sleak::MeshBatch::BeginBatch(m_waterMaterial.get());
-    for (ColumnMesh* col : m_waterScratch)
-        Sleak::MeshBatch::Draw(col->waterMesh, false);
-    Sleak::MeshBatch::EndBatch();
-}
+void ChunkManager::RenderWater() { m_renderer.RenderWater(); }
 
 void ChunkManager::SaveHeightmapCache(const std::string& path) const {
     HeightmapCache::Save(path, m_columnMaxCyCache, m_generator.GetSeed());
