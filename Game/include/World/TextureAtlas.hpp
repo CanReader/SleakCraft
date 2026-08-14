@@ -7,20 +7,24 @@
 
 namespace Sleak { class Texture; }
 
+/// UV rectangle for one atlas tile's content, inside its gutter-padded cell.
 struct AtlasUV {
     float u0, v0; // bottom-left
     float u1, v1; // top-right
 };
 
+/// Builds a runtime texture atlas from the individual block PNGs, with each
+/// tile wrapped into a gutter-padded cell so linear/aniso filtering never
+/// bleeds into a neighboring tile.
 class TextureAtlas {
 public:
     static constexpr int TILES_PER_ROW = 4;
 
-    // Build atlas from individual block textures, returns the texture
-    // Tile order must match BlockTile enum in Block.hpp
+    /// Loads every block texture (in BlockTile enum order, must match),
+    /// resamples each to a common tile size, and packs them into one atlas.
     static Sleak::Texture* BuildAtlas();
 
-    // UVs address the tile content inside its gutter-padded cell
+    /// UVs address the tile content inside its gutter-padded cell.
     static AtlasUV GetTileUV(uint8_t tileIndex) {
         int col = tileIndex % TILES_PER_ROW;
         int row = tileIndex / TILES_PER_ROW;

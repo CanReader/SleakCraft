@@ -226,10 +226,12 @@ const Chunk* ChunkManager::GetChunk(int cx, int cy, int cz) const {
     return nullptr;
 }
 
+/// Floor division (rounds toward -infinity), unlike C++'s truncating `/`.
 static int floorDiv(int a, int b) {
     return (a >= 0) ? a / b : (a - b + 1) / b;
 }
 
+/// Floor modulo, always non-negative for a positive b.
 static int floorMod(int a, int b) {
     return ((a % b) + b) % b;
 }

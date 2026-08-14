@@ -20,18 +20,29 @@
 
 namespace Sleak { class Material; class DirectionalLight; }
 
+/// The in-world gameplay scene: bring-up of the block material/skybox/
+/// lighting/camera, per-frame orchestration of the chunk/player/UI
+/// collaborators, and input event routing. Gameplay and rendering logic
+/// itself lives on ChunkManager, PlayerController, BlockInteraction, and the
+/// UI panels; this class wires them together and owns their lifetime.
 class MainScene : public Sleak::Scene {
 public:
     MainScene(const std::string& name, const std::string& savePath,
               const std::string& worldName, uint32_t seed, bool isNewWorld);
     ~MainScene() override;
 
+    /// Sets up the camera, material/skybox/lighting, loads or generates the
+    /// world, registers benchmark metrics, and subscribes input handlers.
     bool Initialize() override;
+    /// Advances world time, ticks the chunk/player/effects collaborators,
+    /// and renders the world, HUD, and hotbar for one frame.
     void Update(float deltaTime) override;
     void OnDeactivate() override;
 
     // Save current world state (called by Game when returning to menu)
     void SaveGame();
+    /// Unregisters this scene's benchmark metric callbacks so the Benchmark
+    /// singleton, which outlives the scene, doesn't call into freed state.
     void UnregisterBenchmarkMetrics();
     bool HasUnsavedChanges() const;
 
@@ -75,15 +86,22 @@ public:
     }
 
 private:
+    /// Builds the block/water materials, including the runtime texture
+    /// atlas, and applies the settings panel's texture filter.
     void SetupMaterial();
     void SetupSkybox();
+    /// Creates the sun light and applies the voxel-tuned GraphicsConfig
+    /// (shadows on, SSAO/SSR/IBL/bloom off) plus fog and culling settings.
     void SetupLighting();
     void RenderUI();
 
     void OnMousePressed(const Sleak::Events::Input::MouseButtonPressedEvent& e);
     void OnMouseScrolled(const Sleak::Events::Input::MouseScrolledEvent& e);
+    /// Forwards to the player/block-interaction collaborators, then handles
+    /// scene-level keys (ESC to menu, F3 UI toggle, F5 save, F6 reload).
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
     void OnKeyReleased(const Sleak::Events::Input::KeyReleasedEvent& e);
+    /// Persists dirty chunks before the renderer tears down.
     void OnWindowClose(const Sleak::Events::WindowCloseEvent& e);
 
     void LoadGame();

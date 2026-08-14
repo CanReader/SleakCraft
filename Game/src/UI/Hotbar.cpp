@@ -5,8 +5,7 @@
 
 using namespace Sleak;
 
-// Helper: get the representative texture path for a block type (front/side
-// face)
+/// Representative texture path for a block type's front/side face.
 static const char* GetBlockTexturePath(BlockType type) {
     switch (type) {
         case BlockType::Grass:

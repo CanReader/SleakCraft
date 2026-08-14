@@ -6,11 +6,11 @@ class SaveManager;
 class BlockEffects;
 class MainScene;
 
-// Save/load orchestration for a MainScene's world: builds/consumes WorldMeta,
-// drains in-flight block-placement animations before collecting dirty
-// chunks, and drives the ForceReload -> SetSeed -> LoadChunkData ->
-// LoadHeightmapCache load ordering. Player-state and save-lock/UI-message
-// fields are read/written through the owning MainScene.
+/// Save/load orchestration for a MainScene's world: builds/consumes WorldMeta,
+/// drains in-flight block-placement animations before collecting dirty
+/// chunks, and drives the ForceReload -> SetSeed -> LoadChunkData ->
+/// LoadHeightmapCache load ordering. Player-state and save-lock/UI-message
+/// fields are read/written through the owning MainScene.
 class WorldPersistence {
 public:
     WorldPersistence(ChunkManager& chunkManager, SaveManager& saveManager,
@@ -20,7 +20,11 @@ public:
           m_blockEffects(blockEffects),
           m_scene(scene) {}
 
+    /// Drains completed placements, collects dirty chunks and player state
+    /// into a WorldMeta, and writes it via SaveManager.
     void SaveGame();
+    /// Reloads world.dat and region data, then reinitializes the chunk grid
+    /// and player state from it.
     void LoadGame();
 
 private:

@@ -39,7 +39,7 @@ static const char* s_tilePaths[] = {
 static_assert(sizeof(s_tilePaths) / sizeof(s_tilePaths[0]) == TILE_COUNT,
               "Tile path count must match TILE_COUNT");
 
-// Resample src (srcW x srcH) into dst (dstW x dstH) using nearest neighbor
+/// Resamples src (srcW x srcH) into dst (dstW x dstH) using nearest neighbor.
 static void ResampleNearest(const unsigned char* src, int srcW, int srcH,
                             unsigned char* dst, int dstW, int dstH) {
     for (int y = 0; y < dstH; ++y) {

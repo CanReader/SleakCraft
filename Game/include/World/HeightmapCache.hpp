@@ -17,8 +17,12 @@ inline uint64_t PackColumnXZ(int cx, int cz) {
 /// HMCH-format persistence for the column max chunk-Y cache.
 class HeightmapCache {
 public:
+    /// Writes the cache as magic/seed/count followed by packed
+    /// (cx, cz, maxCy) triples; no-op if the cache is empty.
     static void Save(const std::string& path, const ColumnMaxCyMap& cache,
                      uint32_t seed);
+    /// Loads entries into the cache, discarding the file if the magic or
+    /// seed doesn't match or the entry count would run past EOF.
     static void Load(const std::string& path, ColumnMaxCyMap& cache,
                      uint32_t seed);
 };

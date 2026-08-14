@@ -12,12 +12,13 @@
 using namespace Sleak;
 using namespace Sleak::Math;
 
+/// Uniform random float in [lo, hi).
 static float RandFloat(float lo, float hi) {
     float t = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
     return lo + t * (hi - lo);
 }
 
-// Build a unit cube (0..1) with correct per-face textures
+/// Builds a unit cube (0..1) with correct per-face textures.
 static void BuildBlockCube(BlockType type, VertexGroup& verts, IndexGroup& inds) {
     struct FaceInfo {
         float positions[4][3];

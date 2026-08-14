@@ -6,17 +6,21 @@
 class ChunkManager;
 class MainScene;
 
-// Fly toggle (double-tap space), held movement-key state, and the per-frame
-// FirstPersonController/RigidbodyComponent <-> ChunkManager collision glue.
-// Camera/FPC/rigidbody are fetched fresh each call via the owning MainScene.
+/// Fly toggle (double-tap space), held movement-key state, and the per-frame
+/// FirstPersonController/RigidbodyComponent <-> ChunkManager collision glue.
+/// Camera/FPC/rigidbody are fetched fresh each call via the owning MainScene.
 class PlayerController {
 public:
     PlayerController(ChunkManager& chunkManager, MainScene& scene)
         : m_chunkManager(chunkManager), m_scene(scene) {}
 
+    /// Pushes movement/jump tuning onto the active camera's FirstPersonController.
     void ApplyTuning();
+    /// Tracks held movement keys and detects the double-tap-space fly toggle.
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
+    /// Clears held movement-key state.
     void OnKeyReleased(const Sleak::Events::Input::KeyReleasedEvent& e);
+    /// Applies fly vertical input and resolves voxel collision for this frame.
     void Update();
 
 private:

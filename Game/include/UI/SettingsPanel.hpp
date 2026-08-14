@@ -8,23 +8,25 @@ class ChunkManager;
 class MainScene;
 namespace Sleak { class DirectionalLight; }
 
-// General/culling/lighting/SSAO/IBL/texture settings sections. Owns the
-// live-edit sun/ambient/fog/texture state (crosshair/vsync/MT-loading/
-// culling toggles stay on MainScene since MainScene::SetupLighting also
-// reads them at Initialize time; they're read/written here through it).
+/// General/culling/lighting/SSAO/IBL/texture settings sections. Owns the
+/// live-edit sun/ambient/fog/texture state (crosshair/vsync/MT-loading/
+/// culling toggles stay on MainScene since MainScene::SetupLighting also
+/// reads them at Initialize time; they're read/written here through it).
 class SettingsPanel {
 public:
     SettingsPanel(ChunkManager& chunkManager, MainScene& scene)
         : m_chunkManager(chunkManager), m_scene(scene) {}
 
+    /// Draws every settings section in sequence.
     void Render();
 
-    // Hands the panel the live sun light so its edits apply immediately;
-    // called once from MainScene::SetupLighting right after the light is
-    // created.
+    /// Hands the panel the live sun light so its edits apply immediately;
+    /// called once from MainScene::SetupLighting right after the light is
+    /// created.
     void AttachSun(Sleak::DirectionalLight* sun) { m_sun = sun; }
 
     // Initial-value accessors for MainScene::SetupMaterial/SetupLighting.
+    /// Converts the elevation/azimuth sliders into a light direction vector.
     Sleak::Math::Vector3D ComputeSunDirection() const;
     void GetSunColor(float& r, float& g, float& b) const {
         r = m_sunColorR;
@@ -56,13 +58,21 @@ public:
     Sleak::TextureFilter GetTextureFilter() const { return m_texFilter; }
 
 private:
+    /// Crosshair, vsync, and multithreaded-loading toggles.
     void RenderGeneralSection();
+    /// Frustum/occlusion toggles plus the live CullingSystem stat readout.
     void RenderCullingSection();
+    /// MSAA sample-count dropdown, clamped to the renderer's supported max.
     void RenderMSAASection();
+    /// Render distance slider; also re-derives fog distances on change.
     void RenderRenderDistanceSection();
+    /// Sun, ambient, and fog sliders; pushes live edits to the light manager.
     void RenderLightingSection();
+    /// SSAO toggle and radius/bias/power sliders.
     void RenderSSAOSection();
+    /// IBL toggle and intensity slider.
     void RenderIBLSection();
+    /// Texture filter and LOD bias, applied to the block material's texture.
     void RenderTextureSection();
 
     ChunkManager& m_chunkManager;

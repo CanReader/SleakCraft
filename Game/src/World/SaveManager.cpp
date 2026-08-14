@@ -15,6 +15,9 @@
 
 // ── Atomic write: temp file + fsync + rename; target intact on failure ─
 
+/// Writes to a .tmp sibling, fsyncs it, then renames over the target so a
+/// crash mid-write leaves the previous file (or nothing) rather than a
+/// half-written one.
 static bool AtomicWriteFile(const std::string& path,
                             const std::vector<uint8_t>& buf) {
     std::string tmp = path + ".tmp";
@@ -156,6 +159,8 @@ static bool MakeDir(const std::string& path) {
 #endif
 }
 
+/// Creates every missing path component of a directory path, one segment
+/// at a time.
 static bool MakeDirRecursive(const std::string& path) {
     std::string current;
     for (size_t i = 0; i < path.size(); ++i) {

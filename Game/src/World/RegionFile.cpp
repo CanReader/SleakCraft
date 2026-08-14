@@ -12,6 +12,9 @@
 
 // ── Atomic write: temp file + fsync + rename; target intact on failure ─
 
+/// Writes to a .tmp sibling, fsyncs it, then renames over the target so a
+/// crash mid-write leaves the previous file (or nothing) rather than a
+/// half-written one.
 static bool AtomicWriteFile(const std::string& path,
                             const std::vector<uint8_t>& buf) {
     std::string tmp = path + ".tmp";
@@ -103,6 +106,7 @@ static bool ReadI32(const uint8_t*& p, const uint8_t* end, int32_t& v) {
 static uint32_t s_crcTable[256];
 static bool s_crcInit = false;
 
+/// Builds the standard reflected CRC32 lookup table (polynomial 0xEDB88320).
 static void InitCRCTable() {
     for (uint32_t i = 0; i < 256; ++i) {
         uint32_t crc = i;

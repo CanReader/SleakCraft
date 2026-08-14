@@ -5,13 +5,14 @@
 #include <array>
 #include <cstdint>
 
-// Bottom-center hotbar strip: block icon texture cache + slot rendering.
-// Selection/slot state lives on BlockInteraction and is read via reference.
+/// Bottom-center hotbar strip: block icon texture cache + slot rendering.
+/// Selection/slot state lives on BlockInteraction and is read via reference.
 class Hotbar {
 public:
     explicit Hotbar(BlockInteraction& blockInteraction)
         : m_blockInteraction(blockInteraction) {}
 
+    /// Lazy-loads slot icon textures on first call, then draws the strip.
     void Render();
 
 private:

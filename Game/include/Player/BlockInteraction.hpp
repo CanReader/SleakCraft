@@ -10,10 +10,10 @@ class ChunkManager;
 class BlockEffects;
 class MainScene;
 
-// Block break/place raycast, the block outline, hotbar slot state + scroll
-// cycling + number-key selection, and draining BlockEffects' completed
-// placements into the world. Camera is fetched fresh via the owning
-// MainScene where needed.
+/// Block break/place raycast, the block outline, hotbar slot state + scroll
+/// cycling + number-key selection, and draining BlockEffects' completed
+/// placements into the world. Camera is fetched fresh via the owning
+/// MainScene where needed.
 class BlockInteraction {
 public:
     static constexpr int HOTBAR_SLOTS = 9;
@@ -24,11 +24,16 @@ public:
           m_blockEffects(blockEffects),
           m_scene(scene) {}
 
+    /// Raycasts from the camera and breaks or places a block on click.
     void OnMousePressed(
         const Sleak::Events::Input::MouseButtonPressedEvent& e);
+    /// Cycles the selected hotbar slot.
     void OnMouseScrolled(const Sleak::Events::Input::MouseScrolledEvent& e);
+    /// Number-key hotbar slot selection.
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
+    /// Draws a wireframe box around the block the camera is looking at.
     void RenderOutline();
+    /// Applies BlockEffects placements whose place animation has finished.
     void DrainCompletedPlacements();
 
     BlockType GetSelectedBlock() const { return m_selectedBlock; }
