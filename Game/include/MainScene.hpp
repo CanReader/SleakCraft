@@ -13,6 +13,7 @@
 #include "World/Block.hpp"
 #include "World/SaveManager.hpp"
 #include "World/BlockEffects.hpp"
+#include "World/WorldPersistence.hpp"
 
 namespace Sleak { class Material; class DirectionalLight; }
 
@@ -30,6 +31,18 @@ public:
     void SaveGame();
     void UnregisterBenchmarkMetrics();
     bool HasUnsavedChanges() const;
+
+    // Accessors for WorldPersistence (player/scene state it drives)
+    const std::string& GetWorldName() const { return m_worldName; }
+    BlockType GetSelectedBlock() const { return m_selectedBlock; }
+    void SetSelectedBlock(BlockType type) { m_selectedBlock = type; }
+    bool IsSaveLocked() const { return m_saveLocked; }
+    void SetSaveLocked(bool locked) { m_saveLocked = locked; }
+    bool IsMultithreadedLoading() const { return m_multithreadedLoading; }
+    void SetSaveMessage(const std::string& message, float timer) {
+        m_saveMessage = message;
+        m_saveMessageTimer = timer;
+    }
 
 private:
     void SetupMaterial();
@@ -56,6 +69,7 @@ private:
     ChunkManager m_chunkManager;
     BlockEffects m_blockEffects;
     SaveManager m_saveManager;
+    WorldPersistence m_worldPersistence;
     BlockType m_selectedBlock = BlockType::Grass;
     int m_selectedSlot = 0;
     static constexpr int HOTBAR_SLOTS = 9;
