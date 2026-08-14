@@ -130,7 +130,6 @@ private:
     // UI state
     bool m_showUI = true;
     bool m_showCrosshair = true;
-    bool m_showColliders = false;
 
     // Save/load UI feedback
     float m_saveMessageTimer = 0.0f;

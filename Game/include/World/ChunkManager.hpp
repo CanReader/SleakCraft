@@ -129,7 +129,7 @@ public:
     void SaveHeightmapCache(const std::string& path) const;
     void LoadHeightmapCache(const std::string& path);
 
-    // Collaborator access — used by ChunkMesher and ChunkRenderer.
+    // Collaborator access, used by ChunkMesher and ChunkRenderer.
     /// Loaded chunk at a chunk coordinate, or nullptr.
     Chunk* GetChunk(int cx, int cy, int cz);
     /// True while any of the six neighbors is owned by a worker thread.
