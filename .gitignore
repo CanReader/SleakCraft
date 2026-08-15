@@ -67,3 +67,7 @@ BSL/
 
 .claude/
 CLAUDE.md
+
+# generated docs
+docs/html/
+docs/doxygen_warnings.log
