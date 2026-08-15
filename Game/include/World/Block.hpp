@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+/// All placeable/generatable voxel types. COUNT must stay last.
+/// @ingroup world
 enum class BlockType : uint8_t {
     Air = 0,
     Grass,
@@ -21,6 +23,7 @@ enum class BlockType : uint8_t {
     COUNT
 };
 
+/// The six cube faces used for meshing and per-face tile lookup.
 enum class BlockFace : uint8_t {
     Top = 0,
     Bottom,
@@ -30,7 +33,7 @@ enum class BlockFace : uint8_t {
     West
 };
 
-// Tile indices into the atlas (must match TextureAtlas build order)
+/// Tile indices into the atlas (must match TextureAtlas build order)
 enum BlockTile : uint8_t {
     TILE_GRASS_TOP = 0,
     TILE_GRASS_SIDE,
@@ -52,6 +55,8 @@ enum BlockTile : uint8_t {
     TILE_COUNT
 };
 
+/// Atlas tile for a block's given face, accounting for top/bottom variants
+/// (e.g. grass top vs. side, log end-grain vs. bark).
 inline uint8_t GetBlockTextureTile(BlockType type, BlockFace face) {
     switch (type) {
         case BlockType::Grass:
@@ -90,22 +95,29 @@ inline uint8_t GetBlockTextureTile(BlockType type, BlockFace face) {
     }
 }
 
+/// Whether the block participates in collision (Air and Water do not).
 inline bool IsBlockSolid(BlockType type) {
     return type != BlockType::Air && type != BlockType::Water;
 }
 
+/// Whether the block fully occludes neighboring faces for mesh culling and
+/// occlusion. Leaves and water are excluded so light and visibility still
+/// pass through them.
 inline bool IsBlockOpaque(BlockType type) {
     return type != BlockType::Air && type != BlockType::OakLeaves && type != BlockType::Water;
 }
 
+/// Whether the block should be meshed at all (excludes Air).
 inline bool IsBlockRenderable(BlockType type) {
     return type != BlockType::Air;
 }
 
+/// Whether the block is water, meshed and rendered on its own pass.
 inline bool IsBlockWater(BlockType type) {
     return type == BlockType::Water;
 }
 
+/// Display name shown in the HUD.
 inline const char* GetBlockName(BlockType type) {
     switch (type) {
         case BlockType::Grass:       return "Grass";

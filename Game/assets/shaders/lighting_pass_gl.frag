@@ -12,8 +12,7 @@ out vec4 outColor;
 layout(binding = 8)  uniform sampler2D gbAlbedoAO;
 layout(binding = 9)  uniform sampler2D gbNormalRough;
 layout(binding = 10) uniform sampler2D gbMetalEmit;
-layout(binding = 11) uniform sampler2D gbDepth;
-layout(binding = 12) uniform sampler2D gbWorldPos;
+layout(binding = 11) uniform sampler2D gbDepth;  // world pos reconstructed from this
 
 // SSAO (bound at unit 13; blurred R8 AO — 1.0 means fully lit)
 layout(binding = 13) uniform sampler2D gbSSAO;
@@ -65,6 +64,7 @@ layout(std140, binding = 5) uniform ShadowUBO {
     uint  PCSSEnabled;
     uint  ShadowMapEnabled;
     float _shadowPad0, _shadowPad1;
+    mat4  NdcToShadow;   // NDC -> shadow clip, CPU-composed (no shimmer)
 };
 
 layout(std140, binding = 6) uniform DeferredCB {
@@ -130,6 +130,8 @@ vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
 }
 
 // ---- Shadow ----
+// World-space projection via the texel-snapped ShadowLightVP (the
+// NdcToShadow composition shimmered under camera motion).
 float CalcShadowPCF(vec3 worldPos, float NdotL) {
     if (ShadowMapEnabled == 0u) return 1.0;
 
@@ -148,7 +150,7 @@ float CalcShadowPCF(vec3 worldPos, float NdotL) {
     float shadow = 0.0;
     for (int i = 0; i < 16; ++i) {
         shadow += texture(shadowMap,
-            vec3(proj.xy + poissonDisk[i] * ShadowTexelSize * 1.5,
+            vec3(proj.xy + poissonDisk[i] * ShadowTexelSize * 5.0,
                  proj.z - ShadowBias));
     }
     shadow /= 16.0;
@@ -156,6 +158,15 @@ float CalcShadowPCF(vec3 worldPos, float NdotL) {
     // Fade shadow on surfaces facing away from light
     float fadedShadow = shadow * smoothstep(0.0, 0.15, NdotL);
     return mix(1.0, fadedShadow, ShadowStrength * edgeFade);
+}
+
+// Reconstruct world position from depth. OpenGL: no vertex Y-flip, and the
+// default clip depth range is [-1,1], so the stored [0,1] depth maps to
+// NDC.z = 2*depth-1 before InvViewProj.
+vec3 ReconstructWorldPos(vec2 uv, float depth) {
+    vec4 ndc   = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec4 world = InvViewProj * ndc;
+    return world.xyz / world.w;
 }
 
 // ---- ACES tone mapping ----
@@ -213,12 +224,9 @@ void main() {
     float metallic  = metalEmit.r;
     float emitScale = metalEmit.g;
 
-    // World position read DIRECTLY from GBuffer RT3 — never reconstructed
-    // via InvViewProj * ndcPos. Reconstruction depends on the camera
-    // view-projection matrix, so under pure rotation it produces sub-pixel
-    // FP drift in worldPos that propagates into shadow-map sample coords
-    // and shows up as visible "shadow shimmer" on every rotation tick.
-    vec3 worldPos = texture(gbWorldPos, fragUV).xyz;
+    // World position reconstructed from depth + InvViewProj (no worldpos RT).
+    vec3 worldPos = ReconstructWorldPos(fragUV, depth);
+    vec4 ndcPos   = vec4(fragUV * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
 
     // ---- Lighting accumulation (matches forward shader style) ----
     vec3 totalDiffuse = vec3(0.0);

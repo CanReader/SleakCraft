@@ -3,43 +3,107 @@
 
 #include <Core/Scene.hpp>
 #include <Runtime/Texture.hpp>
-#include <Memory/RefPtr.h>
-#include <Events/MouseEvent.h>
-#include <Events/KeyboardEvent.h>
-#include <array>
-#include <Debug/SystemMetrics.hpp>
+#include <Memory/RefPtr.hpp>
+#include <Events/MouseEvent.hpp>
+#include <Events/KeyboardEvent.hpp>
+#include <Events/ApplicationEvent.hpp>
 #include "World/ChunkManager.hpp"
 #include "World/Block.hpp"
 #include "World/SaveManager.hpp"
 #include "World/BlockEffects.hpp"
+#include "World/WorldPersistence.hpp"
+#include "Player/PlayerController.hpp"
+#include "Player/BlockInteraction.hpp"
+#include "UI/HudPanel.hpp"
+#include "UI/SettingsPanel.hpp"
+#include "UI/Hotbar.hpp"
 
 namespace Sleak { class Material; class DirectionalLight; }
 
+/// The in-world gameplay scene: bring-up of the block material/skybox/
+/// lighting/camera, per-frame orchestration of the chunk/player/UI
+/// collaborators, and input event routing. Gameplay and rendering logic
+/// itself lives on ChunkManager, PlayerController, BlockInteraction, and the
+/// UI panels; this class wires them together and owns their lifetime.
+/// @ingroup app
 class MainScene : public Sleak::Scene {
 public:
     MainScene(const std::string& name, const std::string& savePath,
               const std::string& worldName, uint32_t seed, bool isNewWorld);
     ~MainScene() override;
 
+    /// Sets up the camera, material/skybox/lighting, loads or generates the
+    /// world, registers benchmark metrics, and subscribes input handlers.
     bool Initialize() override;
+    /// Advances world time, ticks the chunk/player/effects collaborators,
+    /// and renders the world, HUD, and hotbar for one frame.
     void Update(float deltaTime) override;
     void OnDeactivate() override;
 
     // Save current world state (called by Game when returning to menu)
     void SaveGame();
+    /// Unregisters this scene's benchmark metric callbacks so the Benchmark
+    /// singleton, which outlives the scene, doesn't call into freed state.
+    void UnregisterBenchmarkMetrics();
     bool HasUnsavedChanges() const;
 
+    // Accessors for WorldPersistence/PlayerController/BlockInteraction
+    // (player/scene state they drive)
+    const std::string& GetWorldName() const { return m_worldName; }
+    BlockType GetSelectedBlock() const {
+        return m_blockInteraction.GetSelectedBlock();
+    }
+    void SetSelectedBlock(BlockType type) {
+        m_blockInteraction.SetSelectedBlock(type);
+    }
+    bool IsSaveLocked() const { return m_saveLocked; }
+    void SetSaveLocked(bool locked) { m_saveLocked = locked; }
+    bool IsMultithreadedLoading() const { return m_multithreadedLoading; }
+    void SetMultithreadedLoading(bool enabled) {
+        m_multithreadedLoading = enabled;
+    }
+    void SetSaveMessage(const std::string& message, float timer) {
+        m_saveMessage = message;
+        m_saveMessageTimer = timer;
+    }
+    float GetSaveMessageTimer() const { return m_saveMessageTimer; }
+    const std::string& GetSaveMessage() const { return m_saveMessage; }
+    float GetGameTime() const { return m_gameTime; }
+
+    // Accessors for HudPanel/SettingsPanel (toggles that engine setup code
+    // in MainScene also reads at Initialize time)
+    bool IsShowCrosshair() const { return m_showCrosshair; }
+    void SetShowCrosshair(bool show) { m_showCrosshair = show; }
+    bool IsVSyncEnabled() const { return m_vsync; }
+    void SetVSyncEnabled(bool enabled) { m_vsync = enabled; }
+    bool IsFrustumCullingEnabled() const { return m_frustumCulling; }
+    void SetFrustumCullingEnabled(bool enabled) { m_frustumCulling = enabled; }
+    bool IsOcclusionCullingEnabled() const { return m_occlusionCulling; }
+    void SetOcclusionCullingEnabled(bool enabled) {
+        m_occlusionCulling = enabled;
+    }
+    Sleak::RefPtr<Sleak::Material> GetBlockMaterial() const {
+        return m_blockMaterial;
+    }
+
 private:
+    /// Builds the block/water materials, including the runtime texture
+    /// atlas, and applies the settings panel's texture filter.
     void SetupMaterial();
     void SetupSkybox();
+    /// Creates the sun light and applies the voxel-tuned GraphicsConfig
+    /// (shadows on, SSAO/SSR/IBL/bloom off) plus fog and culling settings.
     void SetupLighting();
     void RenderUI();
 
     void OnMousePressed(const Sleak::Events::Input::MouseButtonPressedEvent& e);
     void OnMouseScrolled(const Sleak::Events::Input::MouseScrolledEvent& e);
+    /// Forwards to the player/block-interaction collaborators, then handles
+    /// scene-level keys (ESC to menu, F3 UI toggle, F5 save, F6 reload).
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
     void OnKeyReleased(const Sleak::Events::Input::KeyReleasedEvent& e);
-    void RenderHotbar();
+    /// Persists dirty chunks before the renderer tears down.
+    void OnWindowClose(const Sleak::Events::WindowCloseEvent& e);
 
     void LoadGame();
 
@@ -53,82 +117,43 @@ private:
     ChunkManager m_chunkManager;
     BlockEffects m_blockEffects;
     SaveManager m_saveManager;
-    BlockType m_selectedBlock = BlockType::Grass;
-    int m_selectedSlot = 0;
-    static constexpr int HOTBAR_SLOTS = 9;
-    std::array<BlockType, HOTBAR_SLOTS> m_hotbar = {{
-        BlockType::Grass, BlockType::Dirt, BlockType::Stone,
-        BlockType::Cobblestone, BlockType::OakLog, BlockType::DarkOakLog,
-        BlockType::SpruceLog, BlockType::OakPlanks, BlockType::Bricks
-    }};
-    std::array<uint64_t, HOTBAR_SLOTS> m_hotbarTextures = {};
-    bool m_hotbarTexturesLoaded = false;
+    WorldPersistence m_worldPersistence;
+    PlayerController m_playerController;
+    BlockInteraction m_blockInteraction;
+    HudPanel m_hudPanel;
+    SettingsPanel m_settingsPanel;
+    Hotbar m_hotbar;
     bool m_multithreadedLoading = true;
     bool m_vsync = false;
+    bool m_frustumCulling = true;
+    bool m_occlusionCulling = true;
 
     // UI state
     bool m_showUI = true;
     bool m_showCrosshair = true;
-    bool m_showColliders = false;
-    Sleak::SystemMetricsData m_cachedMetrics;
-    float m_metricTimer = 0.0f;
 
     // Save/load UI feedback
     float m_saveMessageTimer = 0.0f;
     std::string m_saveMessage;
+    // Never save over a save that failed to load
+    bool m_saveLocked = false;
+    float m_loadConfirmTimer = 0.0f;
 
     // Auto-save
     float m_autoSaveTimer = 0.0f;
     static constexpr float AUTO_SAVE_INTERVAL = 120.0f;
 
-    // Minecraft-style double-tap space to toggle fly
-    bool m_flying = false;
-    float m_lastSpacePressTime = -1.0f;
     float m_gameTime = 0.0f;
-    float m_flySpeed = 10.0f;
-    float m_flySprintMultiplier = 2.5f;
-    static constexpr float DOUBLE_TAP_WINDOW = 0.3f;
-    bool m_spaceHeld = false;
-    bool m_shiftHeld = false;
-    bool m_ctrlHeld = false;
 
+    std::string m_windowCloseHandlerId;
     std::string m_mousePressedHandlerId;
     std::string m_mouseScrolledHandlerId;
     std::string m_keyPressedHandlerId;
     std::string m_keyReleasedHandlerId;
 
-    // Lighting state (live-editable via settings panel)
+    // Sun light created here (needs Scene::AddObject/shadow config); live
+    // elevation/azimuth/color/intensity edits live on SettingsPanel.
     Sleak::DirectionalLight* m_sun = nullptr;
-    float m_sunElevation  = 65.0f;   // degrees above horizon (0=sunrise, 90=noon)
-    float m_sunAzimuth    = 255.0f;  // degrees clockwise from north
-    float m_sunIntensity  = 0.69f;
-    float m_sunColorR     = 1.00f;
-    float m_sunColorG     = 0.96f;
-    float m_sunColorB     = 0.88f;
-    float m_ambientIntensity = 0.725f;
-    float m_ambientColorR    = 0.45f;
-    float m_ambientColorG    = 0.62f;
-    float m_ambientColorB    = 1.00f;
-
-    // Texture quality state
-    Sleak::TextureFilter m_texFilter = Sleak::TextureFilter::Nearest;
-    float m_texLodBias = 0.0f;
-
-    // Fog state (live-editable). Defaults align with LightManager defaults so
-    // toggling the fog UI without touching sliders matches the engine's idle
-    // state. Horizon RGB is overridden by SetupLighting() to a slightly
-    // bluer tint that matches the skybox.
-    bool  m_fogEnabled        = true;
-    float m_fogHorizonR       = 0.62f;
-    float m_fogHorizonG       = 0.78f;
-    float m_fogHorizonB       = 1.00f;
-    float m_fogZenithR        = 0.42f;
-    float m_fogZenithG        = 0.58f;
-    float m_fogZenithB        = 0.86f;
-    bool  m_heightFogEnabled  = true;
-    float m_heightFogTop      = 80.0f;
-    float m_heightFogDensity  = 0.55f;
-    float m_heightFogFalloff  = 0.04f;
 };
 
 #endif

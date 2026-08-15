@@ -1,3 +1,6 @@
+<p align="center"><img src="docs/images/sleakcraft_hero.jpg" width="640" alt="SleakCraft"/></p>
+<p align="center"><i>Built with <b>SleakEngine</b></i> <img src="docs/images/sleakengine-logo-128.png" height="18" alt=""/></p>
+
 # SleakCraft
 
 A voxel sandbox game built on [SleakEngine](https://github.com/CanReader/SleakEngine) — a custom C++ engine supporting DirectX 11, DirectX 12, Vulkan, and OpenGL.
@@ -85,7 +88,7 @@ cmake --build --preset debug
 
 > **Cloned without `--recursive`?**
 > ```bash
-> git submodule update --init --recursive --remote
+> git submodule update --init --recursive
 > ```
 
 Binaries are output to `bin/`.

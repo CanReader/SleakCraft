@@ -1,0 +1,19 @@
+/// @defgroup app Application
+/// Entry point and top-level scenes: Game owns the menu/in-world scene
+/// switch, MainMenuScene drives the title screen, MainScene wires the
+/// gameplay collaborators together for one frame.
+
+/// @defgroup world World & Voxels
+/// Chunk storage, meshing, rendering, generation, and voxel queries: the
+/// block grid, its GPU mesh pipeline, terrain/noise generation, the atlas,
+/// and raycast/collision queries against it.
+
+/// @defgroup persistence Persistence
+/// World save/load: on-disk region/world-meta formats and the orchestration
+/// that drains live state into them and back.
+
+/// @defgroup player Player
+/// Player movement/collision glue and block break/place interaction.
+
+/// @defgroup ui UI
+/// In-game ImGui-backed panels: HUD, settings, and hotbar.

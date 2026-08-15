@@ -1,7 +1,7 @@
 #include "MainMenuScene.hpp"
 #include "Game.hpp"
 #include <Core/Application.hpp>
-#include <Events/KeyboardEvent.h>
+#include <Events/KeyboardEvent.hpp>
 #include <UI/UI.hpp>
 #include "World/SaveManager.hpp"
 #include <ctime>
@@ -130,7 +130,7 @@ void MainMenuScene::RenderBackground() {
     float vw = GetViewportWidth();
     float vh = GetViewportHeight();
 
-    uint64_t bgTex = LoadTextureForUI("assets/textures/background.png");
+    uint64_t bgTex = LoadTextureForUI("assets/textures/Background.png");
     if (bgTex == 0) return;
 
     SetNextWindowPos(0, 0, true);

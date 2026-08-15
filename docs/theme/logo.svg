@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="40" viewBox="0 0 150 40">
+  <g stroke-linejoin="round">
+    <polygon points="20,4 32,11 32,25 20,32 8,25 8,11" fill="none" stroke="#7cc55b" stroke-width="2.4"/>
+    <polygon points="20,4 32,11 20,18 8,11" fill="#7cc55b"/>
+    <polygon points="8,11 20,18 20,32 8,25" fill="#5a9642"/>
+    <polygon points="32,11 32,25 20,32 20,18" fill="#436f31"/>
+  </g>
+  <text x="40" y="26" font-family="Segoe UI, Roboto, sans-serif" font-size="17" font-weight="600" fill="#e8eaed">Sleak<tspan fill="#7cc55b">Craft</tspan></text>
+</svg>

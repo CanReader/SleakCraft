@@ -105,7 +105,7 @@ bool Chunk::IsBlockOpaqueAt(int x, int y, int z) const {
 }
 
 void Chunk::GenerateMeshData() {
-    VoxelVertexGroup vertices;
+    VoxelVertexBuffer vertices;
     IndexGroup indices;
 
     bool opaque[18][18][18];
@@ -117,6 +117,47 @@ void Chunk::GenerateMeshData() {
                 solid[y+1][z+1][x+1]  = IsBlockSolidAt(x, y, z);
             }
         }
+    }
+
+    // Occluder extraction: per-8x8-quadrant, ALL runs (>= 4 layers) of
+    // fully-opaque horizontal layers, ascending. Keeping every run (not
+    // just the longest) preserves the cave-to-surface shell that blocks
+    // sightlines when the player is underground.
+    int8_t occRunMinY[4][OCC_MAX_RUNS];
+    int8_t occRunMaxY[4][OCC_MAX_RUNS];
+    for (int q = 0; q < 4; ++q)
+        for (int i = 0; i < OCC_MAX_RUNS; ++i)
+            occRunMinY[q][i] = occRunMaxY[q][i] = -1;
+    {
+        int runCount[4] = {0, 0, 0, 0};
+        int curStart[4] = {-1, -1, -1, -1};
+        auto closeRun = [&](int q, int endY) {
+            int len = endY - curStart[q] + 1;
+            if (len >= 4 && runCount[q] < OCC_MAX_RUNS) {
+                occRunMinY[q][runCount[q]] = static_cast<int8_t>(curStart[q]);
+                occRunMaxY[q][runCount[q]] = static_cast<int8_t>(endY);
+                ++runCount[q];
+            }
+            curStart[q] = -1;
+        };
+        for (int y = 0; y < SIZE; ++y) {
+            bool full[4] = {true, true, true, true};
+            for (int z = 0; z < SIZE; ++z) {
+                for (int x = 0; x < SIZE; ++x) {
+                    if (!opaque[y+1][z+1][x+1])
+                        full[(x >= 8) + 2 * (z >= 8)] = false;
+                }
+            }
+            for (int q = 0; q < 4; ++q) {
+                if (full[q]) {
+                    if (curStart[q] < 0) curStart[q] = y;
+                } else if (curStart[q] >= 0) {
+                    closeRun(q, y - 1);
+                }
+            }
+        }
+        for (int q = 0; q < 4; ++q)
+            if (curStart[q] >= 0) closeRun(q, SIZE - 1);
     }
 
     auto fastCalcAO = [](bool side1, bool side2, bool corner) {
@@ -193,43 +234,43 @@ void Chunk::GenerateMeshData() {
         float ao[4];
         fastFaceAO(face, x, y, z, ao);
 
-        VoxelVertex v[4];
+        ::VoxelVertex v[4];
         switch (face) {
             case BlockFace::Top:
-                v[0] = VoxelVertex(bx,     by + 1, bz,     0, 1, 0, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx,     by + 1, bz + 1, 0, 1, 0, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx + 1, by + 1, bz + 1, 0, 1, 0, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx + 1, by + 1, bz,     0, 1, 0, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx,     by + 1, bz,     0, 1, 0, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx,     by + 1, bz + 1, 0, 1, 0, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx + 1, by + 1, bz + 1, 0, 1, 0, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx + 1, by + 1, bz,     0, 1, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::Bottom:
-                v[0] = VoxelVertex(bx,     by, bz + 1, 0, -1, 0, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx,     by, bz,     0, -1, 0, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx + 1, by, bz,     0, -1, 0, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx + 1, by, bz + 1, 0, -1, 0, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx,     by, bz + 1, 0, -1, 0, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx,     by, bz,     0, -1, 0, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx + 1, by, bz,     0, -1, 0, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx + 1, by, bz + 1, 0, -1, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::North:
-                v[0] = VoxelVertex(bx + 1, by,     bz + 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx + 1, by + 1, bz + 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx,     by + 1, bz + 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx,     by,     bz + 1, 0, 0, 1, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx + 1, by,     bz + 1, 0, 0, 1, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx + 1, by + 1, bz + 1, 0, 0, 1, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx,     by + 1, bz + 1, 0, 0, 1, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx,     by,     bz + 1, 0, 0, 1, uv.u1, uv.v1);
                 break;
             case BlockFace::South:
-                v[0] = VoxelVertex(bx,     by,     bz, 0, 0, -1, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx,     by + 1, bz, 0, 0, -1, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx + 1, by + 1, bz, 0, 0, -1, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx + 1, by,     bz, 0, 0, -1, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx,     by,     bz, 0, 0, -1, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx,     by + 1, bz, 0, 0, -1, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx + 1, by + 1, bz, 0, 0, -1, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx + 1, by,     bz, 0, 0, -1, uv.u1, uv.v1);
                 break;
             case BlockFace::East:
-                v[0] = VoxelVertex(bx + 1, by,     bz,     1, 0, 0, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx + 1, by + 1, bz,     1, 0, 0, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx + 1, by + 1, bz + 1, 1, 0, 0, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx + 1, by,     bz + 1, 1, 0, 0, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx + 1, by,     bz,     1, 0, 0, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx + 1, by + 1, bz,     1, 0, 0, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx + 1, by + 1, bz + 1, 1, 0, 0, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx + 1, by,     bz + 1, 1, 0, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::West:
-                v[0] = VoxelVertex(bx, by,     bz + 1, -1, 0, 0, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx, by + 1, bz + 1, -1, 0, 0, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx, by + 1, bz,     -1, 0, 0, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx, by,     bz,     -1, 0, 0, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx, by,     bz + 1, -1, 0, 0, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx, by + 1, bz + 1, -1, 0, 0, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx, by + 1, bz,     -1, 0, 0, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx, by,     bz,     -1, 0, 0, uv.u1, uv.v1);
                 break;
         }
 
@@ -248,7 +289,7 @@ void Chunk::GenerateMeshData() {
     };
 
     // Water mesh gets separate buffers
-    VoxelVertexGroup waterVertices;
+    VoxelVertexBuffer waterVertices;
     IndexGroup waterIndices;
 
     // Helper to check if neighbor is water
@@ -281,43 +322,43 @@ void Chunk::GenerateMeshData() {
         float topY = (face == BlockFace::Top || face == BlockFace::Bottom)
                      ? by + 0.875f : by + 1.0f;
 
-        VoxelVertex v[4];
+        ::VoxelVertex v[4];
         switch (face) {
             case BlockFace::Top:
-                v[0] = VoxelVertex(bx,     topY, bz,     0, 1, 0, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx,     topY, bz + 1, 0, 1, 0, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx + 1, topY, bz + 1, 0, 1, 0, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx + 1, topY, bz,     0, 1, 0, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx,     topY, bz,     0, 1, 0, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx,     topY, bz + 1, 0, 1, 0, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx + 1, topY, bz + 1, 0, 1, 0, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx + 1, topY, bz,     0, 1, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::Bottom:
-                v[0] = VoxelVertex(bx,     by, bz + 1, 0, -1, 0, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx,     by, bz,     0, -1, 0, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx + 1, by, bz,     0, -1, 0, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx + 1, by, bz + 1, 0, -1, 0, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx,     by, bz + 1, 0, -1, 0, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx,     by, bz,     0, -1, 0, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx + 1, by, bz,     0, -1, 0, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx + 1, by, bz + 1, 0, -1, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::North:
-                v[0] = VoxelVertex(bx + 1, by,         bz + 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx + 1, by + 0.875f, bz + 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx,     by + 0.875f, bz + 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx,     by,         bz + 1, 0, 0, 1, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx + 1, by,         bz + 1, 0, 0, 1, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx + 1, by + 0.875f, bz + 1, 0, 0, 1, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx,     by + 0.875f, bz + 1, 0, 0, 1, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx,     by,         bz + 1, 0, 0, 1, uv.u1, uv.v1);
                 break;
             case BlockFace::South:
-                v[0] = VoxelVertex(bx,     by,         bz, 0, 0, -1, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx,     by + 0.875f, bz, 0, 0, -1, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx + 1, by + 0.875f, bz, 0, 0, -1, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx + 1, by,         bz, 0, 0, -1, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx,     by,         bz, 0, 0, -1, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx,     by + 0.875f, bz, 0, 0, -1, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx + 1, by + 0.875f, bz, 0, 0, -1, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx + 1, by,         bz, 0, 0, -1, uv.u1, uv.v1);
                 break;
             case BlockFace::East:
-                v[0] = VoxelVertex(bx + 1, by,         bz,     1, 0, 0, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx + 1, by + 0.875f, bz,     1, 0, 0, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx + 1, by + 0.875f, bz + 1, 1, 0, 0, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx + 1, by,         bz + 1, 1, 0, 0, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx + 1, by,         bz,     1, 0, 0, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx + 1, by + 0.875f, bz,     1, 0, 0, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx + 1, by + 0.875f, bz + 1, 1, 0, 0, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx + 1, by,         bz + 1, 1, 0, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::West:
-                v[0] = VoxelVertex(bx, by,         bz + 1, -1, 0, 0, uv.u0, uv.v1);
-                v[1] = VoxelVertex(bx, by + 0.875f, bz + 1, -1, 0, 0, uv.u0, uv.v0);
-                v[2] = VoxelVertex(bx, by + 0.875f, bz,     -1, 0, 0, uv.u1, uv.v0);
-                v[3] = VoxelVertex(bx, by,         bz,     -1, 0, 0, uv.u1, uv.v1);
+                v[0] = ::VoxelVertex(bx, by,         bz + 1, -1, 0, 0, uv.u0, uv.v1);
+                v[1] = ::VoxelVertex(bx, by + 0.875f, bz + 1, -1, 0, 0, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx, by + 0.875f, bz,     -1, 0, 0, uv.u1, uv.v0);
+                v[3] = ::VoxelVertex(bx, by,         bz,     -1, 0, 0, uv.u1, uv.v1);
                 break;
         }
 
@@ -372,37 +413,15 @@ void Chunk::GenerateMeshData() {
     m_pendingWaterMesh.indices = std::move(waterIndices);
     m_hasPendingWaterMesh = true;
 
-    m_meshBuilt = true;
-}
-
-void Chunk::UploadMesh(const RefPtr<Material>& material) {
-    if (!m_hasPendingMesh) return;
-    m_hasPendingMesh = false;
-
-    if (m_pendingMesh.vertices.GetSize() == 0) {
-        m_meshBuilt = true;
-        return;
+    // Publish occluder runs alongside the mesh data
+    for (int q = 0; q < 4; ++q) {
+        for (int i = 0; i < OCC_MAX_RUNS; ++i) {
+            m_occRunMinY[q][i] = occRunMinY[q][i];
+            m_occRunMaxY[q][i] = occRunMaxY[q][i];
+        }
     }
 
-    delete m_gameObject;
-
-    VoxelMeshData meshData;
-    meshData.vertices = std::move(m_pendingMesh.vertices);
-    meshData.indices = std::move(m_pendingMesh.indices);
-
-    m_gameObject = new GameObject("Chunk");
-    // Vertices are already in world-space, so transform is at origin
-    m_gameObject->AddComponent<TransformComponent>(Vector3D(0.0f, 0.0f, 0.0f));
-    m_gameObject->AddComponent<MaterialComponent>(material);
-    m_gameObject->AddComponent<MeshComponent>(std::move(meshData));
-    m_gameObject->Initialize();
-
     m_meshBuilt = true;
-}
-
-void Chunk::BuildMesh(const RefPtr<Material>& material) {
-    GenerateMeshData();
-    UploadMesh(material);
 }
 
 void Chunk::AddToScene(SceneBase* scene) {

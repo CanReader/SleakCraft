@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+/// Player position/orientation/settings persisted in world.dat.
 struct PlayerState {
     float posX = 8.0f, posY = 70.0f, posZ = 8.0f;
     float pitch = 0.0f, yaw = 0.0f;
@@ -12,6 +13,11 @@ struct PlayerState {
     int32_t renderDistance = 8;
 };
 
+/// world.dat schema: world identity, player state, and the region index.
+/// Any field change must bump CURRENT_VERSION; SaveManager::ReadWorldDat
+/// currently rejects a mismatched version outright, so a future format
+/// change needs an explicit legacy-load path added there.
+/// @ingroup persistence
 struct WorldMeta {
     static constexpr uint32_t MAGIC = 0x534C4B57; // "SLKW"
     static constexpr uint16_t CURRENT_VERSION = 1;

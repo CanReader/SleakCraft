@@ -1,47 +1,43 @@
 #!/bin/bash
+# Compile all Vulkan GLSL shaders to SPIR-V, in place (<name>.spv next to source).
+# GL variants (*_gl.*) are runtime-compiled and skipped.
+
+set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Set the directories
-ENGINE_SHADERS_DIR="$ROOT_DIR/Engine/shaders"
-SHADERS_DIR="$ROOT_DIR/Game/shaders"
-OUTPUT_DIR="$ROOT_DIR/Engine/assets/shaders"
+SHADER_DIRS=(
+  "$ROOT_DIR/Engine/assets/shaders"
+  "$ROOT_DIR/Game/assets/shaders"
+)
 
-# Create the output directory if it doesn't exist
-mkdir -p "$OUTPUT_DIR"
+if ! command -v glslc >/dev/null; then
+  echo "error: glslc not found" >&2
+  exit 1
+fi
 
-# Compile engine shader files (default_shader, etc.)
-for shader in "$ENGINE_SHADERS_DIR"/*.{vert,frag,comp,geom,tesc,tese}
-do
-  if [[ -f "$shader" ]]; then
-    filename=$(basename "$shader")
-    output_file="$OUTPUT_DIR/$filename.spv"
-
-    glslc "$shader" -o "$output_file"
-
-    if [[ $? -eq 0 ]]; then
-      echo "Compiled $shader to $output_file"
-    else
-      echo "Failed to compile $shader"
-    fi
+fail=0
+count=0
+for dir in "${SHADER_DIRS[@]}"; do
+  if [[ ! -d "$dir" ]]; then
+    echo "error: shader dir missing: $dir" >&2
+    fail=1
+    continue
   fi
+  for shader in "$dir"/*.vert "$dir"/*.frag "$dir"/*.comp; do
+    [[ -f "$shader" ]] || continue
+    case "$(basename "$shader")" in *_gl.*) continue ;; esac
+    if glslc "$shader" -o "$shader.spv"; then
+      echo "compiled ${shader#$ROOT_DIR/} -> ${shader#$ROOT_DIR/}.spv"
+      count=$((count + 1))
+    else
+      echo "FAILED: $shader" >&2
+      fail=1
+    fi
+  done
 done
 
-# Compile game shader files (if any)
-for shader in "$SHADERS_DIR"/*.{vert,frag,comp,geom,tesc,tese}
-do
-  if [[ -f "$shader" ]]; then
-    filename=$(basename "$shader")
-    output_file="$ROOT_DIR/Game/assets/shaders/$filename.spv"
-
-    mkdir -p "$(dirname "$output_file")"
-    glslc "$shader" -o "$output_file"
-
-    if [[ $? -eq 0 ]]; then
-      echo "Compiled $shader to $output_file"
-    else
-      echo "Failed to compile $shader"
-    fi
-  fi
-done
+echo "$count shaders compiled"
+[[ $count -gt 0 ]] || fail=1
+exit $fail

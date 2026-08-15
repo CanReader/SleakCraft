@@ -1,6 +1,53 @@
 #include "World/RegionFile.hpp"
 #include <fstream>
 #include <cstring>
+#include <cstdio>
+#include <filesystem>
+#include <Core/Logger.hpp>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
+// ── Atomic write: temp file + fsync + rename; target intact on failure ─
+
+/// Writes to a .tmp sibling, fsyncs it, then renames over the target so a
+/// crash mid-write leaves the previous file (or nothing) rather than a
+/// half-written one.
+static bool AtomicWriteFile(const std::string& path,
+                            const std::vector<uint8_t>& buf) {
+    std::string tmp = path + ".tmp";
+    std::FILE* fp = std::fopen(tmp.c_str(), "wb");
+    if (!fp) {
+        SLEAK_ERROR("Save: cannot open temp file {}", tmp);
+        return false;
+    }
+    bool ok = buf.empty() ||
+              std::fwrite(buf.data(), 1, buf.size(), fp) == buf.size();
+    if (ok) ok = (std::fflush(fp) == 0);
+    if (ok) {
+#ifdef _WIN32
+        ok = (_commit(_fileno(fp)) == 0);
+#else
+        ok = (::fsync(::fileno(fp)) == 0);
+#endif
+    }
+    std::fclose(fp);
+    std::error_code ec;
+    if (!ok) {
+        SLEAK_ERROR("Save: write/fsync failed for {}", tmp);
+        std::filesystem::remove(tmp, ec);
+        return false;
+    }
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        SLEAK_ERROR("Save: rename {} -> {} failed: {}", tmp, path, ec.message());
+        std::filesystem::remove(tmp, ec);
+        return false;
+    }
+    return true;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -59,6 +106,7 @@ static bool ReadI32(const uint8_t*& p, const uint8_t* end, int32_t& v) {
 static uint32_t s_crcTable[256];
 static bool s_crcInit = false;
 
+/// Builds the standard reflected CRC32 lookup table (polynomial 0xEDB88320).
 static void InitCRCTable() {
     for (uint32_t i = 0; i < 256; ++i) {
         uint32_t crc = i;
@@ -145,51 +193,89 @@ bool RegionFile::Save(const std::string& path, const std::vector<ChunkSaveData>&
         buf.insert(buf.end(), compressed.begin(), compressed.end());
     }
 
-    std::ofstream file(path, std::ios::binary);
-    if (!file.is_open()) return false;
-    file.write(reinterpret_cast<const char*>(buf.data()),
-               static_cast<std::streamsize>(buf.size()));
-    return file.good();
+    return AtomicWriteFile(path, buf);
 }
 
 // ── Load ─────────────────────────────────────────────────────────────
 
-bool RegionFile::Load(const std::string& path, std::vector<ChunkSaveData>& chunks) {
+bool RegionFile::Load(const std::string& path, std::vector<ChunkSaveData>& chunks,
+                      size_t* droppedChunks) {
+    if (droppedChunks) *droppedChunks = 0;
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) return false;
 
     auto fileSize = file.tellg();
+    if (fileSize < 0) {
+        SLEAK_WARN("Region load: bad size for {}", path);
+        return false;
+    }
     file.seekg(0);
     std::vector<uint8_t> buf(static_cast<size_t>(fileSize));
     file.read(reinterpret_cast<char*>(buf.data()), fileSize);
-    if (!file.good()) return false;
+    if (!file.good()) {
+        SLEAK_WARN("Region load: short read for {}", path);
+        return false;
+    }
 
     const uint8_t* p = buf.data();
     const uint8_t* end = p + buf.size();
 
     uint32_t magic;
     uint16_t version, chunkCount;
-    if (!ReadU32(p, end, magic) || magic != MAGIC) return false;
-    if (!ReadU16(p, end, version) || version > CURRENT_VERSION) return false;
+    if (!ReadU32(p, end, magic) || magic != MAGIC) {
+        SLEAK_WARN("Region load: bad magic in {}", path);
+        return false;
+    }
+    if (!ReadU16(p, end, version) || version != CURRENT_VERSION) {
+        SLEAK_ERROR("Region load: unsupported version in {}", path);
+        return false;
+    }
     if (!ReadU16(p, end, chunkCount)) return false;
 
-    chunks.resize(chunkCount);
+    // Bound count against remaining bytes (min 20-byte header per chunk).
+    size_t remaining = static_cast<size_t>(end - p);
+    if (chunkCount > remaining / 20) {
+        SLEAK_ERROR("Region load: chunkCount {} exceeds file size in {}",
+                    chunkCount, path);
+        return false;
+    }
+
+    chunks.clear();
+    chunks.reserve(chunkCount);
     for (uint16_t i = 0; i < chunkCount; ++i) {
-        auto& c = chunks[i];
-        if (!ReadI32(p, end, c.cx)) return false;
-        if (!ReadI32(p, end, c.cy)) return false;
-        if (!ReadI32(p, end, c.cz)) return false;
+        ChunkSaveData c;
+        if (!ReadI32(p, end, c.cx) || !ReadI32(p, end, c.cy) ||
+            !ReadI32(p, end, c.cz)) {
+            SLEAK_WARN("Region load: truncated header in {}", path);
+            return false;  // structural truncation — stop
+        }
 
         uint32_t compSize, crc;
-        if (!ReadU32(p, end, compSize)) return false;
-        if (!ReadU32(p, end, crc)) return false;
+        if (!ReadU32(p, end, compSize) || !ReadU32(p, end, crc)) {
+            SLEAK_WARN("Region load: truncated chunk record in {}", path);
+            return false;
+        }
+        if (p + compSize > end) {
+            SLEAK_WARN("Region load: chunk payload overruns {}", path);
+            return false;
+        }
 
-        if (p + compSize > end) return false;
-        if (!RLEDecode(p, compSize, c.blocks.data(), 4096)) return false;
+        // Per-chunk recovery: a bad decode/CRC drops one chunk, not the region.
+        bool decoded = RLEDecode(p, compSize, c.blocks.data(), 4096);
         p += compSize;
-
-        uint32_t checkCrc = CRC32(c.blocks.data(), 4096);
-        if (checkCrc != crc) return false;
+        if (!decoded) {
+            SLEAK_WARN("Region load: RLE decode failed for chunk ({},{},{}) in {}",
+                       c.cx, c.cy, c.cz, path);
+            if (droppedChunks) ++*droppedChunks;
+            continue;
+        }
+        if (CRC32(c.blocks.data(), 4096) != crc) {
+            SLEAK_WARN("Region load: CRC mismatch for chunk ({},{},{}) in {}",
+                       c.cx, c.cy, c.cz, path);
+            if (droppedChunks) ++*droppedChunks;
+            continue;
+        }
+        chunks.push_back(std::move(c));
     }
     return true;
 }

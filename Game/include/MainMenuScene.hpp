@@ -2,22 +2,27 @@
 #define _MAIN_MENU_SCENE_HPP_
 
 #include <Core/Scene.hpp>
-#include <Events/KeyboardEvent.h>
+#include <Events/KeyboardEvent.hpp>
 #include <string>
 #include <vector>
 #include <cstdint>
 
+/// Title screen: world create/load/delete flows and the deferred handoff
+/// into Game::StartWorld once a loading screen has had a frame to render.
+/// @ingroup app
 class MainMenuScene : public Sleak::Scene {
 public:
     explicit MainMenuScene(const std::string& name);
     ~MainMenuScene() override;
 
     bool Initialize() override;
+    /// Advances a pending world start, otherwise renders the current panel.
     void Update(float deltaTime) override;
     void OnActivate() override;
     void OnDeactivate() override;
 
 private:
+    /// Which panel Update renders this frame.
     enum class MenuState {
         Main,
         CreateWorld,
@@ -25,17 +30,26 @@ private:
         Loading
     };
 
+    /// Draws the fullscreen background image behind every menu panel.
     void RenderBackground();
+    /// Draws the title panel with Create/Load/Quit buttons.
     void RenderMainMenu();
+    /// Draws the new-world form (name, seed) and validates it on submit.
     void RenderCreateWorld();
+    /// Draws the scrollable save list with per-entry load/delete controls.
     void RenderLoadWorld();
+    /// Draws the loading-screen progress bar while a world start is pending.
     void RenderLoading();
 
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
 
+    /// Rebuilds m_worldList from the saves directory, newest first.
     void ScanSaveDirectory();
+    /// Validates the create-world form and queues a deferred new-world start.
     void StartNewWorld();
+    /// Queues a deferred start for an existing world from the load list.
     void StartLoadWorld(int index);
+    /// Removes a save's files from disk and refreshes the world list.
     void DeleteWorld(int index);
 
     MenuState m_menuState = MenuState::Main;

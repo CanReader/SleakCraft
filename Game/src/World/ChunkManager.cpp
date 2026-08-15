@@ -1,13 +1,10 @@
 #include "World/ChunkManager.hpp"
-#include <Camera/Camera.hpp>
 #include <Core/SceneBase.hpp>
-#include <Logger.hpp>
+#include <Core/Logger.hpp>
 #include <Runtime/Material.hpp>
-#include <Runtime/MeshBatch.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <fstream>
 #include <vector>
 
 ChunkManager::ChunkManager() {}
@@ -54,15 +51,23 @@ void ChunkManager::StopWorkers() {
         w.join();
     m_workers.clear();
 
+    // Release in-flight tokens or the chunks can never unload/remesh again
     {
         std::lock_guard<std::mutex> lock(m_taskMutex);
+        for (Chunk* c : m_taskQueue) c->SetInFlight(false);
         m_taskQueue.clear();
     }
+    // Workers drain the task queue before exiting; requeue their results
     {
         std::lock_guard<std::mutex> lock(m_readyMutex);
+        for (Chunk* c : m_readyQueue) {
+            c->SetInFlight(false);
+            c->SetNeedsMeshRebuild(true);
+            m_chunksNeedingRemesh.insert(
+                {c->GetChunkX(), c->GetChunkY(), c->GetChunkZ()});
+        }
         m_readyQueue.clear();
     }
-    m_chunksNeedingRemesh.clear();
 }
 
 void ChunkManager::WorkerThread() {
@@ -133,7 +138,11 @@ void ChunkManager::SetRenderDistance(int chunks) {
             if (!chunk) continue;
             if (std::abs(chunk->GetChunkX() - cx) > m_renderDistance ||
                 std::abs(chunk->GetChunkZ() - cz) > m_renderDistance) {
-                if (!chunk->IsInFlight())
+                // In-flight neighbors still dereference us — defer to
+                // the gradual unloader (respiral below re-detects these)
+                ChunkCoord coord{chunk->GetChunkX(), chunk->GetChunkY(),
+                                 chunk->GetChunkZ()};
+                if (!chunk->IsInFlight() && !IsNeighborOfInFlight(coord))
                     toDelete.push_back(chunk);
             }
         }
@@ -217,10 +226,12 @@ const Chunk* ChunkManager::GetChunk(int cx, int cy, int cz) const {
     return nullptr;
 }
 
+/// Floor division (rounds toward -infinity), unlike C++'s truncating `/`.
 static int floorDiv(int a, int b) {
     return (a >= 0) ? a / b : (a - b + 1) / b;
 }
 
+/// Floor modulo, always non-negative for a positive b.
 static int floorMod(int a, int b) {
     return ((a % b) + b) % b;
 }
@@ -232,6 +243,8 @@ BlockType ChunkManager::GetBlockAt(int worldX, int worldY, int worldZ) const {
 
     const Chunk* chunk = GetChunk(cx, cy, cz);
     if (!chunk) return BlockType::Air;
+    // Worker may still be writing blocks during generation — treat as air
+    if (chunk->NeedsGeneration()) return BlockType::Air;
 
     int lx = floorMod(worldX, Chunk::SIZE);
     int ly = floorMod(worldY, Chunk::SIZE);
@@ -260,6 +273,13 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
         }
         chunk->SetNeedsGeneration(false);
         LinkNeighbors({cx, cy, cz}, chunk);
+    }
+
+    // Defer edit while a worker may read/write this chunk or a neighbor
+    if (chunk->IsInFlight() || chunk->NeedsGeneration() ||
+        IsNeighborOfInFlight({cx, cy, cz})) {
+        m_pendingEdits.push_back({worldX, worldY, worldZ, type});
+        return true;
     }
 
     int lx = floorMod(worldX, Chunk::SIZE);
@@ -306,178 +326,43 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
     return true;
 }
 
+void ChunkManager::FlushPendingEdits() {
+    // Apply deferred edits for save/exit; visuals refresh via remesh
+    std::vector<PendingBlockEdit> edits;
+    edits.swap(m_pendingEdits);
+    for (auto& e : edits) {
+        int cx = floorDiv(e.x, Chunk::SIZE);
+        int cy = floorDiv(e.y, Chunk::SIZE);
+        int cz = floorDiv(e.z, Chunk::SIZE);
+        Chunk* chunk = GetChunk(cx, cy, cz);
+        if (!chunk) continue;
+        // Still owned by a worker — keep deferred, lands in the next save
+        if (chunk->IsInFlight() || chunk->NeedsGeneration() ||
+            IsNeighborOfInFlight({cx, cy, cz})) {
+            m_pendingEdits.push_back(e);
+            continue;
+        }
+        chunk->SetBlock(floorMod(e.x, Chunk::SIZE), floorMod(e.y, Chunk::SIZE),
+                        floorMod(e.z, Chunk::SIZE), e.type);
+        chunk->SetDirty(true);
+        chunk->SetNeedsMeshRebuild(true);
+        m_chunksNeedingRemesh.insert({cx, cy, cz});
+    }
+}
+
 VoxelRaycastResult ChunkManager::VoxelRaycast(
     const Sleak::Math::Vector3D& origin,
     const Sleak::Math::Vector3D& direction,
     float maxDist) const
 {
-    VoxelRaycastResult result;
-
-    float ox = origin.GetX(), oy = origin.GetY(), oz = origin.GetZ();
-    float dx = direction.GetX(), dy = direction.GetY(), dz = direction.GetZ();
-
-    int x = static_cast<int>(std::floor(ox));
-    int y = static_cast<int>(std::floor(oy));
-    int z = static_cast<int>(std::floor(oz));
-
-    int stepX = (dx >= 0) ? 1 : -1;
-    int stepY = (dy >= 0) ? 1 : -1;
-    int stepZ = (dz >= 0) ? 1 : -1;
-
-    float tDeltaX = (dx != 0.0f) ? std::abs(1.0f / dx) : 1e30f;
-    float tDeltaY = (dy != 0.0f) ? std::abs(1.0f / dy) : 1e30f;
-    float tDeltaZ = (dz != 0.0f) ? std::abs(1.0f / dz) : 1e30f;
-
-    float tMaxX = (dx != 0.0f) ? ((stepX > 0 ? (x + 1.0f - ox) : (ox - x)) * tDeltaX) : 1e30f;
-    float tMaxY = (dy != 0.0f) ? ((stepY > 0 ? (y + 1.0f - oy) : (oy - y)) * tDeltaY) : 1e30f;
-    float tMaxZ = (dz != 0.0f) ? ((stepZ > 0 ? (z + 1.0f - oz) : (oz - z)) * tDeltaZ) : 1e30f;
-
-    int prevX = x, prevY = y, prevZ = z;
-    float t = 0.0f;
-
-    for (int i = 0; i < static_cast<int>(maxDist * 3.0f) + 1; ++i) {
-        BlockType block = GetBlockAt(x, y, z);
-        if (IsBlockSolid(block)) {
-            result.hit = true;
-            result.blockX = x;
-            result.blockY = y;
-            result.blockZ = z;
-            result.placeX = prevX;
-            result.placeY = prevY;
-            result.placeZ = prevZ;
-            result.blockType = block;
-            return result;
-        }
-
-        prevX = x; prevY = y; prevZ = z;
-
-        if (tMaxX < tMaxY) {
-            if (tMaxX < tMaxZ) {
-                t = tMaxX;
-                x += stepX;
-                tMaxX += tDeltaX;
-            } else {
-                t = tMaxZ;
-                z += stepZ;
-                tMaxZ += tDeltaZ;
-            }
-        } else {
-            if (tMaxY < tMaxZ) {
-                t = tMaxY;
-                y += stepY;
-                tMaxY += tDeltaY;
-            } else {
-                t = tMaxZ;
-                z += stepZ;
-                tMaxZ += tDeltaZ;
-            }
-        }
-
-        if (t > maxDist) break;
-    }
-
-    return result;
+    return m_queries.VoxelRaycast(origin, direction, maxDist);
 }
 
 VoxelCollisionResult ChunkManager::ResolveVoxelCollision(
     const Sleak::Math::Vector3D& eyePos,
     float halfWidth, float height, float eyeOffset) const
 {
-    using namespace Sleak::Math;
-    VoxelCollisionResult result;
-
-    float feetY = eyePos.GetY() - eyeOffset;
-    float posX = eyePos.GetX();
-    float posZ = eyePos.GetZ();
-
-    auto computeAABB = [&](float fx, float fy, float fz,
-                           float& minX, float& minY, float& minZ,
-                           float& maxX, float& maxY, float& maxZ) {
-        minX = fx - halfWidth;
-        maxX = fx + halfWidth;
-        minY = fy;
-        maxY = fy + height;
-        minZ = fz - halfWidth;
-        maxZ = fz + halfWidth;
-    };
-
-    for (int iter = 0; iter < 16; ++iter) {
-        float minX, minY, minZ, maxX, maxY, maxZ;
-        computeAABB(posX, feetY, posZ, minX, minY, minZ, maxX, maxY, maxZ);
-
-        int bx0 = static_cast<int>(std::floor(minX));
-        int bx1 = static_cast<int>(std::floor(maxX - 0.0001f));
-        int by0 = static_cast<int>(std::floor(minY));
-        int by1 = static_cast<int>(std::floor(maxY - 0.0001f));
-        int bz0 = static_cast<int>(std::floor(minZ));
-        int bz1 = static_cast<int>(std::floor(maxZ - 0.0001f));
-
-        bool corrected = false;
-        for (int by = by0; by <= by1; ++by) {
-            for (int bz = bz0; bz <= bz1; ++bz) {
-                for (int bx = bx0; bx <= bx1; ++bx) {
-                    if (!IsBlockSolid(GetBlockAt(bx, by, bz))) continue;
-
-                    float blockMinX = static_cast<float>(bx);
-                    float blockMaxX = static_cast<float>(bx + 1);
-                    float blockMinY = static_cast<float>(by);
-                    float blockMaxY = static_cast<float>(by + 1);
-                    float blockMinZ = static_cast<float>(bz);
-                    float blockMaxZ = static_cast<float>(bz + 1);
-
-                    computeAABB(posX, feetY, posZ, minX, minY, minZ, maxX, maxY, maxZ);
-
-                    if (minX >= blockMaxX || maxX <= blockMinX ||
-                        minY >= blockMaxY || maxY <= blockMinY ||
-                        minZ >= blockMaxZ || maxZ <= blockMinZ)
-                        continue;
-
-                    float pushXPos = blockMaxX - minX;
-                    float pushXNeg = maxX - blockMinX;
-                    float penX = std::min(pushXPos, pushXNeg);
-
-                    float pushYPos = blockMaxY - minY;
-                    float pushYNeg = maxY - blockMinY;
-                    float penY = std::min(pushYPos, pushYNeg);
-
-                    float pushZPos = blockMaxZ - minZ;
-                    float pushZNeg = maxZ - blockMinZ;
-                    float penZ = std::min(pushZPos, pushZNeg);
-
-                    if (penY <= penX && penY <= penZ) {
-                        if (pushYPos < pushYNeg) {
-                            feetY += pushYPos;
-                            result.onGround = true;
-                        } else {
-                            feetY -= pushYNeg;
-                            result.hitCeiling = true;
-                        }
-                    } else if (penX <= penZ) {
-                        if (pushXPos < pushXNeg)
-                            posX += pushXPos;
-                        else
-                            posX -= pushXNeg;
-                        result.hitWall = true;
-                    } else {
-                        if (pushZPos < pushZNeg)
-                            posZ += pushZPos;
-                        else
-                            posZ -= pushZNeg;
-                        result.hitWall = true;
-                    }
-                    corrected = true;
-                }
-            }
-        }
-        if (!corrected) break;
-    }
-
-    float newEyeY = feetY + eyeOffset;
-    result.correction = Vector3D(posX - eyePos.GetX(),
-                                  newEyeY - eyePos.GetY(),
-                                  posZ - eyePos.GetZ());
-
-    return result;
+    return m_queries.ResolveVoxelCollision(eyePos, halfWidth, height, eyeOffset);
 }
 
 void ChunkManager::LinkNeighbors(const ChunkCoord& coord, Chunk* chunk) {
@@ -534,102 +419,21 @@ bool ChunkManager::IsNeighborOfInFlight(const ChunkCoord& coord) const {
 }
 
 void ChunkManager::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) {
-    ColumnKey key{cx, yBand, cz};
+    m_mesher.RebuildColumnMesh(cx, yBand, cz, allowDefer);
+}
 
-    int bandMinY = yBand * BAND_SIZE;
-    int bandMaxY = bandMinY + BAND_SIZE - 1;
-
-    Sleak::VoxelVertexGroup mergedVerts;
-    Sleak::IndexGroup mergedIndices;
-    Sleak::VoxelVertexGroup mergedWaterVerts;
-    Sleak::IndexGroup mergedWaterIndices;
-
-    for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
-        Chunk* chunk = GetChunk(cx, cy, cz);
-        // Skip chunks not ready (in-flight or not yet generated)
-        if (!chunk || chunk->IsInFlight() || chunk->NeedsGeneration()) continue;
-
-        // Mesh data was consumed — regenerate it.
-        if (!chunk->HasPendingMesh()) {
-            if (m_multithreaded && allowDefer) {
-                chunk->SetInFlight(true);
-                {
-                    std::lock_guard<std::mutex> lock(m_taskMutex);
-                    m_taskQueue.push_back(chunk);
-                }
-                m_taskCV.notify_one();
-                m_dirtyColumns.insert(key);
-                return;
-            }
-            chunk->GenerateMeshData();
-        }
-
-        // Merge opaque mesh
-        {
-            auto& md = chunk->GetPendingMeshData();
-            chunk->ClearPendingMesh();
-
-            if (md.vertices.GetSize() > 0) {
-                uint32_t baseVertex = static_cast<uint32_t>(mergedVerts.GetSize());
-                const Sleak::VoxelVertex* vdata = md.vertices.GetData();
-                for (size_t i = 0; i < md.vertices.GetSize(); ++i)
-                    mergedVerts.AddVertex(vdata[i]);
-                const uint32_t* idata = md.indices.GetData();
-                for (size_t i = 0; i < md.indices.GetSize(); ++i)
-                    mergedIndices.add(idata[i] + baseVertex);
-            }
-            md.vertices.release();
-            md.indices.release();
-        }
-
-        // Merge water mesh
-        {
-            auto& wd = chunk->GetPendingWaterMeshData();
-            chunk->ClearPendingWaterMesh();
-
-            if (wd.vertices.GetSize() > 0) {
-                uint32_t baseVertex = static_cast<uint32_t>(mergedWaterVerts.GetSize());
-                const Sleak::VoxelVertex* vdata = wd.vertices.GetData();
-                for (size_t i = 0; i < wd.vertices.GetSize(); ++i)
-                    mergedWaterVerts.AddVertex(vdata[i]);
-                const uint32_t* idata = wd.indices.GetData();
-                for (size_t i = 0; i < wd.indices.GetSize(); ++i)
-                    mergedWaterIndices.add(idata[i] + baseVertex);
-            }
-            wd.vertices.release();
-            wd.indices.release();
-        }
-    }
-
-    if (mergedVerts.GetSize() == 0 && mergedWaterVerts.GetSize() == 0) {
-        m_columns.erase(key);
-        return;
-    }
-
-    // Release old GPU buffers BEFORE allocating new ones to reduce peak VRAM.
-    auto existingIt = m_columns.find(key);
-    if (existingIt != m_columns.end()) {
-        existingIt->second.mesh = {};
-        existingIt->second.waterMesh = {};
-    }
-
-    ColumnMesh col;
-    if (mergedVerts.GetSize() > 0)
-        col.mesh = Sleak::MeshBatch::CreateVoxelMesh(mergedVerts, mergedIndices);
-    if (mergedWaterVerts.GetSize() > 0)
-        col.waterMesh = Sleak::MeshBatch::CreateVoxelMesh(mergedWaterVerts, mergedWaterIndices);
-
-    if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) {
-        m_oomThisFrame = true;
-        return;
-    }
-
-    col.visible = true;
-    m_columns[key] = std::move(col);
+void ChunkManager::StashIfDirty(Chunk* chunk) {
+    // Preserve unsaved edits across unload; reload paths restore + re-dirty
+    if (!chunk || !chunk->IsDirty()) return;
+    ChunkCoord c{chunk->GetChunkX(), chunk->GetChunkY(), chunk->GetChunkZ()};
+    std::memcpy(m_savedBlockData[PackCoord(c.x, c.y, c.z)].data(),
+                chunk->GetBlockData(), 4096);
+    m_stashedDirty.insert(c);
 }
 
 void ChunkManager::ForceUnloadChunk(Chunk* chunk) {
     if (!chunk) return;
+    StashIfDirty(chunk);
     int idx = GetGridIndex(chunk->GetChunkX(), chunk->GetChunkY(), chunk->GetChunkZ());
     if (idx >= 0 && m_chunkGrid[idx] == chunk) {
         m_chunkGrid[idx] = nullptr;
@@ -646,14 +450,19 @@ void ChunkManager::ForceUnloadChunk(Chunk* chunk) {
 }
 
 void ChunkManager::Update(float playerX, float playerY, float playerZ) {
+    // Retry deferred block edits; SetBlockAt re-queues any still blocked
+    if (!m_pendingEdits.empty()) {
+        std::vector<PendingBlockEdit> retry;
+        retry.swap(m_pendingEdits);
+        for (auto& e : retry) SetBlockAt(e.x, e.y, e.z, e.type);
+    }
+
     int centerX = static_cast<int>(std::floor(playerX / Chunk::SIZE));
     int centerY = static_cast<int>(std::floor(playerY / Chunk::SIZE));
     int centerZ = static_cast<int>(std::floor(playerZ / Chunk::SIZE));
+    m_lastCenterY = centerY;
 
-    bool xzMoved = (centerX != m_lastCenterX || centerZ != m_lastCenterZ);
-    bool yMoved  = (centerY != m_lastCenterY);
-
-    if (xzMoved) {
+    if (centerX != m_lastCenterX || centerZ != m_lastCenterZ) {
         // Save previous center before updating, so we can compute exiting slabs.
         int prevCX = (m_lastCenterX == INT_MAX) ? centerX : m_lastCenterX;
         int prevCZ = (m_lastCenterZ == INT_MAX) ? centerZ : m_lastCenterZ;
@@ -698,77 +507,36 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             else if (centerZ < prevCZ)
                 for (int z = centerZ + m_renderDistance + 1; z <= prevCZ + m_renderDistance; ++z) unloadSlabZ(z);
         }
-    }
-
-    if (xzMoved || yMoved) {
-        m_lastCenterY = centerY;
 
         m_pendingLoad.clear();
         m_pendingLoad.reserve(m_loadSpiral.size() * (WorldGenerator::MAX_CHUNK_Y - WorldGenerator::MIN_CHUNK_Y + 1));
 
-        for (const auto& offset : m_loadSpiral) {
-            int cx = centerX + offset.first;
-            int cz = centerZ + offset.second;
+        // Spiral generates coordinates from closest to furthest.
+        // We push them in reverse so the pop_back() takes the closest chunks first!
+        // GetCachedColumnMaxCy() computes GetMaxFilledChunkY once per XZ column and caches
+        // the result permanently (terrain is deterministic), replacing O(8) IsChunkAboveTerrain
+        // calls (each with 9×6 FBM evaluations) with a single cached lookup per column.
+        for (auto it = m_loadSpiral.rbegin(); it != m_loadSpiral.rend(); ++it) {
+            int cx = centerX + it->first;
+            int cz = centerZ + it->second;
             int maxCy = GetCachedColumnMaxCy(cx, cz);
             for (int cy = WorldGenerator::MIN_CHUNK_Y; cy <= maxCy; ++cy) {
                 if (!GetChunk(cx, cy, cz))
                     m_pendingLoad.push_back({cx, cy, cz});
             }
         }
-
-        // Velocity in chunk-space from last player world position.
-        float dvx = (playerX - m_lastPlayerX) / Chunk::SIZE;
-        float dvy = (playerY - m_lastPlayerY) / Chunk::SIZE;
-        float dvz = (playerZ - m_lastPlayerZ) / Chunk::SIZE;
-        float speed = std::sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
-
-        if (speed > 0.05f) {
-            // Velocity-biased sort: chunks ahead of the player are pulled to the
-            // front of the load queue so they appear before the player arrives.
-            // lookahead scales with speed, capped at render distance.
-            float inv = 1.0f / speed;
-            float nx = dvx * inv, ny = dvy * inv, nz = dvz * inv;
-            float lookahead = std::min(speed * 4.0f,
-                                       static_cast<float>(m_renderDistance));
-            std::sort(m_pendingLoad.begin(), m_pendingLoad.end(),
-                [centerX, centerY, centerZ, nx, ny, nz, lookahead](
-                        const ChunkCoord& a, const ChunkCoord& b) {
-                    float dax = static_cast<float>(a.x - centerX);
-                    float day = static_cast<float>(a.y - centerY);
-                    float daz = static_cast<float>(a.z - centerZ);
-                    float dbx = static_cast<float>(b.x - centerX);
-                    float dby = static_cast<float>(b.y - centerY);
-                    float dbz = static_cast<float>(b.z - centerZ);
-                    float sa = dax*dax + day*day + daz*daz
-                               - lookahead * (dax*nx + day*ny + daz*nz);
-                    float sb = dbx*dbx + dby*dby + dbz*dbz
-                               - lookahead * (dbx*nx + dby*ny + dbz*nz);
-                    return sa > sb;
-                });
-        } else {
-            // Static: pure 3D distance, closest at back for pop_back().
-            std::sort(m_pendingLoad.begin(), m_pendingLoad.end(),
-                [centerX, centerY, centerZ](const ChunkCoord& a, const ChunkCoord& b) {
-                    int da = (a.x-centerX)*(a.x-centerX)
-                           + (a.y-centerY)*(a.y-centerY)
-                           + (a.z-centerZ)*(a.z-centerZ);
-                    int db = (b.x-centerX)*(b.x-centerX)
-                           + (b.y-centerY)*(b.y-centerY)
-                           + (b.z-centerZ)*(b.z-centerZ);
-                    return da > db;
-                });
-        }
     }
-
-    m_lastPlayerX = playerX;
-    m_lastPlayerY = playerY;
-    m_lastPlayerZ = playerZ;
 
     // Process pending unloads gradually (rate-limited)
     {
         int unloaded = 0;
+        // Over-cap safety valve: drain the backlog faster than it grows
+        int unloadBudget = m_chunksPerFrame;
+        if (static_cast<int>(m_columns.size()) > MAX_COLUMN_MESHES)
+            unloadBudget *= 4;
         std::unordered_set<ColumnKey, ColumnKeyHash> columnsToCheck;
-        while (unloaded < m_chunksPerFrame && !m_pendingUnload.empty()) {
+        std::vector<ChunkCoord> deferredUnloads;
+        while (unloaded < unloadBudget && !m_pendingUnload.empty()) {
             ChunkCoord coord = m_pendingUnload.back();
             m_pendingUnload.pop_back();
 
@@ -779,8 +547,14 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                 std::abs(coord.z - centerZ) <= m_renderDistance)
                 continue;
 
-            if (chunk->IsInFlight() || IsNeighborOfInFlight(coord))
+            // Busy — RE-QUEUE for next frame, never drop (VRAM leak otherwise).
+            // Charge the budget so a deferred backlog can't grow the scan
+            // unbounded within one frame.
+            if (chunk->IsInFlight() || IsNeighborOfInFlight(coord)) {
+                deferredUnloads.push_back(coord);
+                ++unloaded;
                 continue;
+            }
 
             columnsToCheck.insert({coord.x, ChunkYToBand(coord.y), coord.z});
             UnlinkNeighbors(coord, chunk);
@@ -788,6 +562,9 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             delete chunk;
             ++unloaded;
         }
+        // Front insert: busy entries retry AFTER fresh ones, not before
+        m_pendingUnload.insert(m_pendingUnload.begin(), deferredUnloads.begin(),
+                               deferredUnloads.end());
 
         // Free column meshes whose bands lost all chunks.  For columns
         // that still have SOME chunks, erase the column mesh immediately
@@ -881,9 +658,10 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         }
 
         // Phase 2: Dispatch new chunks to workers
-        int dispatchBudget = m_chunksPerFrame;
+        int dispatchBudget = m_dispatchPerFrame;
 
         std::vector<Chunk*> batch;
+        std::vector<ChunkCoord> deferredLoads;
         int dispatched = 0;
         while (dispatched < dispatchBudget && !m_pendingLoad.empty()) {
             ChunkCoord coord = m_pendingLoad.back();
@@ -891,15 +669,23 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
 
             if (GetChunk(coord.x, coord.y, coord.z)) continue;
 
-            auto* chunk = new Chunk(coord.x, coord.y, coord.z);
             int idx = GetGridIndex(coord.x, coord.y, coord.z);
-            if (idx >= 0) {
-                if (m_chunkGrid[idx] != nullptr) {
-                    Chunk* stale = m_chunkGrid[idx];
-                    UnlinkNeighbors({stale->GetChunkX(), stale->GetChunkY(), stale->GetChunkZ()}, stale);
-                    ForceUnloadChunk(stale);
-                    delete stale;
+            // Aliased slot occupant still referenced by a worker — retry later
+            if (idx >= 0 && m_chunkGrid[idx] != nullptr) {
+                Chunk* stale = m_chunkGrid[idx];
+                ChunkCoord staleCoord{stale->GetChunkX(), stale->GetChunkY(),
+                                      stale->GetChunkZ()};
+                if (stale->IsInFlight() || IsNeighborOfInFlight(staleCoord)) {
+                    deferredLoads.push_back(coord);
+                    continue;
                 }
+                UnlinkNeighbors(staleCoord, stale);
+                ForceUnloadChunk(stale);
+                delete stale;
+            }
+
+            auto* chunk = new Chunk(coord.x, coord.y, coord.z);
+            if (idx >= 0) {
                 m_chunkGrid[idx] = chunk;
                 chunk->SetActiveIndex(static_cast<int>(m_activeChunks.size()));
                 m_activeChunks.push_back(chunk);
@@ -910,11 +696,14 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                 std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                             savedIt->second.data(), 4096);
                 chunk->SetNeedsGeneration(false);
+                if (m_stashedDirty.erase(coord)) chunk->SetDirty(true);
             }
             LinkNeighbors(coord, chunk);
             batch.push_back(chunk);
             ++dispatched;
         }
+        m_pendingLoad.insert(m_pendingLoad.end(), deferredLoads.begin(),
+                             deferredLoads.end());
 
         if (!batch.empty()) {
             {
@@ -1013,15 +802,21 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
 
             if (GetChunk(coord.x, coord.y, coord.z)) continue;
 
-            auto* chunk = new Chunk(coord.x, coord.y, coord.z);
             int idx = GetGridIndex(coord.x, coord.y, coord.z);
+            // Guard against stragglers from a prior multithreaded phase
+            if (idx >= 0 && m_chunkGrid[idx] != nullptr) {
+                Chunk* stale = m_chunkGrid[idx];
+                ChunkCoord staleCoord{stale->GetChunkX(), stale->GetChunkY(),
+                                      stale->GetChunkZ()};
+                if (stale->IsInFlight() || IsNeighborOfInFlight(staleCoord))
+                    continue;
+                UnlinkNeighbors(staleCoord, stale);
+                ForceUnloadChunk(stale);
+                delete stale;
+            }
+
+            auto* chunk = new Chunk(coord.x, coord.y, coord.z);
             if (idx >= 0) {
-                if (m_chunkGrid[idx] != nullptr) {
-                    Chunk* stale = m_chunkGrid[idx];
-                    UnlinkNeighbors({stale->GetChunkX(), stale->GetChunkY(), stale->GetChunkZ()}, stale);
-                    ForceUnloadChunk(stale);
-                    delete stale;
-                }
                 m_chunkGrid[idx] = chunk;
                 chunk->SetActiveIndex(static_cast<int>(m_activeChunks.size()));
                 m_activeChunks.push_back(chunk);
@@ -1031,6 +826,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             if (savedIt != m_savedBlockData.end()) {
                 std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                             savedIt->second.data(), 4096);
+                if (m_stashedDirty.erase(coord)) chunk->SetDirty(true);
             } else {
                 m_generator.Generate(chunk);
             }
@@ -1068,10 +864,15 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
         }
     }
 
-    FrustumCull();
+    UpdateVisibility();
 }
 
 void ChunkManager::FlushPendingChunks() {
+    // Bulk synchronous load: drain workers first — the unguarded deletes
+    // and meshing below must not run concurrently with generation.
+    bool restartWorkers = m_multithreaded && !m_workers.empty();
+    if (restartWorkers) StopWorkers();
+
     // Pass 1: Generate all chunks and link neighbors
     std::vector<ChunkCoord> generated;
     while (!m_pendingLoad.empty()) {
@@ -1099,6 +900,7 @@ void ChunkManager::FlushPendingChunks() {
         if (savedIt != m_savedBlockData.end()) {
             std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                         savedIt->second.data(), 4096);
+            if (m_stashedDirty.erase(coord)) chunk->SetDirty(true);
         } else {
             m_generator.Generate(chunk);
         }
@@ -1120,6 +922,8 @@ void ChunkManager::FlushPendingChunks() {
     // Pass 3: Build column meshes
     for (auto& col : flushDirtyColumns)
         RebuildColumnMesh(col.x, col.yBand, col.z);
+
+    if (restartWorkers) StartWorkers();
 }
 
 int64_t ChunkManager::PackCoord(int32_t cx, int32_t cy, int32_t cz) {
@@ -1136,12 +940,19 @@ std::vector<ChunkManager::DirtyChunkInfo> ChunkManager::GetDirtyChunks() const {
             result.push_back({chunk->GetChunkX(), chunk->GetChunkY(), chunk->GetChunkZ(), chunk->GetBlockData()});
         }
     }
+    // Edited chunks that were unloaded before this save
+    for (const auto& c : m_stashedDirty) {
+        auto it = m_savedBlockData.find(PackCoord(c.x, c.y, c.z));
+        if (it != m_savedBlockData.end())
+            result.push_back({c.x, c.y, c.z, it->second.data()});
+    }
     return result;
 }
 
 void ChunkManager::ClearDirtyFlags() {
     for (Chunk* chunk : m_activeChunks)
         if (chunk) chunk->SetDirty(false);
+    m_stashedDirty.clear();
 }
 
 void ChunkManager::LoadChunkData(const std::unordered_map<int64_t, std::array<uint8_t, 4096>>& data) {
@@ -1167,129 +978,24 @@ void ChunkManager::ForceReload() {
     m_lastCenterX = INT_MAX;
     m_lastCenterY = INT_MAX;
     m_lastCenterZ = INT_MAX;
-    m_lastPlayerX = 0.0f;
-    m_lastPlayerY = 0.0f;
-    m_lastPlayerZ = 0.0f;
 
     if (wasMultithreaded) StartWorkers();
 }
 
-void ChunkManager::FrustumCull() {
-    const auto& frustum = Sleak::Camera::GetMainViewFrustum();
-    const auto& camPos = Sleak::Camera::GetMainCameraPosition();
-    float camX = camPos.GetX();
-    float camY = camPos.GetY();
-    float camZ = camPos.GetZ();
+void ChunkManager::UpdateVisibility() { m_renderer.UpdateVisibility(); }
 
-    for (auto& [key, col] : m_columns) {
-        if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) { col.visible = false; continue; }
-
-        float minX = static_cast<float>(key.x * Chunk::SIZE);
-        float minY = static_cast<float>(key.yBand * BAND_SIZE * Chunk::SIZE);
-        float minZ = static_cast<float>(key.z * Chunk::SIZE);
-        float maxX = minX + Chunk::SIZE;
-        float maxY = minY + BAND_SIZE * Chunk::SIZE;
-        float maxZ = minZ + Chunk::SIZE;
-
-        // Horizontal-only distance check (XZ cylinder) so columns stay visible
-        // when the player is high above the terrain
-        float dx = (camX < minX) ? (minX - camX) : (camX > maxX) ? (camX - maxX) : 0.0f;
-        float dz = (camZ < minZ) ? (minZ - camZ) : (camZ > maxZ) ? (camZ - maxZ) : 0.0f;
-        float distSq = dx * dx + dz * dz;
-
-        if (distSq > m_drawDistSq) {
-            col.visible = false;
-            continue;
-        }
-
-        // Force-render columns near the player regardless of camera frustum.
-        // This ensures terrain above caves/enclosed spaces is always in the
-        // shadow map, preventing sunlight from leaking through terrain.
-        constexpr float SHADOW_FORCE_DIST = 48.0f;
-        if (distSq <= SHADOW_FORCE_DIST * SHADOW_FORCE_DIST) {
-            col.visible = true;
-            continue;
-        }
-
-        col.visible = frustum.IsAABBVisible(
-            Sleak::Math::Vector3D(minX, minY, minZ),
-            Sleak::Math::Vector3D(maxX, maxY, maxZ));
-    }
+void ChunkManager::SetCullingEnabled(bool frustum, bool occlusion) {
+    m_renderer.SetCullingEnabled(frustum, occlusion);
 }
 
-void ChunkManager::RenderColumns() {
-    Sleak::MeshBatch::BeginBatch(m_material.get());
-    for (auto& [key, col] : m_columns) {
-        if (col.visible && col.mesh.IsValid())
-            Sleak::MeshBatch::Draw(col.mesh);
-    }
-    Sleak::MeshBatch::EndBatch();
-}
+void ChunkManager::RenderColumns() { m_renderer.RenderColumns(); }
 
-void ChunkManager::RenderWater() {
-    if (!m_waterMaterial) return;
-    Sleak::MeshBatch::BeginBatch(m_waterMaterial.get());
-    for (auto& [key, col] : m_columns) {
-        if (col.visible && col.waterMesh.IsValid())
-            Sleak::MeshBatch::Draw(col.waterMesh);
-    }
-    Sleak::MeshBatch::EndBatch();
-}
-
-// ── Heightmap cache ──────────────────────────────────────────────────────────
-// Format: magic(4) seed(4) count(4) [cx(4) cz(4) maxCy(4)] * count
-// Tied to seed — if seed mismatches the file is silently ignored.
-
-static constexpr uint32_t HEIGHTMAP_MAGIC = 0x484D4348; // "HMCH"
+void ChunkManager::RenderWater() { m_renderer.RenderWater(); }
 
 void ChunkManager::SaveHeightmapCache(const std::string& path) const {
-    if (m_columnMaxCyCache.empty()) return;
-
-    std::ofstream f(path, std::ios::binary);
-    if (!f.is_open()) return;
-
-    uint32_t count = static_cast<uint32_t>(m_columnMaxCyCache.size());
-    uint32_t seed  = m_generator.GetSeed();
-
-    f.write(reinterpret_cast<const char*>(&HEIGHTMAP_MAGIC), 4);
-    f.write(reinterpret_cast<const char*>(&seed),  4);
-    f.write(reinterpret_cast<const char*>(&count), 4);
-
-    for (const auto& [packed, maxCy] : m_columnMaxCyCache) {
-        // Unpack cx/cz from the uint64 key (same packing as PackColumnXZ)
-        int32_t cx = static_cast<int32_t>(static_cast<uint32_t>(packed >> 32));
-        int32_t cz = static_cast<int32_t>(static_cast<uint32_t>(packed & 0xFFFFFFFF));
-        int32_t mc = static_cast<int32_t>(maxCy);
-        f.write(reinterpret_cast<const char*>(&cx), 4);
-        f.write(reinterpret_cast<const char*>(&cz), 4);
-        f.write(reinterpret_cast<const char*>(&mc), 4);
-    }
+    HeightmapCache::Save(path, m_columnMaxCyCache, m_generator.GetSeed());
 }
 
 void ChunkManager::LoadHeightmapCache(const std::string& path) {
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f.is_open()) return;
-
-    auto fileSize = static_cast<size_t>(f.tellg());
-    if (fileSize < 12) return;
-    f.seekg(0);
-
-    uint32_t magic, seed, count;
-    f.read(reinterpret_cast<char*>(&magic), 4);
-    f.read(reinterpret_cast<char*>(&seed),  4);
-    f.read(reinterpret_cast<char*>(&count), 4);
-
-    if (magic != HEIGHTMAP_MAGIC) return;
-    if (seed  != m_generator.GetSeed()) return;  // stale cache — different seed
-    if (fileSize < 12 + static_cast<size_t>(count) * 12) return;  // truncated
-
-    m_columnMaxCyCache.reserve(m_columnMaxCyCache.size() + count);
-    for (uint32_t i = 0; i < count; ++i) {
-        int32_t cx, cz, maxCy;
-        f.read(reinterpret_cast<char*>(&cx),    4);
-        f.read(reinterpret_cast<char*>(&cz),    4);
-        f.read(reinterpret_cast<char*>(&maxCy), 4);
-        uint64_t key = PackColumnXZ(cx, cz);
-        m_columnMaxCyCache.emplace(key, static_cast<int>(maxCy));
-    }
+    HeightmapCache::Load(path, m_columnMaxCyCache, m_generator.GetSeed());
 }

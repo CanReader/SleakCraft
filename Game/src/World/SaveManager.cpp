@@ -1,12 +1,56 @@
 #include "World/SaveManager.hpp"
 #include <fstream>
 #include <cstring>
+#include <cstdio>
 #include <chrono>
 #include <filesystem>
 #include <sys/stat.h>
+#include <Core/Logger.hpp>
 #ifdef _WIN32
 #include <direct.h>
+#include <io.h>
+#else
+#include <unistd.h>
 #endif
+
+// ── Atomic write: temp file + fsync + rename; target intact on failure ─
+
+/// Writes to a .tmp sibling, fsyncs it, then renames over the target so a
+/// crash mid-write leaves the previous file (or nothing) rather than a
+/// half-written one.
+static bool AtomicWriteFile(const std::string& path,
+                            const std::vector<uint8_t>& buf) {
+    std::string tmp = path + ".tmp";
+    std::FILE* fp = std::fopen(tmp.c_str(), "wb");
+    if (!fp) {
+        SLEAK_ERROR("Save: cannot open temp file {}", tmp);
+        return false;
+    }
+    bool ok = buf.empty() ||
+              std::fwrite(buf.data(), 1, buf.size(), fp) == buf.size();
+    if (ok) ok = (std::fflush(fp) == 0);
+    if (ok) {
+#ifdef _WIN32
+        ok = (_commit(_fileno(fp)) == 0);
+#else
+        ok = (::fsync(::fileno(fp)) == 0);
+#endif
+    }
+    std::fclose(fp);
+    std::error_code ec;
+    if (!ok) {
+        SLEAK_ERROR("Save: write/fsync failed for {}", tmp);
+        std::filesystem::remove(tmp, ec);
+        return false;
+    }
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        SLEAK_ERROR("Save: rename {} -> {} failed: {}", tmp, path, ec.message());
+        std::filesystem::remove(tmp, ec);
+        return false;
+    }
+    return true;
+}
 
 // ── Binary write helpers ─────────────────────────────────────────────
 
@@ -115,6 +159,8 @@ static bool MakeDir(const std::string& path) {
 #endif
 }
 
+/// Creates every missing path component of a directory path, one segment
+/// at a time.
 static bool MakeDirRecursive(const std::string& path) {
     std::string current;
     for (size_t i = 0; i < path.size(); ++i) {
@@ -134,9 +180,25 @@ void SaveManager::SetSavePath(const std::string& basePath) {
 }
 
 bool SaveManager::HasSave() const {
-    std::string worldDat = m_savePath + "/world.dat";
-    std::ifstream f(worldDat, std::ios::binary);
-    return f.good();
+    std::error_code ec;
+    auto size = std::filesystem::file_size(m_savePath + "/world.dat", ec);
+    return !ec && size > 0;
+}
+
+// ── Region directory scan: index is reconstructible from filenames ───
+
+std::vector<std::pair<int, int>> SaveManager::ScanRegionDir() const {
+    std::vector<std::pair<int, int>> found;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    for (auto& entry : fs::directory_iterator(m_savePath + "/regions", ec)) {
+        int rx, rz;
+        std::string name = entry.path().filename().string();
+        if (std::sscanf(name.c_str(), "r.%d.%d.dat", &rx, &rz) == 2 &&
+            name == RegionFile::RegionFileName(rx, rz))
+            found.emplace_back(rx, rz);
+    }
+    return found;
 }
 
 bool SaveManager::EnsureDirectories() const {
@@ -176,9 +238,23 @@ bool SaveManager::SaveWorld(const WorldMeta& meta,
         auto [rx, rz] = regionCoords[key];
         std::string regionPath = m_savePath + "/regions/" + RegionFile::RegionFileName(rx, rz);
 
-        // Load existing region data
+        // Fail closed: never rewrite a region we could not fully read
         std::vector<ChunkSaveData> existing;
-        RegionFile::Load(regionPath, existing);
+        size_t dropped = 0;
+        std::error_code ec;
+        if (std::filesystem::exists(regionPath, ec) &&
+            !RegionFile::Load(regionPath, existing, &dropped)) {
+            SLEAK_ERROR("Save: region {} unreadable — keeping it intact, "
+                        "chunks stay dirty for retry", regionPath);
+            return false;
+        }
+        if (dropped > 0) {
+            std::string bak = regionPath + ".corrupt";
+            if (!std::filesystem::exists(bak, ec))
+                std::filesystem::copy_file(regionPath, bak, ec);
+            SLEAK_WARN("Save: {} chunk(s) dropped from {} — original kept at {}",
+                       dropped, regionPath, bak);
+        }
 
         // Build map of existing chunks, overwrite with dirty ones
         std::unordered_map<int64_t, ChunkSaveData> merged;
@@ -219,6 +295,12 @@ bool SaveManager::WriteWorldDat(const WorldMeta& meta,
             allRegions[PackCoord(r.rx, 0, r.rz)] = r;
     }
 
+    // Self-heal: union region files present on disk but missing from index
+    for (auto& [rx, rz] : ScanRegionDir()) {
+        int64_t key = PackCoord(rx, 0, rz);
+        if (!allRegions.count(key)) allRegions[key] = {rx, rz, 0};
+    }
+
     // Merge new regions (overwrite counts for updated regions)
     for (const auto& r : meta.regions)
         allRegions[PackCoord(r.rx, 0, r.rz)] = r;
@@ -255,11 +337,7 @@ bool SaveManager::WriteWorldDat(const WorldMeta& meta,
     }
 
     std::string worldDat = m_savePath + "/world.dat";
-    std::ofstream file(worldDat, std::ios::binary);
-    if (!file.is_open()) return false;
-    file.write(reinterpret_cast<const char*>(buf.data()),
-               static_cast<std::streamsize>(buf.size()));
-    return file.good();
+    return AtomicWriteFile(worldDat, buf);
 }
 
 // ── Load ─────────────────────────────────────────────────────────────
@@ -270,25 +348,27 @@ bool SaveManager::LoadWorld(WorldMeta& meta,
 
     chunkData.clear();
 
-    // Load all region files listed in the meta
-    for (const auto& region : meta.regions) {
-        std::string regionPath = m_savePath + "/regions/" +
-                                 RegionFile::RegionFileName(region.rx, region.rz);
+    // Union indexed regions with a directory scan (index self-heals on save)
+    std::unordered_map<int64_t, std::pair<int, int>> regions;
+    for (const auto& r : meta.regions)
+        regions[PackCoord(r.rx, 0, r.rz)] = {r.rx, r.rz};
+    for (auto& [rx, rz] : ScanRegionDir())
+        regions[PackCoord(rx, 0, rz)] = {rx, rz};
+
+    for (const auto& [key, rc] : regions) {
+        auto& [rx, rz] = rc;
+        std::string regionPath =
+            m_savePath + "/regions/" + RegionFile::RegionFileName(rx, rz);
         std::vector<ChunkSaveData> chunks;
-        if (!RegionFile::Load(regionPath, chunks)) continue;
+        if (!RegionFile::Load(regionPath, chunks)) {
+            SLEAK_WARN("World load: skipping region ({},{}) — unreadable {}",
+                       rx, rz, regionPath);
+            continue;
+        }
 
         for (auto& c : chunks)
             chunkData[PackCoord(c.cx, c.cy, c.cz)] = c.blocks;
     }
-
-    // Also scan for region files not in meta (from previous saves)
-    // We do this by scanning the regions directory
-    // For simplicity, we rely on the meta having all regions.
-    // But let's also try common region files that might exist
-    // Actually, let's just scan the directory
-    std::string regionDir = m_savePath + "/regions/";
-    // Use a pragmatic approach: try to load based on what we already know
-    // The meta.regions should be authoritative after a save
 
     return true;
 }
@@ -299,6 +379,10 @@ bool SaveManager::ReadWorldDat(WorldMeta& meta) const {
     if (!file.is_open()) return false;
 
     auto fileSize = file.tellg();
+    if (fileSize < 0) {
+        SLEAK_WARN("World load: bad size for {}", worldDat);
+        return false;
+    }
     file.seekg(0);
     std::vector<uint8_t> buf(static_cast<size_t>(fileSize));
     file.read(reinterpret_cast<char*>(buf.data()), fileSize);
@@ -309,7 +393,11 @@ bool SaveManager::ReadWorldDat(WorldMeta& meta) const {
 
     uint32_t magic;
     if (!ReadU32(p, end, magic) || magic != WorldMeta::MAGIC) return false;
-    if (!ReadU16(p, end, meta.version) || meta.version > WorldMeta::CURRENT_VERSION) return false;
+    if (!ReadU16(p, end, meta.version) ||
+        meta.version != WorldMeta::CURRENT_VERSION) {
+        SLEAK_ERROR("World load: unsupported version in {}", worldDat);
+        return false;
+    }
     if (!ReadU16(p, end, meta.flags)) return false;
     if (!ReadI64(p, end, meta.saveTimestamp)) return false;
     if (!ReadString(p, end, meta.worldName)) return false;
@@ -327,6 +415,12 @@ bool SaveManager::ReadWorldDat(WorldMeta& meta) const {
     // Region index
     uint32_t regionCount;
     if (!ReadU32(p, end, regionCount)) return false;
+    // Bound count against remaining bytes (12-byte entry: rx, rz, chunkCount).
+    if (regionCount > static_cast<size_t>(end - p) / 12) {
+        SLEAK_ERROR("World load: regionCount {} exceeds file size in {}",
+                    regionCount, worldDat);
+        return false;
+    }
     meta.regions.resize(regionCount);
     for (uint32_t i = 0; i < regionCount; ++i) {
         auto& r = meta.regions[i];

@@ -55,7 +55,8 @@ float CalcShadow(vec4 sc) {
 
     float biasedDepth = projCoords.z - uShadowBias;
 
-    float angle = InterleavedGradientNoise(gl_FragCoord.xy) * 6.283185;
+    float angle =
+        InterleavedGradientNoise(projCoords.xy / uShadowTexelSize) * 6.283185;
     float sa = sin(angle);
     float ca = cos(angle);
     mat2 rotation = mat2(ca, sa, -sa, ca);
