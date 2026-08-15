@@ -33,6 +33,7 @@ struct BreakParticle {
 /// Purely visual block place/break effects (scale-in cube, debris particles).
 /// Owns their scene objects; the actual voxel edit happens separately once
 /// a placement's animation completes (see PopCompletedPlacements).
+/// @ingroup world
 class BlockEffects {
 public:
     void Initialize(Sleak::SceneBase* scene, const Sleak::RefPtr<Sleak::Material>& material);

@@ -25,6 +25,7 @@ struct ColumnInfo {
 /// Deterministic, seed-driven voxel terrain generator: multi-layer noise for
 /// height/biome, spaghetti + cheese cave carving, rivers/lakes, gravel
 /// patches, and tree placement. Same seed always produces the same world.
+/// @ingroup world
 class WorldGenerator {
 public:
     static constexpr int MIN_CHUNK_Y = 0;

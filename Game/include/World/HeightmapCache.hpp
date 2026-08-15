@@ -15,6 +15,7 @@ inline uint64_t PackColumnXZ(int cx, int cz) {
 }
 
 /// HMCH-format persistence for the column max chunk-Y cache.
+/// @ingroup world
 class HeightmapCache {
 public:
     /// Writes the cache as magic/seed/count followed by packed

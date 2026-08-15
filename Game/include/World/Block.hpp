@@ -4,6 +4,7 @@
 #include <cstdint>
 
 /// All placeable/generatable voxel types. COUNT must stay last.
+/// @ingroup world
 enum class BlockType : uint8_t {
     Air = 0,
     Grass,

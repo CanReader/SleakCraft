@@ -12,6 +12,7 @@ namespace Sleak { class DirectionalLight; }
 /// live-edit sun/ambient/fog/texture state (crosshair/vsync/MT-loading/
 /// culling toggles stay on MainScene since MainScene::SetupLighting also
 /// reads them at Initialize time; they're read/written here through it).
+/// @ingroup ui
 class SettingsPanel {
 public:
     SettingsPanel(ChunkManager& chunkManager, MainScene& scene)

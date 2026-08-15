@@ -8,6 +8,7 @@
 
 /// Compact 48-byte chunk vertex: position, normal, color/AO, texcoord.
 /// Layout must stay byte-identical to the registered vertex format below.
+/// @ingroup world
 struct VoxelVertex {
     float px, py, pz;     // position  (offset  0, 12 bytes)
     float nx, ny, nz;     // normal    (offset 12, 12 bytes)

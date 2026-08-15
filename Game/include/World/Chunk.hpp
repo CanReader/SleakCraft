@@ -24,6 +24,7 @@ struct ChunkMeshData {
 /// One 16x16x16 block of the voxel grid. Owns its block data and produces
 /// mesh data on request; the GPU mesh and scene lifetime live on
 /// ChunkManager/ChunkMesher, not here.
+/// @ingroup world
 class Chunk {
 public:
     static constexpr int SIZE = 16;

@@ -23,6 +23,7 @@ struct VoxelRaycastResult {
 };
 
 /// Voxel ray and AABB collision queries against a ChunkManager block field.
+/// @ingroup world
 class VoxelQueries {
 public:
     explicit VoxelQueries(ChunkManager& mgr) : m_mgr(mgr) {}

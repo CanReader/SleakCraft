@@ -14,6 +14,7 @@ class MainScene;
 /// cycling + number-key selection, and draining BlockEffects' completed
 /// placements into the world. Camera is fetched fresh via the owning
 /// MainScene where needed.
+/// @ingroup player
 class BlockInteraction {
 public:
     static constexpr int HOTBAR_SLOTS = 9;

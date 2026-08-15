@@ -9,6 +9,7 @@ class MainScene;
 /// Fly toggle (double-tap space), held movement-key state, and the per-frame
 /// FirstPersonController/RigidbodyComponent <-> ChunkManager collision glue.
 /// Camera/FPC/rigidbody are fetched fresh each call via the owning MainScene.
+/// @ingroup player
 class PlayerController {
 public:
     PlayerController(ChunkManager& chunkManager, MainScene& scene)

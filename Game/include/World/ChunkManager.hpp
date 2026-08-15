@@ -49,6 +49,7 @@ struct ChunkCoordHash {
 /// delegated to VoxelQueries, meshing to ChunkMesher, and rendering/culling
 /// to ChunkRenderer; those collaborators reach back in via the accessors
 /// below.
+/// @ingroup world
 class ChunkManager {
 public:
     ChunkManager();

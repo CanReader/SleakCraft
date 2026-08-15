@@ -10,6 +10,7 @@ class MainScene;
 /// FOV drag), the top-right performance panel, the crosshair, and the
 /// save/load toast. Owns the metrics cache and its 0.5s refresh timer; camera
 /// and app state are fetched fresh via the owning MainScene each call.
+/// @ingroup ui
 class HudPanel {
 public:
     HudPanel(ChunkManager& chunkManager, MainScene& scene)

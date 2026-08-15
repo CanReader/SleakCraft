@@ -49,6 +49,7 @@ using ColumnMeshMap = std::unordered_map<ColumnKey, ColumnMesh, ColumnKeyHash>;
 using ColumnKeySet = std::unordered_set<ColumnKey, ColumnKeyHash>;
 
 /// Merges a band of chunk meshes into one column mesh and uploads it.
+/// @ingroup world
 class ChunkMesher {
 public:
     /// Binds the mesher to the manager owning the chunk grid and column map.

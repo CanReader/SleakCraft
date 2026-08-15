@@ -7,6 +7,7 @@
 class ChunkManager;
 
 /// Culls and submits a ChunkManager's column meshes to the render batches.
+/// @ingroup world
 class ChunkRenderer {
 public:
     /// Binds the renderer to the manager owning the column map and materials.

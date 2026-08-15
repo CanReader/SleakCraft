@@ -11,6 +11,7 @@ class MainScene;
 
 /// Engine entry point for SleakCraft. Owns the menu and in-world scenes and
 /// switches the active Scene between them.
+/// @ingroup app
 class SLEAK_API Game : public Sleak::GameBase {
 public:
   Game();

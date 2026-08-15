@@ -11,6 +11,7 @@ class MainScene;
 /// chunks, and drives the ForceReload -> SetSeed -> LoadChunkData ->
 /// LoadHeightmapCache load ordering. Player-state and save-lock/UI-message
 /// fields are read/written through the owning MainScene.
+/// @ingroup persistence
 class WorldPersistence {
 public:
     WorldPersistence(ChunkManager& chunkManager, SaveManager& saveManager,

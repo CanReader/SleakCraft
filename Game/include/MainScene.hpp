@@ -25,6 +25,7 @@ namespace Sleak { class Material; class DirectionalLight; }
 /// collaborators, and input event routing. Gameplay and rendering logic
 /// itself lives on ChunkManager, PlayerController, BlockInteraction, and the
 /// UI panels; this class wires them together and owns their lifetime.
+/// @ingroup app
 class MainScene : public Sleak::Scene {
 public:
     MainScene(const std::string& name, const std::string& savePath,

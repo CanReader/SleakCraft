@@ -17,6 +17,7 @@ struct ChunkCoordHash;
 /// index) plus the region files under regions/. Groups dirty chunks into
 /// their RegionFile, merges with what's already on disk, and self-heals the
 /// region index against the directory listing on every save/load.
+/// @ingroup persistence
 class SaveManager {
 public:
     void SetSavePath(const std::string& basePath);

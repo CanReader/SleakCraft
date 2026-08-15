@@ -5,6 +5,7 @@
 
 /// Seeded Perlin noise generator with 2D/3D fractal Brownian motion (FBM)
 /// on top; the terrain and cave generators sample this per world/chunk.
+/// @ingroup world
 class Noise {
 public:
     Noise();

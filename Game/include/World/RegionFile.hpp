@@ -15,6 +15,7 @@ struct ChunkSaveData {
 /// Binary on-disk format grouping REGION_SIZE^2 chunk columns into one file:
 /// per-chunk RLE compression, a CRC32 per chunk, and an atomic (temp file +
 /// fsync + rename) write so a crash mid-save can't corrupt an existing file.
+/// @ingroup persistence
 class RegionFile {
 public:
     static constexpr uint32_t MAGIC = 0x534C4B52; // "SLKR"

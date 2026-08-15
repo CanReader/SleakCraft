@@ -7,6 +7,7 @@
 
 /// Bottom-center hotbar strip: block icon texture cache + slot rendering.
 /// Selection/slot state lives on BlockInteraction and is read via reference.
+/// @ingroup ui
 class Hotbar {
 public:
     explicit Hotbar(BlockInteraction& blockInteraction)

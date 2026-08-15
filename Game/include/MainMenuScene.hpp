@@ -9,6 +9,7 @@
 
 /// Title screen: world create/load/delete flows and the deferred handoff
 /// into Game::StartWorld once a loading screen has had a frame to render.
+/// @ingroup app
 class MainMenuScene : public Sleak::Scene {
 public:
     explicit MainMenuScene(const std::string& name);

@@ -16,6 +16,7 @@ struct AtlasUV {
 /// Builds a runtime texture atlas from the individual block PNGs, with each
 /// tile wrapped into a gutter-padded cell so linear/aniso filtering never
 /// bleeds into a neighboring tile.
+/// @ingroup world
 class TextureAtlas {
 public:
     static constexpr int TILES_PER_ROW = 4;
