@@ -1,0 +1,658 @@
+diff --git a/Engine/include/private/Graphics/OpenGL/OpenGLRenderer.hpp b/Engine/include/private/Graphics/OpenGL/OpenGLRenderer.hpp
+index c4c660b..fae244b 100644
+--- a/Engine/include/private/Graphics/OpenGL/OpenGLRenderer.hpp
++++ b/Engine/include/private/Graphics/OpenGL/OpenGLRenderer.hpp
+@@ -121,6 +121,7 @@ private:
+     virtual bool IsDeferredEnabled() const override;
+     virtual bool IsInGeometryPass() const override { return m_inGeometryPass; }
+     virtual void BindGBufferShader() override;
++    virtual void BindPBRMaterial(Sleak::Material* material) override;
+     virtual void ExecuteDeferredLightingPass() override;
+     virtual void BeginForwardTransparentPass() override;
+     virtual void EndForwardTransparentPass() override;
+@@ -177,6 +178,50 @@ private:
+     GLuint m_iblBoundCubemap  = 0;   // last skybox cubemap we baked from
+     void EnsureIBL();
+     void CleanupIBL();
++
++    // ---- HDR scene target (deferred lighting + forward render into this) ----
++    // The deferred lighting pass and the forward transparent/skybox pass both
++    // render into this RGBA16F target. Post-effects (TAA/SSR/Bloom) then run,
++    // and the composite tonemaps to the default framebuffer in EndRender().
++    GLuint m_hdrFBO      = 0;
++    GLuint m_hdrColorTex = 0;   // RGBA16F linear HDR scene
++    bool   m_postCreated = false;
++
++    bool   CreatePostResources();
++    void   CleanupPostResources();
++    void   RecreatePostOnResize(int width, int height);
++
++    // ---- Bloom (6-mip pyramid) ----
++    static constexpr int BLOOM_MIP_COUNT = 6;
++    GLuint m_bloomFBO[BLOOM_MIP_COUNT]  = {};
++    GLuint m_bloomTex[BLOOM_MIP_COUNT]  = {};
++    int    m_bloomW[BLOOM_MIP_COUNT]    = {};
++    int    m_bloomH[BLOOM_MIP_COUNT]    = {};
++    class OpenGLShader* m_bloomThresholdShader  = nullptr;
++    class OpenGLShader* m_bloomDownsampleShader = nullptr;
++    class OpenGLShader* m_bloomUpsampleShader   = nullptr;
++    class OpenGLShader* m_bloomCompositeShader  = nullptr;
++    void RenderBloomGL();           // builds the bloom pyramid into m_bloomTex[0]
++    void RenderCompositeGL();       // ALWAYS runs: HDR(+bloom+SSR) -> FBO 0
++
++    // ---- SSR ----
++    GLuint m_ssrFBO        = 0;
++    GLuint m_ssrTex        = 0;   // RGBA16F premultiplied reflection
++    GLuint m_ssrParamsUBO  = 0;   // binding 11
++    class OpenGLShader* m_ssrShader = nullptr;
++    void RenderSSRGL();
++
++    // ---- TAA ----
++    GLuint m_taaFBO        = 0;
++    GLuint m_taaHistoryTex[2] = {};  // ping-pong history (RGBA16F)
++    int    m_taaHistoryIdx = 0;
++    int    m_taaFrameIdx   = 0;
++    GLuint m_taaParamsUBO  = 0;   // binding 12
++    class OpenGLShader* m_taaShader = nullptr;
++    float  m_prevView[16]  = {};
++    float  m_prevProj[16]  = {};
++    bool   m_havePrevVP    = false;
++    void RenderTAAGL();
+ };
+ 
+ }  // namespace RenderEngine
+diff --git a/Engine/src/OpenGLRenderer.cpp b/Engine/src/OpenGLRenderer.cpp
+index 87bdf7d..59b4321 100644
+--- a/Engine/src/OpenGLRenderer.cpp
++++ b/Engine/src/OpenGLRenderer.cpp
+@@ -14,10 +14,12 @@
+ #include <Core/Application.hpp>
+ #include <Core/SceneBase.hpp>
+ #include <Runtime/Skybox.hpp>
++#include <Runtime/Material.hpp>
+ #include <GameBase.hpp>
+ #include <SDL3/SDL.h>
+ #include <vector>
+ #include <cstring>
++#include <algorithm>
+ 
+ namespace Sleak {
+ namespace RenderEngine {
+@@ -160,6 +162,24 @@ void OpenGLRenderer::BeginRender() {
+ }
+ 
+ void OpenGLRenderer::EndRender() {
++    // Deferred post-process chain. Deferred lighting + the forward
++    // transparent/skybox pass rendered into the HDR scene target; now run
++    // TAA -> SSR -> Bloom, then composite (scene + bloom + SSR) to FBO 0.
++    // Mirrors VulkanRenderer::EndRender ordering. Runs only when the HDR target
++    // is active (m_postCreated); otherwise the deferred path drew straight to
++    // FBO 0 and there is nothing to composite.
++    if (m_deferredEnabled && m_gbufferCreated && m_postCreated) {
++        RenderTAAGL();         // resolve HDR with history (passthrough when off)
++        RenderSSRGL();         // reflections -> SSR target (cleared when off)
++        RenderBloomGL();       // bloom pyramid -> bloomTex[0] (black when off)
++        RenderCompositeGL();   // ALWAYS: scene(+bloom+SSR) -> FBO 0
++#ifdef DEBUG
++        GLenum glErr = glGetError();
++        if (glErr != GL_NO_ERROR)
++            SLEAK_WARN("OpenGL post-process GL error: 0x{:X}", (unsigned)glErr);
++#endif
++    }
++
+     // Resolve MSAA FBO to default framebuffer before ImGui.
+     // Skip in deferred mode — we rendered directly to FBO 0.
+     if (m_msaaFBO != 0 && !IsDeferredEnabled()) {
+@@ -877,11 +897,16 @@ bool OpenGLRenderer::CreateGBufferResources() {
+     if (!CreateSSAOResources()) {
+         SLEAK_WARN("OpenGL SSAO resources failed to initialize — SSAO disabled");
+     }
++    if (!CreatePostResources()) {
++        SLEAK_WARN("OpenGL post-process resources failed to initialize — "
++                   "bloom/SSR/TAA disabled");
++    }
+     return true;
+ }
+ 
+ void OpenGLRenderer::CleanupGBufferResources() {
+     CleanupSSAOResources();
++    CleanupPostResources();
+     CleanupIBL();
+     if (m_gbufferAlbedoAO)    { glDeleteTextures(1, &m_gbufferAlbedoAO);    m_gbufferAlbedoAO    = 0; }
+     if (m_gbufferNormalRough) { glDeleteTextures(1, &m_gbufferNormalRough); m_gbufferNormalRough = 0; }
+@@ -975,6 +1000,7 @@ void OpenGLRenderer::RecreateGBufferOnResize(int width, int height) {
+     glBindTexture(GL_TEXTURE_2D, 0);
+ 
+     RecreateSSAOOnResize(width, height);
++    RecreatePostOnResize(width, height);
+ 
+     SLEAK_INFO("OpenGL GBuffer resized to {}x{}", width, height);
+ }
+@@ -1009,6 +1035,15 @@ void OpenGLRenderer::BindGBufferShader() {
+     }
+ }
+ 
++void OpenGLRenderer::BindPBRMaterial(Sleak::Material* material) {
++    // Deferred geometry pass material bind. The deferred rewrite routed this
++    // through RenderContext::BindPBRMaterial (a no-op default) and only Vulkan
++    // overrode it — leaving OpenGL drawing terrain with the leftover (water)
++    // program. Restore the original path: GBuffer shader + material textures/CB.
++    BindGBufferShader();
++    if (material) material->BindTexturesAndCB();
++}
++
+ void OpenGLRenderer::UpdateDeferredCB(const void* data, uint32_t size) {
+     if (!m_deferredCBCreated) return;
+     glBindBuffer(GL_UNIFORM_BUFFER, m_deferredCBUBO);
+@@ -1030,13 +1065,17 @@ void OpenGLRenderer::ExecuteDeferredLightingPass() {
+     // lighting shader binds units 14/15/16 and UBO 10.
+     EnsureIBL();
+ 
+-    // Deferred rendering always outputs to the default FBO (framebuffer 0).
+-    // MSAA is incompatible with deferred (multisampled GBuffer is too expensive),
+-    // so we skip the MSAA FBO and render directly to the default framebuffer.
+-    constexpr GLuint targetFBO = 0;
++    // Deferred lighting renders into the HDR scene target (RGBA16F). The
++    // forward transparent/skybox pass renders there too, then EndRender()
++    // runs TAA/SSR/Bloom and the composite which tonemaps to FBO 0.
++    // If post resources are unavailable, fall back to direct-to-FBO0 so the
++    // renderer still produces an image (degraded — no HDR/effects).
++    const GLuint targetFBO = m_postCreated ? m_hdrFBO : 0;
+     glBindFramebuffer(GL_FRAMEBUFFER, targetFBO);
+ 
+-    // Keep the sky color cleared
++    // Sky clear color stays the same. When rendering to the HDR target this
++    // is the linear HDR clear that the skybox forward pass overwrites; sky
++    // pixels are tonemapped by the composite just like everything else.
+     glClearColor(0.39f, 0.58f, 0.93f, 1.0f);
+     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+ 
+@@ -1359,5 +1398,488 @@ void OpenGLRenderer::ExecuteSSAOPass() {
+     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+ }
+ 
++// ============================================================
++// Post-process pipeline (HDR scene target + Bloom + SSR + TAA + Composite)
++//
++// Mirrors the Vulkan path (VulkanRenderer::EndRender): deferred lighting and
++// the forward transparent/skybox pass both render into an RGBA16F HDR target,
++// then TAA -> SSR -> Bloom build their results, and a final composite pass
++// applies ACES tonemap + fog and writes the default framebuffer.
++//
++// Texture units used by the post passes: 0-5 (free after the forward pass).
++// UBO bindings: SSR params = 11, TAA params = 12 (0-10 owned by lighting/SSAO/IBL).
++// ============================================================
++
++bool OpenGLRenderer::CreatePostResources() {
++    if (m_postCreated) return true;
++    if (!m_gbufferCreated) return false;
++
++    const int w = m_gbufferWidth;
++    const int h = m_gbufferHeight;
++
++    auto makeHDRTex = [](GLuint& tex, int tw, int th) {
++        glGenTextures(1, &tex);
++        glBindTexture(GL_TEXTURE_2D, tex);
++        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, tw, th, 0, GL_RGBA, GL_FLOAT, nullptr);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    };
++
++    // ---- HDR scene FBO: RGBA16F color + own depth renderbuffer ----
++    // A private depth RBO (not the GBuffer depth) reproduces the historical
++    // FBO0 depth behaviour the lighting pass relies on: lighting writes coarse
++    // depth (GL_ALWAYS) for geometry, sky discards leaving the cleared 1.0, so
++    // the skybox (LessEqual) only shows through sky pixels.
++    makeHDRTex(m_hdrColorTex, w, h);
++    glGenFramebuffers(1, &m_hdrFBO);
++    glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
++    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                           GL_TEXTURE_2D, m_hdrColorTex, 0);
++    GLuint hdrDepthRBO = 0;
++    glGenRenderbuffers(1, &hdrDepthRBO);
++    glBindRenderbuffer(GL_RENDERBUFFER, hdrDepthRBO);
++    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
++    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
++                              GL_RENDERBUFFER, hdrDepthRBO);
++    // Stash the RBO id in the FBO's unused alpha-of-tex slot? No — track via a
++    // dedicated member would be cleaner, but the RBO lifetime is tied to the
++    // FBO; delete it in CleanupPostResources by querying the attachment.
++    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
++        SLEAK_ERROR("OpenGL HDR scene FBO incomplete");
++        glDeleteRenderbuffers(1, &hdrDepthRBO);
++        CleanupPostResources();
++        return false;
++    }
++
++    // ---- Bloom 6-mip pyramid (RGBA16F, halving each level) ----
++    for (int m = 0; m < BLOOM_MIP_COUNT; ++m) {
++        m_bloomW[m] = std::max(1, w >> (m + 1));   // mip0 is half-res
++        m_bloomH[m] = std::max(1, h >> (m + 1));
++        makeHDRTex(m_bloomTex[m], m_bloomW[m], m_bloomH[m]);
++        glGenFramebuffers(1, &m_bloomFBO[m]);
++        glBindFramebuffer(GL_FRAMEBUFFER, m_bloomFBO[m]);
++        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                               GL_TEXTURE_2D, m_bloomTex[m], 0);
++        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
++            SLEAK_ERROR("OpenGL bloom mip {} FBO incomplete", m);
++            glDeleteRenderbuffers(1, &hdrDepthRBO);
++            CleanupPostResources();
++            return false;
++        }
++    }
++
++    // ---- SSR target (RGBA16F premultiplied) ----
++    makeHDRTex(m_ssrTex, w, h);
++    glGenFramebuffers(1, &m_ssrFBO);
++    glBindFramebuffer(GL_FRAMEBUFFER, m_ssrFBO);
++    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                           GL_TEXTURE_2D, m_ssrTex, 0);
++    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
++        SLEAK_ERROR("OpenGL SSR FBO incomplete");
++        glDeleteRenderbuffers(1, &hdrDepthRBO);
++        CleanupPostResources();
++        return false;
++    }
++
++    // ---- TAA history ping-pong (RGBA16F) ----
++    makeHDRTex(m_taaHistoryTex[0], w, h);
++    makeHDRTex(m_taaHistoryTex[1], w, h);
++    glGenFramebuffers(1, &m_taaFBO);   // re-targeted to a history tex each frame
++
++    glBindTexture(GL_TEXTURE_2D, 0);
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++
++    // ---- UBOs ----
++    glGenBuffers(1, &m_ssrParamsUBO);
++    glBindBuffer(GL_UNIFORM_BUFFER, m_ssrParamsUBO);
++    // 2*mat4 + vec4 + vec2 + 4*float + pad = 128+16+8+... round to 176 bytes
++    glBufferData(GL_UNIFORM_BUFFER, 176, nullptr, GL_DYNAMIC_DRAW);
++
++    glGenBuffers(1, &m_taaParamsUBO);
++    glBindBuffer(GL_UNIFORM_BUFFER, m_taaParamsUBO);
++    // 4*mat4 + vec2 + 2*float = 256 + 16 = 272 bytes
++    glBufferData(GL_UNIFORM_BUFFER, 272, nullptr, GL_DYNAMIC_DRAW);
++    glBindBuffer(GL_UNIFORM_BUFFER, 0);
++
++    // ---- Shaders ----
++    auto compile = [](OpenGLShader*& s, const char* frag) -> bool {
++        s = new OpenGLShader();
++        if (!s->compile("assets/shaders/fullscreen_gl.vert", frag)) {
++            delete s; s = nullptr; return false;
++        }
++        return true;
++    };
++
++    if (!compile(m_bloomThresholdShader,  "assets/shaders/bloom_threshold_gl.frag") ||
++        !compile(m_bloomDownsampleShader, "assets/shaders/bloom_downsample_gl.frag") ||
++        !compile(m_bloomUpsampleShader,   "assets/shaders/bloom_upsample_gl.frag") ||
++        !compile(m_bloomCompositeShader,  "assets/shaders/bloom_composite_gl.frag") ||
++        !compile(m_ssrShader,             "assets/shaders/ssr_gl.frag") ||
++        !compile(m_taaShader,             "assets/shaders/taa_gl.frag")) {
++        SLEAK_ERROR("OpenGL post-process shader compile failed");
++        glDeleteRenderbuffers(1, &hdrDepthRBO);
++        CleanupPostResources();
++        return false;
++    }
++
++    m_postCreated = true;
++    m_taaFrameIdx = 0;
++    m_havePrevVP  = false;
++    SLEAK_INFO("OpenGL post-process ready ({}x{}) — bloom/SSR/TAA available", w, h);
++    return true;
++}
++
++void OpenGLRenderer::CleanupPostResources() {
++    // Delete the HDR depth renderbuffer by querying the attachment (it was
++    // created locally in CreatePostResources without a dedicated member).
++    if (m_hdrFBO) {
++        glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
++        GLint type = 0, name = 0;
++        glGetFramebufferAttachmentParameteriv(
++            GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
++            GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
++        if (type == GL_RENDERBUFFER) {
++            glGetFramebufferAttachmentParameteriv(
++                GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
++                GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &name);
++            if (name) { GLuint rbo = (GLuint)name; glDeleteRenderbuffers(1, &rbo); }
++        }
++        glBindFramebuffer(GL_FRAMEBUFFER, 0);
++        glDeleteFramebuffers(1, &m_hdrFBO); m_hdrFBO = 0;
++    }
++    if (m_hdrColorTex) { glDeleteTextures(1, &m_hdrColorTex); m_hdrColorTex = 0; }
++
++    for (int m = 0; m < BLOOM_MIP_COUNT; ++m) {
++        if (m_bloomFBO[m]) { glDeleteFramebuffers(1, &m_bloomFBO[m]); m_bloomFBO[m] = 0; }
++        if (m_bloomTex[m]) { glDeleteTextures(1, &m_bloomTex[m]);     m_bloomTex[m] = 0; }
++    }
++    if (m_ssrFBO) { glDeleteFramebuffers(1, &m_ssrFBO); m_ssrFBO = 0; }
++    if (m_ssrTex) { glDeleteTextures(1, &m_ssrTex);     m_ssrTex = 0; }
++    if (m_taaFBO) { glDeleteFramebuffers(1, &m_taaFBO); m_taaFBO = 0; }
++    if (m_taaHistoryTex[0]) { glDeleteTextures(1, &m_taaHistoryTex[0]); m_taaHistoryTex[0] = 0; }
++    if (m_taaHistoryTex[1]) { glDeleteTextures(1, &m_taaHistoryTex[1]); m_taaHistoryTex[1] = 0; }
++    if (m_ssrParamsUBO) { glDeleteBuffers(1, &m_ssrParamsUBO); m_ssrParamsUBO = 0; }
++    if (m_taaParamsUBO) { glDeleteBuffers(1, &m_taaParamsUBO); m_taaParamsUBO = 0; }
++
++    delete m_bloomThresholdShader;  m_bloomThresholdShader  = nullptr;
++    delete m_bloomDownsampleShader; m_bloomDownsampleShader = nullptr;
++    delete m_bloomUpsampleShader;   m_bloomUpsampleShader   = nullptr;
++    delete m_bloomCompositeShader;  m_bloomCompositeShader  = nullptr;
++    delete m_ssrShader;             m_ssrShader             = nullptr;
++    delete m_taaShader;             m_taaShader             = nullptr;
++
++    m_postCreated  = false;
++    m_havePrevVP   = false;
++    m_taaHistoryIdx = 0;
++}
++
++void OpenGLRenderer::RecreatePostOnResize(int width, int height) {
++    if (!m_postCreated) return;
++
++    glBindTexture(GL_TEXTURE_2D, m_hdrColorTex);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
++
++    // Resize HDR depth RBO.
++    glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
++    GLint type = 0, name = 0;
++    glGetFramebufferAttachmentParameteriv(
++        GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
++        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
++    if (type == GL_RENDERBUFFER) {
++        glGetFramebufferAttachmentParameteriv(
++            GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
++            GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &name);
++        if (name) {
++            glBindRenderbuffer(GL_RENDERBUFFER, (GLuint)name);
++            glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
++        }
++    }
++
++    for (int m = 0; m < BLOOM_MIP_COUNT; ++m) {
++        m_bloomW[m] = std::max(1, width  >> (m + 1));
++        m_bloomH[m] = std::max(1, height >> (m + 1));
++        glBindTexture(GL_TEXTURE_2D, m_bloomTex[m]);
++        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, m_bloomW[m], m_bloomH[m], 0,
++                     GL_RGBA, GL_FLOAT, nullptr);
++    }
++
++    glBindTexture(GL_TEXTURE_2D, m_ssrTex);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
++
++    glBindTexture(GL_TEXTURE_2D, m_taaHistoryTex[0]);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
++    glBindTexture(GL_TEXTURE_2D, m_taaHistoryTex[1]);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
++
++    glBindTexture(GL_TEXTURE_2D, 0);
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++
++    m_havePrevVP = false;   // matrices invalid across resize; skip reprojection
++}
++
++// ---- 4x4 inverse helper not needed here: TAA inverts inside the shader and
++// SSR uses View/Projection directly (same as SSAO). ----
++
++void OpenGLRenderer::RenderTAAGL() {
++    if (!m_postCreated || !m_taaShader) return;
++
++    // Capture current view/projection (raw memcpy convention, like SSAO).
++    const Math::Matrix4& V = Camera::GetMainViewMatrix();
++    const Math::Matrix4& P = Camera::GetMainProjectionMatrix();
++    float curView[16], curProj[16];
++    std::memcpy(curView, &V(0, 0), sizeof(curView));
++    std::memcpy(curProj, &P(0, 0), sizeof(curProj));
++
++    // TAA disabled (or no valid history yet): leave HDR scene as-is and keep
++    // history in sync so re-enabling later doesn't ghost. We still record the
++    // current VP for next frame's reprojection.
++    bool canResolve = m_taaEnabled && m_havePrevVP && m_taaFrameIdx >= 1;
++
++    if (canResolve) {
++        // Upload TAA params UBO: CurView, CurProj, PrevView, PrevProj, screen, blend.
++        unsigned char buf[272];
++        std::memset(buf, 0, sizeof(buf));
++        std::memcpy(buf + 0,   curView,   64);
++        std::memcpy(buf + 64,  curProj,   64);
++        std::memcpy(buf + 128, m_prevView, 64);
++        std::memcpy(buf + 192, m_prevProj, 64);
++        float sw = (float)m_gbufferWidth, sh = (float)m_gbufferHeight;
++        std::memcpy(buf + 256, &sw, 4);
++        std::memcpy(buf + 260, &sh, 4);
++        float blend = 0.1f;
++        std::memcpy(buf + 264, &blend, 4);
++
++        glBindBuffer(GL_UNIFORM_BUFFER, m_taaParamsUBO);
++        glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(buf), buf);
++        glBindBuffer(GL_UNIFORM_BUFFER, 0);
++        glBindBufferBase(GL_UNIFORM_BUFFER, 12, m_taaParamsUBO);
++
++        const int histRead  = m_taaHistoryIdx;
++        const int histWrite = histRead ^ 1;
++
++        // Resolve current(HDR) + history -> write into the write-history tex.
++        glBindFramebuffer(GL_FRAMEBUFFER, m_taaFBO);
++        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                               GL_TEXTURE_2D, m_taaHistoryTex[histWrite], 0);
++        glViewport(0, 0, m_gbufferWidth, m_gbufferHeight);
++        glDisable(GL_DEPTH_TEST);
++        glDepthMask(GL_FALSE);
++        glDisable(GL_BLEND);
++
++        m_taaShader->bind();
++        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, m_hdrColorTex);
++        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, m_taaHistoryTex[histRead]);
++        glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, m_gbufferDepth);
++        glActiveTexture(GL_TEXTURE0);
++
++        glBindVertexArray(m_lightingVAO);
++        glDrawArrays(GL_TRIANGLES, 0, 3);
++
++        // Copy the resolved result back into the HDR scene so SSR/Bloom/Composite
++        // consume the anti-aliased image (matches Vulkan, which writes resolved
++        // back into hdrScene).
++        glBindFramebuffer(GL_READ_FRAMEBUFFER, m_taaFBO);
++        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_hdrFBO);
++        glBlitFramebuffer(0, 0, m_gbufferWidth, m_gbufferHeight,
++                          0, 0, m_gbufferWidth, m_gbufferHeight,
++                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
++        glBindFramebuffer(GL_FRAMEBUFFER, 0);
++
++        m_taaHistoryIdx = histWrite;
++    } else {
++        // No resolve this frame: seed the history with the current HDR frame so
++        // the next frame has something to blend against.
++        glBindFramebuffer(GL_READ_FRAMEBUFFER, m_hdrFBO);
++        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_taaFBO);
++        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                               GL_TEXTURE_2D, m_taaHistoryTex[m_taaHistoryIdx], 0);
++        glBlitFramebuffer(0, 0, m_gbufferWidth, m_gbufferHeight,
++                          0, 0, m_gbufferWidth, m_gbufferHeight,
++                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
++        glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    }
++
++    // Record VP for next frame.
++    std::memcpy(m_prevView, curView, sizeof(m_prevView));
++    std::memcpy(m_prevProj, curProj, sizeof(m_prevProj));
++    m_havePrevVP = true;
++    if (m_taaFrameIdx < 1000000) m_taaFrameIdx++;
++}
++
++void OpenGLRenderer::RenderSSRGL() {
++    if (!m_postCreated || !m_ssrShader) return;
++
++    // SSR disabled: clear the SSR target to zero so the composite adds nothing.
++    if (!m_ssrEnabled) {
++        glBindFramebuffer(GL_FRAMEBUFFER, m_ssrFBO);
++        glViewport(0, 0, m_gbufferWidth, m_gbufferHeight);
++        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
++        glClear(GL_COLOR_BUFFER_BIT);
++        glBindFramebuffer(GL_FRAMEBUFFER, 0);
++        return;
++    }
++
++    // Upload SSR params (View, Projection passed separately like SSAO).
++    const Math::Matrix4& V = Camera::GetMainViewMatrix();
++    const Math::Matrix4& P = Camera::GetMainProjectionMatrix();
++    const auto& camPos = Camera::GetMainCameraPosition();
++
++    unsigned char buf[176];
++    std::memset(buf, 0, sizeof(buf));
++    std::memcpy(buf + 0,  &V(0, 0), 64);   // View
++    std::memcpy(buf + 64, &P(0, 0), 64);   // Projection
++    float cp[4] = { camPos.GetX(), camPos.GetY(), camPos.GetZ(), 0.0f };
++    std::memcpy(buf + 128, cp, 16);        // CameraPos
++    float screen[2] = { (float)m_gbufferWidth, (float)m_gbufferHeight };
++    std::memcpy(buf + 144, screen, 8);     // ScreenSize
++    float maxDist = 20.0f, thickness = 0.5f, roughThresh = 0.9f;
++    int   numSteps = 20, numBinary = 6;
++    std::memcpy(buf + 152, &maxDist,   4);
++    std::memcpy(buf + 156, &thickness, 4);
++    std::memcpy(buf + 160, &numSteps,  4);
++    std::memcpy(buf + 164, &numBinary, 4);
++    std::memcpy(buf + 168, &roughThresh, 4);
++
++    glBindBuffer(GL_UNIFORM_BUFFER, m_ssrParamsUBO);
++    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(buf), buf);
++    glBindBuffer(GL_UNIFORM_BUFFER, 0);
++    glBindBufferBase(GL_UNIFORM_BUFFER, 11, m_ssrParamsUBO);
++
++    glBindFramebuffer(GL_FRAMEBUFFER, m_ssrFBO);
++    glViewport(0, 0, m_gbufferWidth, m_gbufferHeight);
++    glDisable(GL_DEPTH_TEST);
++    glDepthMask(GL_FALSE);
++    glDisable(GL_BLEND);
++    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
++    glClear(GL_COLOR_BUFFER_BIT);
++
++    m_ssrShader->bind();
++    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, m_gbufferNormalRough);
++    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, m_gbufferWorldPos);
++    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, m_gbufferDepth);
++    glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, m_gbufferMetalEmit);
++    glActiveTexture(GL_TEXTURE4); glBindTexture(GL_TEXTURE_2D, m_gbufferAlbedoAO);
++    glActiveTexture(GL_TEXTURE5); glBindTexture(GL_TEXTURE_2D, m_hdrColorTex);
++    glActiveTexture(GL_TEXTURE0);
++
++    glBindVertexArray(m_lightingVAO);
++    glDrawArrays(GL_TRIANGLES, 0, 3);
++
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++}
++
++void OpenGLRenderer::RenderBloomGL() {
++    if (!m_postCreated) return;
++
++    glDisable(GL_DEPTH_TEST);
++    glDepthMask(GL_FALSE);
++    glBindVertexArray(m_lightingVAO);
++
++    // Bloom disabled: clear mip0 to black so the composite (bloomStrength=0)
++    // adds nothing, and skip the expensive pyramid.
++    if (!m_bloomEnabled) {
++        glBindFramebuffer(GL_FRAMEBUFFER, m_bloomFBO[0]);
++        glViewport(0, 0, m_bloomW[0], m_bloomH[0]);
++        glDisable(GL_BLEND);
++        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
++        glClear(GL_COLOR_BUFFER_BIT);
++        glBindFramebuffer(GL_FRAMEBUFFER, 0);
++        return;
++    }
++
++    glDisable(GL_BLEND);
++
++    // ---- Threshold: HDR scene -> bloom mip 0 ----
++    {
++        glBindFramebuffer(GL_FRAMEBUFFER, m_bloomFBO[0]);
++        glViewport(0, 0, m_bloomW[0], m_bloomH[0]);
++        m_bloomThresholdShader->bind();
++        GLuint prog = m_bloomThresholdShader->GetProgram();
++        // The OpenGL scene is already ACES-LDR ([0,1]); threshold below 1.0 so
++        // bright sunlit/sky/highlight regions still feed the bloom pyramid.
++        glUniform1f(glGetUniformLocation(prog, "uThreshold"), 0.6f);
++        glUniform1f(glGetUniformLocation(prog, "uKnee"), 0.3f);
++        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, m_hdrColorTex);
++        glDrawArrays(GL_TRIANGLES, 0, 3);
++    }
++
++    // ---- Downsample chain: mip[i-1] -> mip[i] ----
++    m_bloomDownsampleShader->bind();
++    GLuint dprog = m_bloomDownsampleShader->GetProgram();
++    GLint dTexel = glGetUniformLocation(dprog, "uSrcTexelSize");
++    GLint dKaris = glGetUniformLocation(dprog, "uKaris");
++    for (int m = 1; m < BLOOM_MIP_COUNT; ++m) {
++        glBindFramebuffer(GL_FRAMEBUFFER, m_bloomFBO[m]);
++        glViewport(0, 0, m_bloomW[m], m_bloomH[m]);
++        glUniform2f(dTexel, 1.0f / (float)m_bloomW[m - 1], 1.0f / (float)m_bloomH[m - 1]);
++        glUniform1f(dKaris, (m == 1) ? 1.0f : 0.0f);   // Karis on first downsample
++        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, m_bloomTex[m - 1]);
++        glDrawArrays(GL_TRIANGLES, 0, 3);
++    }
++
++    // ---- Upsample chain (additive): mip[m] -> mip[m-1] ----
++    glEnable(GL_BLEND);
++    glBlendFunc(GL_ONE, GL_ONE);
++    glBlendEquation(GL_FUNC_ADD);
++    m_bloomUpsampleShader->bind();
++    GLuint uprog = m_bloomUpsampleShader->GetProgram();
++    GLint uTexel  = glGetUniformLocation(uprog, "uSrcTexelSize");
++    GLint uRadius = glGetUniformLocation(uprog, "uFilterRadius");
++    GLint uInten  = glGetUniformLocation(uprog, "uIntensity");
++    for (int m = BLOOM_MIP_COUNT - 1; m >= 1; --m) {
++        glBindFramebuffer(GL_FRAMEBUFFER, m_bloomFBO[m - 1]);
++        glViewport(0, 0, m_bloomW[m - 1], m_bloomH[m - 1]);
++        glUniform2f(uTexel, 1.0f / (float)m_bloomW[m], 1.0f / (float)m_bloomH[m]);
++        glUniform1f(uRadius, 1.0f);
++        glUniform1f(uInten, 1.0f);
++        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, m_bloomTex[m]);
++        glDrawArrays(GL_TRIANGLES, 0, 3);
++    }
++
++    glDisable(GL_BLEND);
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++}
++
++void OpenGLRenderer::RenderCompositeGL() {
++    if (!m_postCreated || !m_bloomCompositeShader) {
++        // No composite available: blit HDR straight to the screen as a fallback.
++        if (m_hdrFBO) {
++            glBindFramebuffer(GL_READ_FRAMEBUFFER, m_hdrFBO);
++            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
++            glBlitFramebuffer(0, 0, m_gbufferWidth, m_gbufferHeight,
++                              0, 0, m_gbufferWidth, m_gbufferHeight,
++                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
++            glBindFramebuffer(GL_FRAMEBUFFER, 0);
++        }
++        return;
++    }
++
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    glViewport(0, 0, m_gbufferWidth, m_gbufferHeight);
++    glDisable(GL_DEPTH_TEST);
++    glDepthMask(GL_FALSE);
++    glDisable(GL_BLEND);
++
++    m_bloomCompositeShader->bind();
++    GLuint prog = m_bloomCompositeShader->GetProgram();
++    glUniform1f(glGetUniformLocation(prog, "uBloomStrength"), m_bloomEnabled ? 0.5f : 0.0f);
++    glUniform1i(glGetUniformLocation(prog, "uSSREnabled"), m_ssrEnabled ? 1 : 0);
++
++    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, m_hdrColorTex);
++    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, m_bloomTex[0]);
++    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, m_ssrTex);
++    glActiveTexture(GL_TEXTURE0);
++
++    glBindVertexArray(m_lightingVAO);
++    glDrawArrays(GL_TRIANGLES, 0, 3);
++
++    // Restore default blend state for ImGui / subsequent passes.
++    glEnable(GL_BLEND);
++    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++    glBindVertexArray(m_VAO);
++}
++
+ }  // namespace RenderEngine
+ }  // namespace Sleak

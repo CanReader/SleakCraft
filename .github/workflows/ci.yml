@@ -34,6 +34,9 @@ jobs:
           - name: Linux Release
             os: ubuntu-latest
             config: Release
+          - name: Windows Debug
+            os: windows-latest
+            config: Debug
           - name: Windows Release
             os: windows-latest
             config: Release
@@ -93,9 +96,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-craft-${{ runner.os }}-${{ matrix.config }}-${{ github.sha }}
+          key: ccache-craft-${{ runner.os }}-${{ matrix.name }}-${{ github.sha }}
           restore-keys: |
-            ccache-craft-${{ runner.os }}-${{ matrix.config }}-
+            ccache-craft-${{ runner.os }}-${{ matrix.name }}-
+            ccache-craft-${{ runner.os }}-
 
       - name: Configure (Linux)
         if: runner.os == 'Linux'
@@ -103,6 +107,7 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSDL_IBUS=OFF
 
@@ -114,6 +119,17 @@ jobs:
       - name: Build
         working-directory: SleakCraft
         run: cmake --build build --config ${{ matrix.config }}
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.name }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            SleakCraft/build/CMakeFiles/CMakeError.log
+            SleakCraft/build/CMakeFiles/CMakeOutput.log
 
       - name: Confirm the binary was produced
         shell: bash
@@ -176,3 +192,97 @@ jobs:
           done
           [ $missing -eq 0 ] && echo "All voxel shaders have committed SPIR-V."
           exit $missing
+
+  # Compiling proves nothing about whether the game runs. Runners have no GPU,
+  # but Mesa's software Vulkan (lavapipe) plus a virtual display is enough to
+  # boot the real binary into a real world and catch startup crashes, missing
+  # shaders and failed asset loads.
+  smoke:
+    name: Headless smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out the game
+        uses: actions/checkout@v4
+        with:
+          path: SleakCraft
+
+      - name: Check out the engine
+        uses: actions/checkout@v4
+        with:
+          repository: CanReader/SleakEngine
+          submodules: recursive
+          path: SleakEngine
+
+      - name: Install dependencies and software Vulkan
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build ccache pkg-config xvfb \
+            mesa-vulkan-drivers vulkan-tools libvulkan1 \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxinerama-dev libxss-dev libxmu-dev \
+            libxkbcommon-dev libwayland-dev wayland-protocols \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
+            glslc || sudo apt-get install -y glslang-tools
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-craft-smoke-${{ github.sha }}
+          restore-keys: ccache-craft-smoke-
+
+      # Debug, because the -world flag that drives this test is Debug only.
+      - name: Build Debug
+        working-directory: SleakCraft
+        run: |
+          ccache -M 2G
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DSDL_IBUS=OFF
+          cmake --build build
+
+      - name: Confirm lavapipe is present
+        run: vulkaninfo --summary 2>/dev/null | head -20 || true
+
+      - name: Boot into a world
+        working-directory: SleakCraft/bin
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_LOADER_DRIVERS_SELECT: lvp_icd.x86_64.json
+        run: |
+          set +e
+          timeout --preserve-status 120 \
+            xvfb-run -a --server-args="-screen 0 1280x720x24" \
+            ./SleakCraft -r vulkan -w 640 -h 360 -world citest -seed 42 -rd 4 \
+            > smoke.log 2>&1
+          status=$?
+          set -e
+          echo "----- output -----"
+          tail -60 smoke.log
+          echo "------------------"
+          # 124 and 143 mean the timeout stopped a still-running game, which is
+          # the success case: it survived to the end of the window.
+          if [ $status -ne 0 ] && [ $status -ne 124 ] && [ $status -ne 143 ]; then
+            echo "The game exited with status $status before the timeout."
+            exit 1
+          fi
+          if ! grep -q "Creating new world 'citest'" smoke.log; then
+            echo "The game never reached world creation."
+            exit 1
+          fi
+          if grep -qiE "segmentation fault|assertion .* failed|terminate called" smoke.log; then
+            echo "A crash signature appeared in the output."
+            exit 1
+          fi
+          echo "Booted into a world and survived the run window."
+
+      - name: Upload the smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-log
+          retention-days: 7
+          if-no-files-found: ignore
+          path: SleakCraft/bin/smoke.log
