@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Check out the game
+        uses: actions/checkout@v4
+        with:
+          path: SleakCraft
+
+      - name: Check out the engine
+        uses: actions/checkout@v4
+        with:
+          repository: CanReader/SleakEngine
+          submodules: recursive
+          path: SleakEngine
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxinerama-dev libxss-dev libxmu-dev \
+            libxkbcommon-dev libwayland-dev wayland-protocols \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
+            glslc || sudo apt-get install -y glslang-tools
+
+      - name: Build Release
+        shell: bash
+        working-directory: SleakCraft
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSDL_IBUS=OFF
+          else
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          fi
+          cmake --build build --config Release
+
+      # bin/ already holds the binary next to its staged assets, which is the
+      # layout the executable expects since it chdirs to its own directory.
+      - name: Stage the package
+        shell: bash
+        working-directory: SleakCraft
+        run: |
+          test -d bin || { echo "bin/ missing after build"; exit 1; }
+          name="SleakCraft-${GITHUB_REF_NAME}-${RUNNER_OS}"
+          mkdir -p "dist/$name"
+          cp -r bin/* "dist/$name/"
+          cp README.md LICENSE "dist/$name/" 2>/dev/null || true
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "$name.zip" "$name" >/dev/null
+          else
+            tar czf "$name.tar.gz" "$name"
+          fi
+          ls -la
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            SleakCraft/dist/*.tar.gz
+            SleakCraft/dist/*.zip
+          generate_release_notes: true

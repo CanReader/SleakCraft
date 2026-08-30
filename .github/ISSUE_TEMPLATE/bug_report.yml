@@ -1,0 +1,50 @@
+name: Bug report
+description: Something behaves incorrectly, crashes, corrupts a world, or renders wrong
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: The incorrect behavior, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      placeholder: |
+        1. Start a world with -world test -seed 42
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where it shows up
+      multiple: true
+      options:
+        - World generation or streaming
+        - Saving or loading
+        - Player movement or block interaction
+        - Rendering or shaders
+        - UI, HUD, or menus
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: dataloss
+    attributes:
+      label: Data safety
+      options:
+        - label: This lost or corrupted a world I cared about
+  - type: input
+    id: platform
+    attributes:
+      label: Platform, GPU, and backend
+      placeholder: Arch Linux, RTX 3060, Vulkan
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      render: shell

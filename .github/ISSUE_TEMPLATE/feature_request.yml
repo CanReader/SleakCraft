@@ -1,0 +1,29 @@
+name: Feature request
+description: Propose gameplay, content, or a visual feature
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What should exist
+      description: Describe it from the player's point of view.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is worth building
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Possible approach
+      description: Optional. Which systems it touches, what it builds on.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This belongs in the game, not in the engine
+          required: true

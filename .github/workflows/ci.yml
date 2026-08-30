@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      engine_ref:
+        description: Engine branch or SHA to build against
+        default: main
+        required: false
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux Debug
+            os: ubuntu-latest
+            config: Debug
+          - name: Linux Release
+            os: ubuntu-latest
+            config: Release
+          - name: Windows Release
+            os: windows-latest
+            config: Release
+    steps:
+      # Engine/ is a tracked symlink to ../SleakEngine, so the two repos must
+      # sit side by side in the workspace for it to resolve.
+      - name: Check out the game
+        uses: actions/checkout@v4
+        with:
+          path: SleakCraft
+
+      - name: Check out the engine
+        uses: actions/checkout@v4
+        with:
+          repository: CanReader/SleakEngine
+          ref: ${{ github.event.inputs.engine_ref || 'main' }}
+          submodules: recursive
+          path: SleakEngine
+
+      - name: Verify the Engine symlink resolves
+        shell: bash
+        run: |
+          cd SleakCraft
+          if [ ! -f Engine/CMakeLists.txt ]; then
+            echo "Engine/ did not resolve to the engine checkout."
+            ls -la Engine || true
+            exit 1
+          fi
+          echo "Engine resolves to $(cd Engine && pwd)"
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build ccache pkg-config \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxinerama-dev libxss-dev libxmu-dev \
+            libxkbcommon-dev libwayland-dev wayland-protocols \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
+            glslc || sudo apt-get install -y glslang-tools
+
+      - name: Cache compiler output
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-craft-${{ runner.os }}-${{ matrix.config }}-${{ github.sha }}
+          restore-keys: |
+            ccache-craft-${{ runner.os }}-${{ matrix.config }}-
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        working-directory: SleakCraft
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DSDL_IBUS=OFF
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        working-directory: SleakCraft
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }}
+
+      - name: Build
+        working-directory: SleakCraft
+        run: cmake --build build --config ${{ matrix.config }}
+
+      - name: Confirm the binary was produced
+        shell: bash
+        working-directory: SleakCraft
+        run: |
+          found=$(find bin build -name 'SleakCraft*' -type f 2>/dev/null | head -1)
+          if [ -z "$found" ]; then
+            echo "No SleakCraft binary found after a successful build."
+            exit 1
+          fi
+          echo "Built $found"
+
+  shaders:
+    name: Shaders compile and are current
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the game
+        uses: actions/checkout@v4
+        with:
+          path: SleakCraft
+
+      - name: Check out the engine
+        uses: actions/checkout@v4
+        with:
+          repository: CanReader/SleakEngine
+          path: SleakEngine
+
+      - name: Install glslc
+        run: sudo apt-get update && sudo apt-get install -y glslc
+
+      - name: Recompile all shaders
+        working-directory: SleakCraft
+        run: ./scripts/compile_shaders.sh
+
+      # Only the game's own shaders are checked here. The engine's are
+      # verified by the engine repository's own workflow.
+      - name: Fail if any committed SPIR-V is stale
+        working-directory: SleakCraft
+        run: |
+          if ! git diff --quiet -- Game/assets/shaders; then
+            echo "These SPIR-V files do not match their source:"
+            git diff --name-only -- Game/assets/shaders
+            echo
+            echo "Run ./scripts/compile_shaders.sh and commit the result."
+            exit 1
+          fi
+          echo "All SPIR-V output matches its source."
