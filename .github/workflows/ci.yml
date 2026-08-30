@@ -93,7 +93,7 @@ jobs:
 
       - name: Cache compiler output
         if: runner.os == 'Linux'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.ccache
           key: ccache-craft-${{ runner.os }}-${{ matrix.name }}-${{ github.sha }}
@@ -228,7 +228,7 @@ jobs:
             libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
             glslc || sudo apt-get install -y glslang-tools
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.ccache
           key: ccache-craft-smoke-${{ github.sha }}
