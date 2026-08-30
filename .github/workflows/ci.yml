@@ -219,6 +219,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             ninja-build ccache pkg-config xvfb \
+            libgl1-mesa-dri mesa-utils \
             mesa-vulkan-drivers vulkan-tools libvulkan1 \
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
@@ -243,19 +244,24 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DSDL_IBUS=OFF
           cmake --build build
 
-      - name: Confirm lavapipe is present
-        run: vulkaninfo --summary 2>/dev/null | head -20 || true
+      - name: Report the software renderer in use
+        run: |
+          xvfb-run -a glxinfo -B 2>/dev/null | grep -iE "renderer|opengl version" || true
 
+      # OpenGL through Mesa's llvmpipe, not Vulkan. A runner has no display
+      # server for Vulkan's surface extensions, whereas software GL under a
+      # virtual display is well supported. Booting the game is the point here;
+      # backend coverage is the build matrix's job.
       - name: Boot into a world
         working-directory: SleakCraft/bin
         env:
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-          VK_LOADER_DRIVERS_SELECT: lvp_icd.x86_64.json
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
         run: |
           set +e
           timeout --preserve-status 120 \
             xvfb-run -a --server-args="-screen 0 1280x720x24" \
-            ./SleakCraft -r vulkan -w 640 -h 360 -world citest -seed 42 -rd 4 \
+            ./SleakCraft -r opengl -w 640 -h 360 -world citest -seed 42 -rd 4 \
             > smoke.log 2>&1
           status=$?
           set -e
@@ -270,6 +276,10 @@ jobs:
           fi
           if ! grep -q "Creating new world 'citest'" smoke.log; then
             echo "The game never reached world creation."
+            exit 1
+          fi
+          if grep -qiE "\[critical\]|failed to create window" smoke.log; then
+            echo "The engine reported a critical failure."
             exit 1
           fi
           if grep -qiE "segmentation fault|assertion .* failed|terminate called" smoke.log; then
