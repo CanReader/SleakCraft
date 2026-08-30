@@ -44,12 +44,12 @@ jobs:
       # Engine/ is a tracked symlink to ../SleakEngine, so the two repos must
       # sit side by side in the workspace for it to resolve.
       - name: Check out the game
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: SleakCraft
 
       - name: Check out the engine
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: CanReader/SleakEngine
           ref: ${{ github.event.inputs.engine_ref || 'main' }}
@@ -147,12 +147,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the game
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: SleakCraft
 
       - name: Check out the engine
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: CanReader/SleakEngine
           path: SleakEngine
@@ -203,12 +203,12 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Check out the game
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: SleakCraft
 
       - name: Check out the engine
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: CanReader/SleakEngine
           submodules: recursive
