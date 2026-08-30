@@ -30,6 +30,17 @@ jobs:
           submodules: recursive
           path: SleakEngine
 
+      # Git on Windows materializes the Engine symlink as a plain text file,
+      # so CMake sees no directory there. A directory junction gives the same
+      # result as the symlink does on Linux and needs no elevation.
+      - name: Replace the Engine link with a junction (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: SleakCraft
+        run: |
+          if exist Engine\NUL (rmdir /s /q Engine) else (if exist Engine del /f /q Engine)
+          mklink /J Engine ..\SleakEngine
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
