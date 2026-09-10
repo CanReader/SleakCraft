@@ -19,12 +19,12 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - name: Check out the game
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: SleakCraft
 
       - name: Check out the engine
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: CanReader/SleakEngine
           submodules: recursive
