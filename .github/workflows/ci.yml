@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
   pull_request:
-    branches: [main]
+    branches: [main, staging]
   workflow_dispatch:
     inputs:
       engine_ref:
@@ -19,6 +19,9 @@ concurrency:
 permissions:
   contents: read
 
+# The check names here (the build matrix names and the other jobs' names) are
+# required status checks in .github/rulesets/. Rename both together, or pull
+# requests will wait on a check that never reports.
 jobs:
   build:
     name: ${{ matrix.name }}
@@ -141,6 +144,18 @@ jobs:
             exit 1
           fi
           echo "Built $found"
+
+      # staging is the testing layer, so every push there leaves a playable
+      # build to try before staging is merged into main. bin/ holds the binary
+      # next to its assets, the same folder a release packages.
+      - name: Upload the staging test build
+        if: github.event_name == 'push' && github.ref == 'refs/heads/staging' && matrix.config == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SleakCraft-staging-${{ runner.os }}
+          retention-days: 14
+          if-no-files-found: error
+          path: SleakCraft/bin/
 
   shaders:
     name: Shaders compile and are committed
