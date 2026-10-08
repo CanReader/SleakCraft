@@ -30,11 +30,13 @@ static void PrintHelp(const char* exe) {
         << "  --no-vsync         Disable VSync on launch\n"
         << "\nBenchmark\n"
         << "  --bench            Start benchmark recording immediately\n"
+        << "  --autofly <m/s>    Autopilot flight speed (Debug builds)\n"
         << "  --gpuprofile       Log per-pass GPU timings (Vulkan)\n"
         << "  -capture <file>    Write frame N as a PPM, then exit (Vulkan)\n"
         << "  -capture-frame <n> Frame index for -capture (default: 600)\n"
         << "\nDebug\n"
-        << "  --validate         Enable Vulkan validation layer\n"
+        << "  --validate         Enable Vulkan validation (Debug: always on)\n"
+        << "  --syncval          Enable Vulkan synchronization validation\n"
         << "\nMisc\n"
         << "  --help             Show this message\n\n";
 }
@@ -59,6 +61,15 @@ int main(int argc, char** argv) {
     };
 
     Game* game = new Game();
+#ifdef DEBUG
+    const std::string autoFly = defaults.CommandLineArgs["--autofly"];
+    if (!autoFly.empty()) {
+        try {
+            game->SetAutoFlySpeed(std::stof(autoFly));
+        } catch (...) {
+        }
+    }
+#endif
     Sleak::Application app(defaults);
 
     return app.Run(game);

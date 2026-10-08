@@ -38,8 +38,14 @@ public:
 
   inline bool GetIsGameRunning() { return bIsGameRunning; }
 
+  /// Autopilot speed in m/s that new game scenes fly at, 0 for none.
+  void SetAutoFlySpeed(float speed) { m_autoFlySpeed = speed; }
+  /// Autopilot speed in m/s set by SetAutoFlySpeed().
+  float GetAutoFlySpeed() const { return m_autoFlySpeed; }
+
 private:
   bool bIsGameRunning = true;
+  float m_autoFlySpeed = 0.0f;
   MainMenuScene* m_menuScene = nullptr;
   MainScene* m_gameScene = nullptr;
 };

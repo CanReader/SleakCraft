@@ -113,8 +113,15 @@ bool MainScene::Initialize() {
         lm->SetFogDistances(fogDist * 0.91f, fogDist);
     }
 
-    // Register game-specific benchmark metrics
+    // Autopilot hides UI panels
     auto* app = Sleak::Application::GetInstance();
+    auto* game = app ? static_cast<Game*>(app->GetGame()) : nullptr;
+    if (game && game->GetAutoFlySpeed() > 0.0f) {
+        m_playerController.StartAutoFly(game->GetAutoFlySpeed());
+        m_showUI = false;
+    }
+
+    // Register game-specific benchmark metrics
     if (app && app->GetBenchmark()) {
         app->GetBenchmark()->RegisterMetric("RenderDistance", [this]() {
             return static_cast<float>(m_chunkManager.GetRenderDistance());

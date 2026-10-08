@@ -10,6 +10,11 @@
 
 using namespace Sleak;
 
+namespace {
+// Autopilot view, about 27 degrees below its +Z heading
+const Math::Vector3D kAutoFlyLook(0.0f, -0.5f, 1.0f);
+}  // namespace
+
 void PlayerController::ApplyTuning() {
     auto* cam = m_scene.GetActiveCamera();
     if (!cam) return;
@@ -80,9 +85,38 @@ void PlayerController::OnKeyReleased(
         m_shiftHeld = false;
 }
 
+void PlayerController::StartAutoFly(float speed) {
+    auto* cam = m_scene.GetActiveCamera();
+    if (!cam || speed <= 0.0f) return;
+    m_autoFlySpeed = speed;
+
+    // Above the build limit
+    const float altitude =
+        static_cast<float>((WorldGenerator::MAX_CHUNK_Y + 1) * Chunk::SIZE) +
+        8.0f;
+    auto pos = cam->GetPosition();
+    cam->SetPosition({pos.GetX(), altitude, pos.GetZ()});
+    cam->SetDirection(kAutoFlyLook);
+
+    if (auto* fpc = cam->GetComponent<FirstPersonController>())
+        fpc->SetEnabled(false);
+    if (auto* rb = cam->GetComponent<RigidbodyComponent>())
+        rb->SetUseGravity(false);
+}
+
 void PlayerController::Update() {
     auto* cam = m_scene.GetActiveCamera();
     if (!cam) return;
+
+    // Autopilot: physics integrates velocity
+    if (m_autoFlySpeed > 0.0f) {
+        if (auto* rb = cam->GetComponent<RigidbodyComponent>()) {
+            rb->SetUseGravity(false);
+            rb->SetVelocity(Math::Vector3D::Forward() * m_autoFlySpeed);
+        }
+        cam->SetDirection(kAutoFlyLook);
+        return;
+    }
 
     // Fly: space=up, ctrl=down, shift=sprint
     if (m_flying) {

@@ -23,10 +23,16 @@ public:
     void OnKeyReleased(const Sleak::Events::Input::KeyReleasedEvent& e);
     /// Applies fly vertical input and resolves voxel collision for this frame.
     void Update();
+    /// Starts a hands-free flight along +Z just above the build limit so
+    /// tests can drive chunk streaming. Speed is in m/s; zero or less is
+    /// ignored.
+    void StartAutoFly(float speed);
 
 private:
     ChunkManager& m_chunkManager;
     MainScene& m_scene;
+
+    float m_autoFlySpeed = 0.0f;
 
     // Minecraft-style double-tap space to toggle fly
     bool m_flying = false;
