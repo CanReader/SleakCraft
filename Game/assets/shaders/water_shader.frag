@@ -114,7 +114,6 @@ vec3 SampleSky(vec3 dir, vec3 sunDir, vec3 sunColor, vec3 amb) {
 // ============================================================
 // Helpers
 // ============================================================
-vec3  ACESFilm(vec3 x) { return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), vec3(0), vec3(1)); }
 float FresnelSchlick(float c) { return 0.02 + 0.98 * pow(clamp(1.0 - c, 0.0, 1.0), 5.0); }
 float GGX(float NdotH, float r) { float a=r*r*r*r; float d=NdotH*NdotH*(a-1.0)+1.0; return a/(3.14159265*d*d); }
 
@@ -191,9 +190,9 @@ void main() {
         finalColor += sunCol * c * 0.05 * shadow;
     }
 
-    // ---- ACES + fog ----
-    finalColor = ACESFilm(finalColor);
+    // ---- Fog in linear HDR (composite tonemaps) ----
     finalColor = ApplyFog(finalColor, fragWorldPos);
+    finalColor = clamp(finalColor, vec3(0.0), vec3(1000.0));
 
     // ---- Alpha: BSL waterAlpha=0.70 base, Fresnel boosts edges to ~0.95 ----
     float alpha = mix(0.72, 0.97, pow(clamp(1.0 - NdotV, 0.0, 1.0), 2.0));
