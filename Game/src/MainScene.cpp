@@ -73,6 +73,10 @@ bool MainScene::Initialize() {
     m_chunkManager.Initialize(this, m_blockMaterial);
     m_blockEffects.Initialize(this, m_blockMaterial);
 
+    // Captures load synchronously
+    if (!Sleak::CommandLine::GetValue("-capture").empty())
+        m_multithreadedLoading = false;
+
     if (m_isNewWorld) {
         m_chunkManager.SetSeed(m_worldSeed);
 
