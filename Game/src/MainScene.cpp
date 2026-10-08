@@ -285,6 +285,9 @@ void MainScene::Update(float deltaTime) {
 
         m_playerController.Update();
 
+        // Next shadow pass matrix
+        auto* lm = GetLightManager();
+        m_chunkManager.SetShadowLightVP(lm ? lm->GetShadowLightVP() : nullptr);
         m_chunkManager.Update(pos.GetX(), pos.GetY(), pos.GetZ());
         m_chunkManager.RenderColumns();
 

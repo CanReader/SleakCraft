@@ -79,6 +79,8 @@ public:
     float GetDrawDistance() const { return m_drawDistance; }
 
     void SetShadowCasterDistance(float dist) { m_shadowCasterDistSq = dist * dist; }
+    /// Stores the next shadow pass light view-projection (nullptr: none).
+    void SetShadowLightVP(const float* vp);
 
     void SetSeed(uint32_t seed) { m_generator.SetSeed(seed); }
     uint32_t GetSeed() const { return m_generator.GetSeed(); }
@@ -147,6 +149,10 @@ public:
     void SetOOMThisFrame(bool oom) { m_oomThisFrame = oom; }
     float GetDrawDistSq() const { return m_drawDistSq; }
     float GetShadowCasterDistSq() const { return m_shadowCasterDistSq; }
+    /// Light view-projection used to cull shadow casters, or nullptr.
+    const float* GetShadowLightVP() const {
+        return m_hasShadowLightVP ? m_shadowLightVP : nullptr;
+    }
     const Sleak::RefPtr<Sleak::Material>& GetMaterial() const { return m_material; }
     const Sleak::RefPtr<Sleak::Material>& GetWaterMaterial() const { return m_waterMaterial; }
 
@@ -222,6 +228,8 @@ private:
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
     float m_shadowCasterDistSq = 96.0f * 96.0f;
+    float m_shadowLightVP[16] = {};
+    bool m_hasShadowLightVP = false;
     int m_lastCenterX = INT_MAX;
     int m_lastCenterY = INT_MAX;
     int m_lastCenterZ = INT_MAX;
