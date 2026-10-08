@@ -61,7 +61,7 @@ float CalcShadow(vec4 sc) {
     float rad = uShadowTexelSize * uLightSize * 6.0;
     float s = 0.0;
     for (int i = 0; i < 16; i++)
-        s += texture(shadowMap, vec3(p.xy + rot * disk[i] * rad, p.z - uShadowBias));
+        s += textureLod(shadowMap, vec3(p.xy + rot * disk[i] * rad, p.z - uShadowBias), 0.0);
     return mix(1.0, s / 16.0, uShadowStrength * fc.x * fc.y);
 }
 
@@ -82,19 +82,34 @@ float WaterHeight(vec2 xz, float time) {
     return h;
 }
 
-// Finite-difference normal — purely fragment-shader, no vertex displacement
+// Central difference (step WD) of WaterHeight in closed form: for
+// A*sin(k*x+c) it is A*cos(k*x+c)*sin(k*WD)/WD, so no height re-evaluation.
+const float WD = 0.15;
 vec3 WaveNormal(vec3 wp, float time) {
     if (fragNormal.y < 0.5) return fragNormal;   // side faces keep flat normal
 
-    const float d = 0.15;
-    float h1 = WaterHeight(wp.xz + vec2( d, 0.0), time);
-    float h2 = WaterHeight(wp.xz - vec2( d, 0.0), time);
-    float h3 = WaterHeight(wp.xz + vec2(0.0,  d), time);
-    float h4 = WaterHeight(wp.xz - vec2(0.0,  d), time);
-
-    float xd = (h2 - h1) / (2.0 * d);
-    float zd = (h4 - h3) / (2.0 * d);
-    return normalize(vec3(xd * 0.30, 1.0, zd * 0.30));
+    vec2  w1 = vec2( time * 0.45,  time * 0.30);
+    vec2  w2 = vec2(-time * 0.35,  time * 0.50);
+    float a1 = wp.x * 0.24 + w1.x, b1 = wp.z * 0.19 + w1.y;
+    float a2 = wp.x * 0.33 + w2.x - wp.z * 0.11;
+    float a3 = wp.x * 0.80 + w1.x * 1.9 + wp.z * 0.58;
+    float a4 = wp.x * 1.10 - w2.x * 2.1, b4 = wp.z * 0.88 + w2.y * 1.4;
+    float a5 = wp.x * 2.20 + w1.x * 3.3, b5 = wp.z * 1.85 - w1.y * 2.7;
+    float a6 = wp.x * 3.00 - w2.x * 4.2 + wp.z * 2.30;
+    float ca2 = cos(a2), ca3 = cos(a3), ca6 = cos(a6);
+    float dHdx = cos(a1) * sin(b1) * (sin(0.24 * WD) / WD)
+               + 0.65 * ca2 * (sin(0.33 * WD) / WD)
+               + 0.40 * ca3 * (sin(0.80 * WD) / WD)
+               + 0.35 * cos(a4) * sin(b4) * (sin(1.10 * WD) / WD)
+               + 0.15 * cos(a5) * sin(b5) * (sin(2.20 * WD) / WD)
+               + 0.10 * ca6 * (sin(3.00 * WD) / WD);
+    float dHdz = sin(a1) * cos(b1) * (sin(0.19 * WD) / WD)
+               - 0.65 * ca2 * (sin(0.11 * WD) / WD)
+               + 0.40 * ca3 * (sin(0.58 * WD) / WD)
+               + 0.35 * sin(a4) * cos(b4) * (sin(0.88 * WD) / WD)
+               + 0.15 * sin(a5) * cos(b5) * (sin(1.85 * WD) / WD)
+               + 0.10 * ca6 * (sin(2.30 * WD) / WD);
+    return normalize(vec3(-dHdx * 0.30, 1.0, -dHdz * 0.30));
 }
 
 // ============================================================
@@ -152,9 +167,11 @@ void main() {
     float fresnel = FresnelSchlick(NdotV);
 
     // ---- Shadow & diffuse ----
-    float shadow = CalcShadow(fragShadowCoord);
-    shadow *= smoothstep(-0.1, 0.2, dot(N, sunDir));
-    float NdotL  = clamp(dot(N, sunDir) * 0.65 + 0.35, 0.0, 1.0);
+    float NdotS  = dot(N, sunDir);
+    float shadow = 0.0;
+    if (NdotS > -0.1)
+        shadow = CalcShadow(fragShadowCoord) * smoothstep(-0.1, 0.2, NdotS);
+    float NdotL  = clamp(NdotS * 0.65 + 0.35, 0.0, 1.0);
     vec3  diffuse = sunCol * NdotL * shadow;
 
     // ---- BSL water color: R=64 G=160 B=255 I=0.35, then squared ----
