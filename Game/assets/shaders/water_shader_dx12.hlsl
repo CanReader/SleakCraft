@@ -76,45 +76,84 @@ float CalcShadow(float4 sc, float2 sp) {
 #define GRAVITY              9.81     // m/s^2
 #define WAVE_COUNT           12
 #define WAVE_BASE_LENGTH     13.0     // m, longest octave
-#define WAVE_LENGTH_RATIO    0.7      // each octave's wavelength over the previous
+#define WAVE_LENGTH_RATIO    (1.0 / sqrt(2.0))  // irrational octave spacing
+#define WAVE_LENGTH_JITTER   0.12     // +- fraction added to each octave step
 #define WAVE_BASE_STEEPNESS  0.075    // slope amplitude of the longest octave
 #define WAVE_STEEPNESS_DECAY 0.8946   // per-octave steepness falloff
 #define WIND_ANGLE           0.2      // rad, mean travel direction in xz
-#define WIND_SPREAD          1.4      // rad, octaves spread across +-this
-#define GOLDEN_ANGLE         (PI * (3.0 - sqrt(5.0)))    // decorrelates directions
-#define GOLDEN_RATIO_FRAC    ((sqrt(5.0) - 1.0) * 0.5)   // decorrelates phases
+#define WIND_SPREAD_LONG     0.9      // rad, long octaves stay nearer the wind
+#define WIND_SPREAD_SHORT    1.4      // rad, short chop spreads wider
+#define WAVE_DIR_SEED        17.0     // hash streams per octave index
+#define WAVE_PHASE_SEED      31.0
+#define WAVE_LENGTH_SEED     47.0
 #define WAVE_SPEED_SCALE     0.55     // fraction of deep-water phase speed
 #define WAVE_FADE_START      0.08     // pixel footprint / wavelength
 #define WAVE_FADE_END        0.25     // 4 pixels per wavelength
-#define SWELL_BASE           0.8
-#define SWELL_RANGE          0.2
-#define SWELL_FREQ_A         float2(0.021, 0.013)  // rad/m
-#define SWELL_FREQ_B         float2(-0.011, 0.024)
-#define SWELL_SPEED_A        0.07                  // rad/s
-#define SWELL_SPEED_B        0.05
 #define TOP_FACE_MIN_Y       0.5      // normal.y above which a face is the water top
 
-// xyz = normal, w = slope variance removed by the filter
-float4 WaveNormal(float3 wp, float3 origNorm, float time, float footprint) {
+// ---- Wave field variation ----
+#define WARP_SCALE           (1.0 / 55.0)          // 1/m, domain warp noise
+#define WARP_AMPLITUDE       2.5                   // m the wave coordinates bend
+#define WARP_SPEED           0.03                  // noise units per second
+#define WARP_CHANNEL_OFFSET  float2(19.3, 7.7)     // decorrelates warp x and y
+#define SWELL_SCALE          (1.0 / 90.0)          // 1/m, long-octave amplitude patches
+#define SWELL_RANGE          float2(0.65, 1.15)    // min, max amplitude
+#define SWELL_DRIFT          float2(0.011, 0.007)  // noise units per second
+#define GUST_SCALE           (1.0 / 24.0)          // 1/m, short-octave gust patches
+#define GUST_RANGE           float2(0.35, 1.3)
+#define GUST_DRIFT           float2(-0.03, 0.02)
+#define CALM_START           30.0   // m from the camera where the surface settles
+#define CALM_END             100.0
+#define FAR_SLOPE_SCALE      0.35   // remaining wave slope far away
+
+// ---- Hash (Dave Hoskins, hash without sine) ----
+#define HASH_SCALE  0.1031
+#define HASH_OFFSET 33.33
+
+float Hash12(float2 p) {
+    float3 p3 = frac(float3(p.xyx) * HASH_SCALE);
+    p3 += dot(p3, p3.yzx + HASH_OFFSET);
+    return frac((p3.x + p3.y) * p3.z);
+}
+float ValueNoise(float2 p) {
+    float2 i = floor(p), f = frac(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(Hash12(i), Hash12(i + float2(1.0, 0.0)), u.x),
+                lerp(Hash12(i + float2(0.0, 1.0)), Hash12(i + float2(1.0, 1.0)), u.x), u.y);
+}
+float SignedNoise(float2 p) { return ValueNoise(p) * 2.0 - 1.0; }
+
+// xyz = normal, w = slope variance removed by the filter and the far calm
+float4 WaveNormal(float3 wp, float3 origNorm, float time, float footprint, float viewDist) {
     if (origNorm.y < TOP_FACE_MIN_Y) return float4(origNorm, 0.0);
     float2 xz = wp.xz;
-    float swell = SWELL_BASE + SWELL_RANGE
-                * sin(dot(xz, SWELL_FREQ_A) + time * SWELL_SPEED_A)
-                * sin(dot(xz, SWELL_FREQ_B) - time * SWELL_SPEED_B);
+    // Slow domain warp keeps crests from lining up into periodic rows
+    float2 wn = xz * WARP_SCALE + time * WARP_SPEED;
+    float2 p = xz + float2(SignedNoise(wn), SignedNoise(wn + WARP_CHANNEL_OFFSET)) * WARP_AMPLITUDE;
+    // Patches of swell for the long octaves and gusts for the short ones
+    float swell = lerp(SWELL_RANGE.x, SWELL_RANGE.y, ValueNoise(xz * SWELL_SCALE + time * SWELL_DRIFT));
+    float gust  = lerp(GUST_RANGE.x, GUST_RANGE.y, ValueNoise(xz * GUST_SCALE + time * GUST_DRIFT));
+    // Distant water settles toward a mirror; the removed slope widens the glint
+    float calm = lerp(1.0, FAR_SLOPE_SCALE, smoothstep(CALM_START, CALM_END, viewDist));
+
     float2 g = float2(0.0, 0.0);
     float lost = 0.0;
     float wavelength = WAVE_BASE_LENGTH;
-    float steepness = WAVE_BASE_STEEPNESS * swell;
+    float steepness = WAVE_BASE_STEEPNESS;
     [unroll] for (int k = 0; k < WAVE_COUNT; k++) {
-        float fade = 1.0 - smoothstep(WAVE_FADE_START, WAVE_FADE_END, footprint / wavelength);
-        lost += steepness * steepness * (1.0 - fade * fade);
-        float angle = WIND_ANGLE + WIND_SPREAD * sin(k * GOLDEN_ANGLE);
+        float octave = (float)k / (float)(WAVE_COUNT - 1);
+        float s = steepness * lerp(swell, gust, octave);
+        float fade = (1.0 - smoothstep(WAVE_FADE_START, WAVE_FADE_END, footprint / wavelength)) * calm;
+        lost += s * s * (1.0 - fade * fade);
+        float spread = lerp(WIND_SPREAD_LONG, WIND_SPREAD_SHORT, octave);
+        float angle = WIND_ANGLE + spread * (2.0 * Hash12(float2(k, WAVE_DIR_SEED)) - 1.0);
         float2 dir = float2(cos(angle), sin(angle));
         float wavenumber = TWO_PI / wavelength;
         float omega = sqrt(GRAVITY * wavenumber) * WAVE_SPEED_SCALE;
-        float phase = frac(k * GOLDEN_RATIO_FRAC) * TWO_PI;
-        g += dir * (steepness * fade * cos(dot(dir, xz) * wavenumber - omega * time + phase));
-        wavelength *= WAVE_LENGTH_RATIO;
+        float phase = Hash12(float2(k, WAVE_PHASE_SEED)) * TWO_PI;
+        g += dir * (s * fade * cos(dot(dir, p) * wavenumber - omega * time + phase));
+        float jitter = 2.0 * Hash12(float2(k, WAVE_LENGTH_SEED)) - 1.0;
+        wavelength *= WAVE_LENGTH_RATIO * (1.0 + WAVE_LENGTH_JITTER * jitter);
         steepness *= WAVE_STEEPNESS_DECAY;
     }
     // Mean of cos^2 is one half
@@ -174,7 +213,7 @@ VS_OUTPUT VS_Main(VS_INPUT i) {
 float4 PS_Main(VS_OUTPUT i) : SV_Target {
     float time = i.Time;
     float footprint = max(length(ddx(i.WorldPos.xz)), length(ddy(i.WorldPos.xz)));
-    float4 wave = WaveNormal(i.WorldPos, i.Normal, time, footprint);
+    float4 wave = WaveNormal(i.WorldPos, i.Normal, time, footprint, length(CameraPos.xyz - i.WorldPos));
     float3 N = wave.xyz;
     float3 V = normalize(CameraPos.xyz - i.WorldPos);
 
