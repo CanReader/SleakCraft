@@ -12,6 +12,7 @@ using namespace Sleak;
 
 namespace {
 // Autopilot view, about 27 degrees below its +Z heading
+#define AUTOFLY_CLEARANCE 8.0f
 const Math::Vector3D kAutoFlyLook(0.0f, -0.5f, 1.0f);
 }  // namespace
 
@@ -93,7 +94,7 @@ void PlayerController::StartAutoFly(float speed) {
     // Above the build limit
     const float altitude =
         static_cast<float>((WorldGenerator::MAX_CHUNK_Y + 1) * Chunk::SIZE) +
-        8.0f;
+        AUTOFLY_CLEARANCE;
     auto pos = cam->GetPosition();
     cam->SetPosition({pos.GetX(), altitude, pos.GetZ()});
     cam->SetDirection(kAutoFlyLook);
