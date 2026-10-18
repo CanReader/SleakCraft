@@ -2,6 +2,8 @@
 #include <Core/CommandLine.hpp>
 #include <Game.hpp>
 #include <Core/Logger.hpp>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 
@@ -31,6 +33,8 @@ static void PrintHelp(const char* exe) {
         << "\nBenchmark\n"
         << "  --bench            Start benchmark recording immediately\n"
         << "  --autofly <m/s>    Autopilot flight speed (Debug builds)\n"
+        << "  -campose x,y,z,yaw,pitch\n"
+        << "                     Pin the camera, degrees (Debug builds)\n"
         << "  --gpuprofile       Log per-pass GPU timings (Vulkan)\n"
         << "  -capture <file>    Write frame N as a PPM, then exit (Vulkan)\n"
         << "  -capture-frame <n> Frame index for -capture (default: 600)\n"
@@ -68,6 +72,15 @@ int main(int argc, char** argv) {
             game->SetAutoFlySpeed(std::stof(autoFly));
         } catch (...) {
         }
+    }
+    // Raw argv: CommandLine drops values that start with '-'
+    for (int i = 1; i + 1 < argc; ++i) {
+        CameraPose pose;
+        if (std::strcmp(argv[i], "-campose") == 0 &&
+            std::sscanf(argv[i + 1], "%f,%f,%f,%f,%f", &pose.x, &pose.y,
+                        &pose.z, &pose.yawDeg,
+                        &pose.pitchDeg) == CAMERA_POSE_FIELD_COUNT)
+            game->SetCameraPose(pose);
     }
 #endif
     Sleak::Application app(defaults);
