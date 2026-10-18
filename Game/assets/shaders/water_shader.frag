@@ -143,22 +143,34 @@ vec3 FogColorAt(vec3 p) {
 // ---- Waves: octaves derived from a few parameters ----
 #define WAVE_COUNT           12
 #define WAVE_BASE_LENGTH     13.0     // m, longest octave
-#define WAVE_LENGTH_RATIO    0.7      // each octave's wavelength over the previous
+#define WAVE_LENGTH_RATIO    (1.0 / sqrt(2.0))  // irrational octave spacing
+#define WAVE_LENGTH_JITTER   0.12     // +- fraction added to each octave step
 #define WAVE_BASE_STEEPNESS  0.075    // slope amplitude of the longest octave
 #define WAVE_STEEPNESS_DECAY 0.8946   // per-octave steepness falloff
 #define WIND_ANGLE           0.2      // rad, mean travel direction in xz
-#define WIND_SPREAD          1.4      // rad, octaves spread across +-this
-#define GOLDEN_ANGLE         (PI * (3.0 - sqrt(5.0)))    // decorrelates directions
-#define GOLDEN_RATIO_FRAC    ((sqrt(5.0) - 1.0) * 0.5)   // decorrelates phases
+#define WIND_SPREAD_LONG     0.9      // rad, long octaves stay nearer the wind
+#define WIND_SPREAD_SHORT    1.4      // rad, short chop spreads wider
+#define WAVE_DIR_SEED        17.0     // hash streams per octave index
+#define WAVE_PHASE_SEED      31.0
+#define WAVE_LENGTH_SEED     47.0
 #define WAVE_SPEED_SCALE     0.55     // fraction of deep-water phase speed
 #define WAVE_FADE_START      0.08     // pixel footprint / wavelength
 #define WAVE_FADE_END        0.25     // 4 pixels per wavelength
-#define SWELL_BASE        0.8
-#define SWELL_RANGE       0.2
-#define SWELL_FREQ_A      vec2(0.021, 0.013)  // rad/m
-#define SWELL_FREQ_B      vec2(-0.011, 0.024)
-#define SWELL_SPEED_A     0.07                // rad/s
-#define SWELL_SPEED_B     0.05
+
+// ---- Wave field variation ----
+#define WARP_SCALE           (1.0 / 55.0)       // 1/m, domain warp noise
+#define WARP_AMPLITUDE       2.5                // m the wave coordinates bend
+#define WARP_SPEED           0.03               // noise units per second
+#define WARP_CHANNEL_OFFSET  vec2(19.3, 7.7)    // decorrelates warp x and y
+#define SWELL_SCALE          (1.0 / 90.0)       // 1/m, long-octave amplitude patches
+#define SWELL_RANGE          vec2(0.65, 1.15)   // min, max amplitude
+#define SWELL_DRIFT          vec2(0.011, 0.007) // noise units per second
+#define GUST_SCALE           (1.0 / 24.0)       // 1/m, short-octave gust patches
+#define GUST_RANGE           vec2(0.35, 1.3)
+#define GUST_DRIFT           vec2(-0.03, 0.02)
+#define CALM_START           30.0   // m from the camera where the surface settles
+#define CALM_END             100.0
+#define FAR_SLOPE_SCALE      0.35   // remaining wave slope far away
 
 // ---- Optics ----
 #define BASE_ROUGHNESS     0.035
@@ -168,6 +180,7 @@ vec3 FogColorAt(vec3 p) {
 #define SPEC_MAX           30.0
 #define SUN_SHADOW_FADE    vec2(-0.1, 0.2)  // N.L range where the sun fades in
 #define MAX_UNFOG          0.9
+#define BOTTOM_TRUST_FOG   0.4     // fog amount where the bottom color starts to fade out
 
 // ---- Sky ----
 #define SKY_MIN_Y          0.07    // stay above the skybox's own horizon band
@@ -248,27 +261,51 @@ vec3 FogColorAt(vec3 p) {
 #define CAUSTIC_WARP_SPEED  vec2(0.8, -0.7)
 #define CAUSTIC_DRIFT       vec2(0.6, -0.5)
 
-// xyz = normal, w = slope variance removed by the filter
-vec4 WaveNormal(vec2 xz, float t, float footprint) {
-    float swell = SWELL_BASE + SWELL_RANGE
-                * sin(dot(xz, SWELL_FREQ_A) + t * SWELL_SPEED_A)
-                * sin(dot(xz, SWELL_FREQ_B) - t * SWELL_SPEED_B);
+float Hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * HASH_SCALE);
+    p3 += dot(p3, p3.yzx + HASH_OFFSET);
+    return fract((p3.x + p3.y) * p3.z);
+}
+float ValueNoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(Hash12(i), Hash12(i + vec2(1.0, 0.0)), u.x),
+               mix(Hash12(i + vec2(0.0, 1.0)), Hash12(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+
+float SignedNoise(vec2 p) { return ValueNoise(p) * 2.0 - 1.0; }
+
+// xyz = normal, w = slope variance removed by the filter and the far calm
+vec4 WaveNormal(vec2 xz, float t, float footprint, float viewDist) {
+    // Slow domain warp keeps crests from lining up into periodic rows
+    vec2 wp = xz * WARP_SCALE + t * WARP_SPEED;
+    vec2 p = xz + vec2(SignedNoise(wp), SignedNoise(wp + WARP_CHANNEL_OFFSET)) * WARP_AMPLITUDE;
+    // Patches of swell for the long octaves and gusts for the short ones
+    float swell = mix(SWELL_RANGE.x, SWELL_RANGE.y, ValueNoise(xz * SWELL_SCALE + t * SWELL_DRIFT));
+    float gust  = mix(GUST_RANGE.x, GUST_RANGE.y, ValueNoise(xz * GUST_SCALE + t * GUST_DRIFT));
+    // Distant water settles toward a mirror; the removed slope widens the glint
+    float calm = mix(1.0, FAR_SLOPE_SCALE, smoothstep(CALM_START, CALM_END, viewDist));
+
     vec2  g = vec2(0.0);
     float lost = 0.0;
     float wavelength = WAVE_BASE_LENGTH;
-    float steepness = WAVE_BASE_STEEPNESS * swell;
+    float steepness = WAVE_BASE_STEEPNESS;
     for (int i = 0; i < WAVE_COUNT; ++i) {
-        float fade = 1.0 - smoothstep(WAVE_FADE_START, WAVE_FADE_END, footprint / wavelength);
-        lost += steepness * steepness * (1.0 - fade * fade);
+        float octave = float(i) / float(WAVE_COUNT - 1);
+        float s = steepness * mix(swell, gust, octave);
+        float fade = (1.0 - smoothstep(WAVE_FADE_START, WAVE_FADE_END, footprint / wavelength)) * calm;
+        lost += s * s * (1.0 - fade * fade);
         if (fade > 0.0) {
-            float angle = WIND_ANGLE + WIND_SPREAD * sin(float(i) * GOLDEN_ANGLE);
+            float spread = mix(WIND_SPREAD_LONG, WIND_SPREAD_SHORT, octave);
+            float angle = WIND_ANGLE + spread * (2.0 * Hash12(vec2(i, WAVE_DIR_SEED)) - 1.0);
             vec2  dir = vec2(cos(angle), sin(angle));
             float k = TWO_PI / wavelength;
             float omega = sqrt(GRAVITY * k) * WAVE_SPEED_SCALE;
-            float phase = fract(float(i) * GOLDEN_RATIO_FRAC) * TWO_PI;
-            g += dir * (steepness * fade * cos(dot(dir, xz) * k - omega * t + phase));
+            float phase = Hash12(vec2(i, WAVE_PHASE_SEED)) * TWO_PI;
+            g += dir * (s * fade * cos(dot(dir, p) * k - omega * t + phase));
         }
-        wavelength *= WAVE_LENGTH_RATIO;
+        float jitter = 2.0 * Hash12(vec2(i, WAVE_LENGTH_SEED)) - 1.0;
+        wavelength *= WAVE_LENGTH_RATIO * (1.0 + WAVE_LENGTH_JITTER * jitter);
         steepness *= WAVE_STEEPNESS_DECAY;
     }
     // Mean of cos^2 is one half
@@ -289,18 +326,6 @@ vec3 SkyColor(vec3 dir, float lod, vec3 sunDir, vec3 sunCol, vec3 amb) {
     return sky + sunCol * pow(sd, SKY_SUN_POW) * SKY_SUN_GAIN;
 }
 
-float Hash12(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * HASH_SCALE);
-    p3 += dot(p3, p3.yzx + HASH_OFFSET);
-    return fract((p3.x + p3.y) * p3.z);
-}
-float ValueNoise(vec2 p) {
-    vec2 i = floor(p), f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(Hash12(i), Hash12(i + vec2(1.0, 0.0)), u.x),
-               mix(Hash12(i + vec2(0.0, 1.0)), Hash12(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-
 float Caustics(vec2 p, float t) {
     vec2 warp = sin(p.yx * CAUSTIC_WARP_FREQ + t * CAUSTIC_WARP_SPEED) * CAUSTIC_WARP_AMOUNT;
     vec2 layers = abs(sin(p * CAUSTIC_FREQ + warp + t * CAUSTIC_DRIFT));
@@ -309,8 +334,8 @@ float Caustics(vec2 p, float t) {
     return pow(clamp(1.0 - 0.5 * (a + b), 0.0, 1.0), CAUSTIC_SHARPNESS);
 }
 
-vec3 Unfog(vec3 c, vec3 p) {
-    float f = min(FogAmount(p), MAX_UNFOG);
+vec3 Unfog(vec3 c, vec3 p, float fog) {
+    float f = min(fog, MAX_UNFOG);
     return max((c - FogColorAt(p) * f) / (1.0 - f), vec3(0.0));
 }
 
@@ -383,7 +408,7 @@ WaterResult ShadeWater(vec3 P, vec3 Nface, float t, float footprint) {
     bool  scene  = IsSet(uSceneFlags.x);
 
     // Waves
-    vec4 wave = top ? WaveNormal(P.xz, t, footprint) : vec4(Nface, 0.0);
+    vec4 wave = top ? WaveNormal(P.xz, t, footprint, length(toCam)) : vec4(Nface, 0.0);
     vec3 N = below ? -wave.xyz : wave.xyz;
     float a2 = BASE_ROUGHNESS * BASE_ROUGHNESS + wave.w;
 
@@ -448,14 +473,17 @@ WaterResult ShadeWater(vec3 P, vec3 Nface, float t, float footprint) {
                       textureLod(sceneColor, uv1 + o2, 0.0).rgb +
                       textureLod(sceneColor, uv1 - o2, 0.0).rgb) * BLUR_CENTER_WEIGHT;
         }
-        bottom = SceneToLinear(Unfog(bottom, B1));
+        float bottomFog = FogAmount(B1);
+        bottom = SceneToLinear(Unfog(bottom, B1, bottomFog));
         if (top && !below && d1 < 1.0) {
             vec2 cp = B1.xz + sunDir.xz * (depth1 / max(sunDir.y, MIN_SUN_ELEVATION));
             float c = Caustics(cp * CAUSTIC_SCALE, t);
             bottom *= 1.0 + c * CAUSTIC_STRENGTH * sunVis * exp(-CAUSTIC_FALLOFF * depth1)
                     * smoothstep(CAUSTIC_FADE_IN.x, CAUSTIC_FADE_IN.y, depth1);
         }
-        under = bottom * trans + inscatter * (1.0 - trans);
+        // A heavily fogged bottom carries no usable color; it sinks into the water body
+        float bottomTrust = 1.0 - smoothstep(BOTTOM_TRUST_FOG, MAX_UNFOG, bottomFog);
+        under = inscatter + (bottom - inscatter) * trans * bottomTrust;
     }
 
     // Reflection: screen-space hit over the sky cubemap
