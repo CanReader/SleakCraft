@@ -15,6 +15,14 @@
 using namespace Sleak;
 using namespace Sleak::Math;
 
+
+  SettingsPanel::SettingsPanel(ChunkManager& chunkManager, MainScene& scene)
+        : m_chunkManager(chunkManager), m_scene(scene) {
+  m_app = Application::GetInstance();
+  isDeferredEnabled = m_app->GetIsDeferredEnabled();
+  isTAAEnabled = m_app->IsTAAEnabled();
+}
+
 Vector3D SettingsPanel::ComputeSunDirection() const {
     const float deg2rad = 0.01745329f;
     float eRad = m_sunElevation * deg2rad;
@@ -25,8 +33,7 @@ Vector3D SettingsPanel::ComputeSunDirection() const {
 
 void SettingsPanel::Render() {
     auto* cam = m_scene.GetActiveCamera();
-    auto* app = Application::GetInstance();
-    if (!cam || !app) return;
+    if (!cam || !m_app) return;
 
     auto* fpc = cam->GetComponent<FirstPersonController>();
     bool inGameMode = fpc && fpc->IsEnabled();
@@ -49,7 +56,9 @@ void SettingsPanel::Render() {
 }
 
 void SettingsPanel::RenderGeneralSection() {
-    auto* app = Application::GetInstance();
+
+    if (UI::Checkbox("Deferred Rendering", &isDeferredEnabled))
+      m_app->SetDeferredEnabled(isDeferredEnabled);
 
     bool showCrosshair = m_scene.IsShowCrosshair();
     if (UI::Checkbox("Show Crosshair", &showCrosshair))
@@ -58,7 +67,7 @@ void SettingsPanel::RenderGeneralSection() {
     bool vsync = m_scene.IsVSyncEnabled();
     if (UI::Checkbox("VSync", &vsync)) {
         m_scene.SetVSyncEnabled(vsync);
-        if (app) app->SetVSync(vsync);
+        if (m_app) m_app->SetVSync(vsync);
     }
 
     bool mtLoading = m_scene.IsMultithreadedLoading();
@@ -96,25 +105,30 @@ void SettingsPanel::RenderCullingSection() {
 }
 
 void SettingsPanel::RenderMSAASection() {
-    auto* app = Application::GetInstance();
-    if (!app) return;
+    if (!m_app) return;
 
     UI::Separator();
-    UI::Text("Anti-Aliasing");
+    if(!m_app->GetIsDeferredEnabled())
     {
+      UI::Text("Anti-Aliasing");
+      {
         const char* labels[] = {"Off", "2x", "4x", "8x"};
         int values[] = {1, 2, 4, 8};
         int count = 1;
-        uint32_t maxMSAA = app->GetMaxMSAASampleCount();
+        uint32_t maxMSAA = m_app->GetMaxMSAASampleCount();
         for (int i = 1; i < 4; i++)
             if (static_cast<uint32_t>(values[i]) <= maxMSAA) count = i + 1;
         int current = 0;
         for (int i = 0; i < count; i++)
-            if (static_cast<uint32_t>(values[i]) == app->GetMSAASampleCount())
+            if (static_cast<uint32_t>(values[i]) == m_app->GetMSAASampleCount())
                 current = i;
         if (UI::Combo("MSAA", &current, labels, count))
-            app->SetMSAASampleCount(values[current]);
-    }
+            m_app->SetMSAASampleCount(values[current]);
+      }
+    } else {
+      UI::Checkbox("Temporal Anti-Aliasing",&isTAAEnabled);
+        m_app->SetTAAEnabled(isTAAEnabled);
+  }
 }
 
 void SettingsPanel::RenderRenderDistanceSection() {
@@ -216,20 +230,20 @@ void SettingsPanel::RenderLightingSection() {
 void SettingsPanel::RenderSSAOSection() {
     UI::Separator();
     UI::Text("-- SSAO --");
-    if (auto* app = Application::GetInstance()) {
-        bool ssaoEnabled = app->IsSSAOEnabled();
-        float ssaoRadius = app->GetSSAORadius();
-        float ssaoBias = app->GetSSAOBias();
-        float ssaoPower = app->GetSSAOPower();
+    if (m_app) {
+        bool ssaoEnabled = m_app->IsSSAOEnabled();
+        float ssaoRadius = m_app->GetSSAORadius();
+        float ssaoBias = m_app->GetSSAOBias();
+        float ssaoPower = m_app->GetSSAOPower();
         if (UI::Checkbox("SSAO Enabled", &ssaoEnabled))
-            app->SetSSAOEnabled(ssaoEnabled);
+            m_app->SetSSAOEnabled(ssaoEnabled);
         if (ssaoEnabled) {
             if (UI::DragFloat("SSAO Radius", &ssaoRadius, 0.01f, 0.05f, 4.0f))
-                app->SetSSAORadius(ssaoRadius);
+                m_app->SetSSAORadius(ssaoRadius);
             if (UI::DragFloat("SSAO Bias", &ssaoBias, 0.001f, 0.0f, 0.2f))
-                app->SetSSAOBias(ssaoBias);
+                m_app->SetSSAOBias(ssaoBias);
             if (UI::DragFloat("SSAO Power", &ssaoPower, 0.05f, 0.1f, 8.0f))
-                app->SetSSAOPower(ssaoPower);
+                m_app->SetSSAOPower(ssaoPower);
         }
     }
 }
@@ -237,17 +251,15 @@ void SettingsPanel::RenderSSAOSection() {
 void SettingsPanel::RenderIBLSection() {
     UI::Separator();
     UI::Text("-- IBL --");
-    if (auto* app = Application::GetInstance()) {
-        bool iblEnabled = app->IsIBLEnabled();
-        float iblIntensity = app->GetIBLIntensity();
+        bool iblEnabled = m_app->IsIBLEnabled();
+        float iblIntensity = m_app->GetIBLIntensity();
         if (UI::Checkbox("IBL Enabled", &iblEnabled))
-            app->SetIBLEnabled(iblEnabled);
+            m_app->SetIBLEnabled(iblEnabled);
         if (iblEnabled) {
             if (UI::DragFloat("IBL Intensity", &iblIntensity, 0.05f, 0.0f,
                               5.0f))
-                app->SetIBLIntensity(iblIntensity);
+                m_app->SetIBLIntensity(iblIntensity);
         }
-    }
 }
 
 void SettingsPanel::RenderTextureSection() {

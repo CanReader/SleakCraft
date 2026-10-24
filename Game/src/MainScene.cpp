@@ -372,7 +372,7 @@ void MainScene::SetupMaterial() {
     waterMat->SetDiffuseColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
     waterMat->SetOpacity(0.7f);
     waterMat->SetRenderMode(MaterialRenderMode::Transparent);
-    waterMat->SetTwoSided(true);
+    waterMat->SetTwoSided(false);
     waterMat->SetShininess(64.0f);
     waterMat->SetSpecularColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
     waterMat->Initialize();
@@ -402,9 +402,9 @@ void MainScene::SetupLighting() {
     cfg.ssrEnabled = false;
     cfg.iblEnabled = false;
     cfg.bloomEnabled = false;  // match OpenGL ref (no post-FX bloom chain)
-    cfg.taaEnabled = true;     // smooths shadow-edge aliasing (VK only for now)
-    cfg.shadowMapResolution = 3072;  // BSL ULTRA tier; 4096 spiked VK frames
-    cfg.shadowFrustumSize = 128.0f;  // half-extent → 256m ≈ fog range; 2x texel density
+    cfg.taaEnabled = false;     // smooths shadow-edge aliasing (VK only for now)
+    cfg.shadowMapResolution = 1072;  // BSL ULTRA tier; 4096 spiked VK frames
+    cfg.shadowFrustumSize = 256.0f;  // half-extent → 256m ≈ fog range; 2x texel density
     cfg.shadowCasterDistance = 256.0f;
     cfg.shadowDistance =
         400.0f;  // pull-back > frustum, else near-clip eats shadows
@@ -415,7 +415,7 @@ void MainScene::SetupLighting() {
     cfg.maxOccluders = 192;
 
     auto* app = Sleak::Application::GetInstance();
-    if (app) app->ApplyGraphicsConfig(cfg);
+    if (app) app->ApplyGraphicsConfig(cfg); 
 
     // Apply culling settings directly (not carried by ApplyGraphicsConfig).
     Sleak::CullingSystem::SetOcclusionBufferSize(cfg.occlusionBufferWidth,
