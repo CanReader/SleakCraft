@@ -5,8 +5,10 @@
 #include <Camera/Camera.hpp>
 #include <ECS/Components/FirstPersonController.hpp>
 #include <Input/KeyCodes.hpp>
+#include <Math/Math.hpp>
 #include <Math/Vector.hpp>
 #include <Physics/RigidbodyComponent.hpp>
+#include <cmath>
 
 using namespace Sleak;
 
@@ -105,9 +107,37 @@ void PlayerController::StartAutoFly(float speed) {
         rb->SetUseGravity(false);
 }
 
+void PlayerController::PinCamera(const CameraPose& pose) {
+    auto* cam = m_scene.GetActiveCamera();
+    if (!cam) return;
+    const float yaw = static_cast<float>(pose.yawDeg * D2R);
+    const float pitch = static_cast<float>(pose.pitchDeg * D2R);
+    m_pinPosition = Math::Vector3D(pose.x, pose.y, pose.z);
+    m_pinDirection =
+        Math::Vector3D(std::sin(yaw) * std::cos(pitch), -std::sin(pitch),
+                       std::cos(yaw) * std::cos(pitch));
+    m_pinned = true;
+
+    if (auto* fpc = cam->GetComponent<FirstPersonController>())
+        fpc->SetEnabled(false);
+    if (auto* rb = cam->GetComponent<RigidbodyComponent>())
+        rb->SetUseGravity(false);
+}
+
 void PlayerController::Update() {
     auto* cam = m_scene.GetActiveCamera();
     if (!cam) return;
+
+    // Pinned capture pose
+    if (m_pinned) {
+        if (auto* rb = cam->GetComponent<RigidbodyComponent>()) {
+            rb->SetUseGravity(false);
+            rb->SetVelocity(Math::Vector3D());
+        }
+        cam->SetPosition(m_pinPosition);
+        cam->SetDirection(m_pinDirection);
+        return;
+    }
 
     // Autopilot: physics integrates velocity
     if (m_autoFlySpeed > 0.0f) {

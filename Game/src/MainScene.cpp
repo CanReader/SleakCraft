@@ -120,6 +120,11 @@ bool MainScene::Initialize() {
         m_playerController.StartAutoFly(game->GetAutoFlySpeed());
         m_showUI = false;
     }
+    if (game && game->GetCameraPose()) {
+        m_playerController.PinCamera(*game->GetCameraPose());
+        m_showUI = false;
+        m_showHud = false;
+    }
 
     // Register game-specific benchmark metrics
     if (app && app->GetBenchmark()) {
@@ -310,11 +315,11 @@ void MainScene::Update(float deltaTime) {
         if (m_saveMessageTimer > 0.0f) m_saveMessageTimer -= deltaTime;
         if (m_loadConfirmTimer > 0.0f) m_loadConfirmTimer -= deltaTime;
 
-        m_hudPanel.RenderCrosshair();
+        if (m_showHud) m_hudPanel.RenderCrosshair();
 
         if (m_showUI) RenderUI();
 
-        m_hotbar.Render();
+        if (m_showHud) m_hotbar.Render();
     }
 }
 

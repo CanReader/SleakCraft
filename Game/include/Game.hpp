@@ -5,6 +5,9 @@
 #include <Core/OSDef.hpp>
 #include <string>
 #include <cstdint>
+#include <optional>
+
+#include "Player/CameraPose.hpp"
 
 class MainMenuScene;
 class MainScene;
@@ -42,10 +45,17 @@ public:
   void SetAutoFlySpeed(float speed) { m_autoFlySpeed = speed; }
   /// Autopilot speed in m/s set by SetAutoFlySpeed().
   float GetAutoFlySpeed() const { return m_autoFlySpeed; }
+  /// Pins the camera of new game scenes at a fixed pose.
+  void SetCameraPose(const CameraPose& pose) { m_cameraPose = pose; }
+  /// Pose set by SetCameraPose(), if any.
+  const std::optional<CameraPose>& GetCameraPose() const {
+      return m_cameraPose;
+  }
 
 private:
   bool bIsGameRunning = true;
   float m_autoFlySpeed = 0.0f;
+  std::optional<CameraPose> m_cameraPose;
   MainMenuScene* m_menuScene = nullptr;
   MainScene* m_gameScene = nullptr;
 };
