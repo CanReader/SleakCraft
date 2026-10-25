@@ -126,8 +126,16 @@ void SettingsPanel::RenderMSAASection() {
             m_app->SetMSAASampleCount(values[current]);
       }
     } else {
-      UI::Checkbox("Temporal Anti-Aliasing",&isTAAEnabled);
-        m_app->SetTAAEnabled(isTAAEnabled);
+      isTAAEnabled = m_app->IsTAAEnabled();
+      if (UI::Checkbox("Temporal Anti-Aliasing", &isTAAEnabled)) {
+          m_app->SetTAAEnabled(isTAAEnabled);
+          ApplyTextureLodBias();
+      }
+      if (isTAAEnabled) {
+          float sharpen = m_app->GetSharpenStrength();
+          if (UI::DragFloat("Sharpen", &sharpen, 0.01f, 0.0f, 1.0f))
+              m_app->SetSharpenStrength(sharpen);
+      }
   }
 }
 
@@ -293,9 +301,14 @@ void SettingsPanel::RenderTextureSection() {
         }
     }
 
-    if (UI::DragFloat("LOD Bias", &m_texLodBias, 0.05f, -4.0f, 4.0f)) {
-        auto* tex =
-            blockMaterial ? blockMaterial->GetDiffuseTexture() : nullptr;
-        if (tex) tex->SetLodBias(m_texLodBias);
-    }
+    if (UI::DragFloat("LOD Bias", &m_texLodBias, 0.05f, -4.0f, 4.0f))
+        ApplyTextureLodBias();
+}
+
+void SettingsPanel::ApplyTextureLodBias() {
+    auto blockMaterial = m_scene.GetBlockMaterial();
+    auto* tex = blockMaterial ? blockMaterial->GetDiffuseTexture() : nullptr;
+    if (!tex) return;
+    const bool taa = m_app && m_app->IsTAAEnabled();
+    tex->SetLodBias(m_texLodBias + (taa ? TAA_TEXTURE_LOD_BIAS : 0.0f));
 }

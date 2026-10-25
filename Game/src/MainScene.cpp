@@ -25,6 +25,9 @@
 #include "Game.hpp"
 #include "World/TextureAtlas.hpp"
 
+// Post-TAA RCAS strength (0 = off, 1 = strongest)
+#define DEFAULT_SHARPEN_STRENGTH 0.5f
+
 using namespace Sleak;
 using namespace Sleak::Math;
 
@@ -407,7 +410,8 @@ void MainScene::SetupLighting() {
     cfg.ssrEnabled = false;
     cfg.iblEnabled = false;
     cfg.bloomEnabled = false;  // match OpenGL ref (no post-FX bloom chain)
-    cfg.taaEnabled = false;     // smooths shadow-edge aliasing (VK only for now)
+    cfg.taaEnabled = true;      // VK only for now
+    cfg.sharpenStrength = DEFAULT_SHARPEN_STRENGTH;
     cfg.shadowMapResolution = 1072;  // BSL ULTRA tier; 4096 spiked VK frames
     cfg.shadowFrustumSize = 256.0f;  // half-extent → 256m ≈ fog range; 2x texel density
     cfg.shadowCasterDistance = 256.0f;
@@ -421,6 +425,7 @@ void MainScene::SetupLighting() {
 
     auto* app = Sleak::Application::GetInstance();
     if (app) app->ApplyGraphicsConfig(cfg); 
+    m_settingsPanel.ApplyTextureLodBias();
 
     // Apply culling settings directly (not carried by ApplyGraphicsConfig).
     Sleak::CullingSystem::SetOcclusionBufferSize(cfg.occlusionBufferWidth,

@@ -8,6 +8,9 @@ class ChunkManager;
 class MainScene;
 namespace Sleak { class DirectionalLight; class Application; }
 
+// TAA recovers sub-pixel texture detail, so the atlas can sample one mip sharper
+#define TAA_TEXTURE_LOD_BIAS (-1.0f)
+
 /// General/culling/lighting/SSAO/IBL/texture settings sections. Owns the
 /// live-edit sun/ambient/fog/texture state (crosshair/vsync/MT-loading/
 /// culling toggles stay on MainScene since MainScene::SetupLighting also
@@ -56,6 +59,9 @@ public:
     float GetHeightFogDensity() const { return m_heightFogDensity; }
     float GetHeightFogFalloff() const { return m_heightFogFalloff; }
     Sleak::TextureFilter GetTextureFilter() const { return m_texFilter; }
+
+    /// Applies the user LOD bias to the block atlas, plus the TAA bias while TAA is on.
+    void ApplyTextureLodBias();
 
 private:
     /// Crosshair, vsync, and multithreaded-loading toggles.
