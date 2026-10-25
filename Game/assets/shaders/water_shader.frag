@@ -203,8 +203,9 @@ vec3 FogColorAt(vec3 p) {
 #define BLUR_PER_DEPTH      0.06   // m of blur radius per m of depth
 #define BLUR_MIN_PX         0.5
 #define BLUR_MAX_PX         6.0
-#define BLUR_TAPS           4.0
-#define BLUR_CENTER_WEIGHT  (1.0 / (BLUR_TAPS + 1.0))
+#define BLUR_TAPS           8      // fixed Vogel disk, no per-pixel noise to boil under motion
+#define GOLDEN_ANGLE        2.39996323
+#define VOGEL_RING_OFFSET   0.5    // centres each tap in its equal-area ring
 #define CAUSTIC_SCALE       0.9
 #define CAUSTIC_STRENGTH    1.2
 #define CAUSTIC_FALLOFF     0.35   // 1/m
@@ -217,8 +218,7 @@ vec3 FogColorAt(vec3 p) {
 #define SSR_STEPS           16
 #define SSR_BATCH           4      // depth fetches issued together
 #define SSR_REFINE_STEPS    4
-#define SSR_START           0.3    // m
-#define SSR_START_JITTER    0.4    // m
+#define SSR_START           0.5    // m, fixed so reflections stay still under motion
 #define SSR_GROWTH          1.38
 #define SSR_STEP_ADD        0.1    // m
 #define SSR_MAX_DIST        90.0   // m
@@ -228,9 +228,6 @@ vec3 FogColorAt(vec3 p) {
 #define SSR_DIST_FADE_START 0.6    // fraction of SSR_MAX_DIST
 #define SSR_ORIGIN_OFFSET   0.02   // m along the normal
 #define SSR_MIN_DIR_Y       0.015
-#define SSR_FRAME_CYCLE     16.0
-#define SSR_NOISE_SHIFT     vec2(5.588, 0.0)
-#define FRAMES_PER_SECOND   60.0
 
 // ---- Shoreline ----
 #define SHORE_FADE_DEPTH    0.12   // m of depth over which the contact line fades in
@@ -349,9 +346,9 @@ bool OnScreen(vec2 uv) {
 }
 
 // rgb = scene color at the hit, a = confidence
-vec4 TraceReflection(vec3 origin, vec3 dir, float jitter) {
+vec4 TraceReflection(vec3 origin, vec3 dir) {
     float prevT = 0.0;
-    float t = SSR_START + SSR_START_JITTER * jitter;
+    float t = SSR_START;
     for (int i = 0; i < SSR_STEPS; i += SSR_BATCH) {
         // Issue a batch of depth fetches before testing any of them
         float ts[SSR_BATCH];
@@ -464,14 +461,13 @@ WaterResult ShadeWater(vec3 P, vec3 Nface, float t, float footprint) {
         vec3 bottom = textureLod(sceneColor, uv1, 0.0).rgb;
         float blurPx = clamp(depth1 * BLUR_PER_DEPTH / max(footprint, EPSILON), 0.0, BLUR_MAX_PX);
         if (blurPx > BLUR_MIN_PX) {
-            float ang = InterleavedGradientNoise(gl_FragCoord.xy) * (0.5 * PI);
-            vec2  o1 = vec2(cos(ang), sin(ang)) * blurPx * uScreenSize.zw;
-            vec2  o2 = vec2(-o1.y, o1.x);
-            bottom = (bottom +
-                      textureLod(sceneColor, uv1 + o1, 0.0).rgb +
-                      textureLod(sceneColor, uv1 - o1, 0.0).rgb +
-                      textureLod(sceneColor, uv1 + o2, 0.0).rgb +
-                      textureLod(sceneColor, uv1 - o2, 0.0).rgb) * BLUR_CENTER_WEIGHT;
+            vec2 radius = blurPx * uScreenSize.zw;
+            for (int i = 0; i < BLUR_TAPS; ++i) {
+                float r = sqrt((float(i) + VOGEL_RING_OFFSET) / float(BLUR_TAPS));
+                float a = float(i) * GOLDEN_ANGLE;
+                bottom += textureLod(sceneColor, uv1 + vec2(cos(a), sin(a)) * r * radius, 0.0).rgb;
+            }
+            bottom /= float(BLUR_TAPS + 1);
         }
         float bottomFog = FogAmount(B1);
         bottom = SceneToLinear(Unfog(bottom, B1, bottomFog));
@@ -490,10 +486,8 @@ WaterResult ShadeWater(vec3 P, vec3 Nface, float t, float footprint) {
     vec3 R = reflect(-V, N);
     vec3 refl = SkyColor(R, sqrt(wave.w) * SKY_LOD_PER_SLOPE, sunDir, sunCol, amb);
     if (scene && !below && fresnel > SSR_MIN_FRESNEL) {
-        float frame = mod(t * FRAMES_PER_SECOND, SSR_FRAME_CYCLE);
-        float jitter = InterleavedGradientNoise(gl_FragCoord.xy + SSR_NOISE_SHIFT * frame);
         vec3  dir = normalize(vec3(R.x, max(R.y, SSR_MIN_DIR_Y), R.z));
-        vec4  hit = TraceReflection(P + N * SSR_ORIGIN_OFFSET, dir, jitter);
+        vec4  hit = TraceReflection(P + N * SSR_ORIGIN_OFFSET, dir);
         refl = mix(refl, SceneToLinear(hit.rgb), hit.a);
     }
     if (below) {
