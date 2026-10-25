@@ -19,6 +19,12 @@ concurrency:
 permissions:
   contents: read
 
+# Game staging builds against engine staging and main against main, so a
+# change that spans both repos is tested together before either reaches main.
+# A manual run can pick any engine branch or SHA.
+env:
+  ENGINE_REF: ${{ github.event.inputs.engine_ref || ((github.base_ref || github.ref_name) == 'staging' && 'staging') || 'main' }}
+
 # The check names here (the build matrix names and the other jobs' names) are
 # required status checks in .github/rulesets/. Rename both together, or pull
 # requests will wait on a check that never reports.
@@ -55,7 +61,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CanReader/SleakEngine
-          ref: ${{ github.event.inputs.engine_ref || 'main' }}
+          ref: ${{ env.ENGINE_REF }}
           submodules: recursive
           path: SleakEngine
 
@@ -170,6 +176,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CanReader/SleakEngine
+          ref: ${{ env.ENGINE_REF }}
           path: SleakEngine
 
       - name: Install glslc
@@ -226,6 +233,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CanReader/SleakEngine
+          ref: ${{ env.ENGINE_REF }}
           submodules: recursive
           path: SleakEngine
 
