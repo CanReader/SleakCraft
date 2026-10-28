@@ -19,12 +19,12 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - name: Check out the game
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: SleakCraft
 
       - name: Check out the engine
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: CanReader/SleakEngine
           submodules: recursive
@@ -85,7 +85,7 @@ jobs:
           ls -la
 
       - name: Attach to the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             SleakCraft/dist/*.tar.gz

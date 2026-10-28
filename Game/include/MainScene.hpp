@@ -130,6 +130,7 @@ private:
 
     // UI state
     bool m_showUI = true;
+    bool m_showHud = true;  // crosshair and hotbar, off for pinned captures
     bool m_showCrosshair = true;
 
     // Save/load UI feedback

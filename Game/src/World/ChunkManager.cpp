@@ -984,6 +984,11 @@ void ChunkManager::ForceReload() {
 
 void ChunkManager::UpdateVisibility() { m_renderer.UpdateVisibility(); }
 
+void ChunkManager::SetShadowLightVP(const float* vp) {
+    m_hasShadowLightVP = vp != nullptr;
+    if (vp) std::memcpy(m_shadowLightVP, vp, sizeof(m_shadowLightVP));
+}
+
 void ChunkManager::SetCullingEnabled(bool frustum, bool occlusion) {
     m_renderer.SetCullingEnabled(frustum, occlusion);
 }

@@ -25,6 +25,9 @@
 #include "Game.hpp"
 #include "World/TextureAtlas.hpp"
 
+// Post-TAA RCAS strength (0 = off, 1 = strongest)
+#define DEFAULT_SHARPEN_STRENGTH 0.5f
+
 using namespace Sleak;
 using namespace Sleak::Math;
 
@@ -73,6 +76,10 @@ bool MainScene::Initialize() {
     m_chunkManager.Initialize(this, m_blockMaterial);
     m_blockEffects.Initialize(this, m_blockMaterial);
 
+    // Captures load synchronously
+    if (!Sleak::CommandLine::GetValue("-capture").empty())
+        m_multithreadedLoading = false;
+
     if (m_isNewWorld) {
         m_chunkManager.SetSeed(m_worldSeed);
 
@@ -109,8 +116,20 @@ bool MainScene::Initialize() {
         lm->SetFogDistances(fogDist * 0.91f, fogDist);
     }
 
-    // Register game-specific benchmark metrics
+    // Autopilot hides UI panels
     auto* app = Sleak::Application::GetInstance();
+    auto* game = app ? static_cast<Game*>(app->GetGame()) : nullptr;
+    if (game && game->GetAutoFlySpeed() > 0.0f) {
+        m_playerController.StartAutoFly(game->GetAutoFlySpeed());
+        m_showUI = false;
+    }
+    if (game && game->GetCameraPose()) {
+        m_playerController.PinCamera(*game->GetCameraPose());
+        m_showUI = false;
+        m_showHud = false;
+    }
+
+    // Register game-specific benchmark metrics
     if (app && app->GetBenchmark()) {
         app->GetBenchmark()->RegisterMetric("RenderDistance", [this]() {
             return static_cast<float>(m_chunkManager.GetRenderDistance());
@@ -274,6 +293,9 @@ void MainScene::Update(float deltaTime) {
 
         m_playerController.Update();
 
+        // Next shadow pass matrix
+        auto* lm = GetLightManager();
+        m_chunkManager.SetShadowLightVP(lm ? lm->GetShadowLightVP() : nullptr);
         m_chunkManager.Update(pos.GetX(), pos.GetY(), pos.GetZ());
         m_chunkManager.RenderColumns();
 
@@ -296,11 +318,11 @@ void MainScene::Update(float deltaTime) {
         if (m_saveMessageTimer > 0.0f) m_saveMessageTimer -= deltaTime;
         if (m_loadConfirmTimer > 0.0f) m_loadConfirmTimer -= deltaTime;
 
-        m_hudPanel.RenderCrosshair();
+        if (m_showHud) m_hudPanel.RenderCrosshair();
 
         if (m_showUI) RenderUI();
 
-        m_hotbar.Render();
+        if (m_showHud) m_hotbar.Render();
     }
 }
 
@@ -358,7 +380,7 @@ void MainScene::SetupMaterial() {
     waterMat->SetDiffuseColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
     waterMat->SetOpacity(0.7f);
     waterMat->SetRenderMode(MaterialRenderMode::Transparent);
-    waterMat->SetTwoSided(true);
+    waterMat->SetTwoSided(false);
     waterMat->SetShininess(64.0f);
     waterMat->SetSpecularColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
     waterMat->Initialize();
@@ -388,9 +410,10 @@ void MainScene::SetupLighting() {
     cfg.ssrEnabled = false;
     cfg.iblEnabled = false;
     cfg.bloomEnabled = false;  // match OpenGL ref (no post-FX bloom chain)
-    cfg.taaEnabled = true;     // smooths shadow-edge aliasing (VK only for now)
-    cfg.shadowMapResolution = 3072;  // BSL ULTRA tier; 4096 spiked VK frames
-    cfg.shadowFrustumSize = 128.0f;  // half-extent → 256m ≈ fog range; 2x texel density
+    cfg.taaEnabled = true;      // VK only for now
+    cfg.sharpenStrength = DEFAULT_SHARPEN_STRENGTH;
+    cfg.shadowMapResolution = 1072;  // BSL ULTRA tier; 4096 spiked VK frames
+    cfg.shadowFrustumSize = 256.0f;  // half-extent → 256m ≈ fog range; 2x texel density
     cfg.shadowCasterDistance = 256.0f;
     cfg.shadowDistance =
         400.0f;  // pull-back > frustum, else near-clip eats shadows
@@ -401,7 +424,8 @@ void MainScene::SetupLighting() {
     cfg.maxOccluders = 192;
 
     auto* app = Sleak::Application::GetInstance();
-    if (app) app->ApplyGraphicsConfig(cfg);
+    if (app) app->ApplyGraphicsConfig(cfg); 
+    m_settingsPanel.ApplyTextureLodBias();
 
     // Apply culling settings directly (not carried by ApplyGraphicsConfig).
     Sleak::CullingSystem::SetOcclusionBufferSize(cfg.occlusionBufferWidth,

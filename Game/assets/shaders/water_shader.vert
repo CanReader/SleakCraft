@@ -29,9 +29,17 @@ layout(set = 2, binding = 0) uniform ShadowLightUBO {
     vec2  _fogPad;            // std140: must be vec2 (8B) not float[2] (stride-16 = 32B)
 };
 
+// Scene read block (VertexLayoutDesc::transparentReadsScene)
+layout(set = 3, binding = 5) uniform SceneReadUBO {
+    mat4 uViewProj;
+    mat4 uInvViewProj;
+    vec4 uScreenSize;
+    vec4 uSceneCamera;  // xy = TAA jitter in NDC, z = near, w = far
+    vec4 uSceneFlags;
+};
+
 layout(location = 0) out vec3  fragWorldPos;
 layout(location = 1) out vec3  fragNormal;
-layout(location = 2) out vec4  fragColor;
 layout(location = 3) out vec4  fragShadowCoord;
 layout(location = 4) out float fragTime;
 
@@ -40,10 +48,11 @@ void main() {
     // via procedural normal mapping (BSL approach).
     gl_Position   = WVP * vec4(inPosition, 1.0);
     gl_Position.y = -gl_Position.y;   // Vulkan NDC y-flip
+    // Same sub-pixel jitter as the opaque GBuffer geometry
+    gl_Position.xy += uSceneCamera.xy * gl_Position.w;
 
     fragWorldPos   = inPosition;
     fragNormal     = inNormal;
-    fragColor      = inColor;
     fragTime       = uCameraPos.w;    // scene clock stashed in cam.w by LightManager
 
     float normalBias = uLightDir.w;

@@ -6,7 +6,10 @@
 
 class ChunkManager;
 class MainScene;
-namespace Sleak { class DirectionalLight; }
+namespace Sleak { class DirectionalLight; class Application; }
+
+// TAA recovers sub-pixel texture detail, so the atlas can sample one mip sharper
+#define TAA_TEXTURE_LOD_BIAS (-1.0f)
 
 /// General/culling/lighting/SSAO/IBL/texture settings sections. Owns the
 /// live-edit sun/ambient/fog/texture state (crosshair/vsync/MT-loading/
@@ -15,8 +18,7 @@ namespace Sleak { class DirectionalLight; }
 /// @ingroup ui
 class SettingsPanel {
 public:
-    SettingsPanel(ChunkManager& chunkManager, MainScene& scene)
-        : m_chunkManager(chunkManager), m_scene(scene) {}
+    SettingsPanel(ChunkManager& chunkManager, MainScene& scene);
 
     /// Draws every settings section in sequence.
     void Render();
@@ -58,6 +60,9 @@ public:
     float GetHeightFogFalloff() const { return m_heightFogFalloff; }
     Sleak::TextureFilter GetTextureFilter() const { return m_texFilter; }
 
+    /// Applies the user LOD bias to the block atlas, plus the TAA bias while TAA is on.
+    void ApplyTextureLodBias();
+
 private:
     /// Crosshair, vsync, and multithreaded-loading toggles.
     void RenderGeneralSection();
@@ -77,10 +82,14 @@ private:
     void RenderTextureSection();
 
     ChunkManager& m_chunkManager;
+    Sleak::Application* m_app;
     MainScene& m_scene;
 
     // Non-owning; the light itself is owned/created by MainScene.
     Sleak::DirectionalLight* m_sun = nullptr;
+
+    bool isDeferredEnabled = false;
+    bool isTAAEnabled = false;
 
     // Sun state (live-editable)
     float m_sunElevation  = 65.0f;   // degrees above horizon (0=sunrise, 90=noon)

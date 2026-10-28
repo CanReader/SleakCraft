@@ -69,38 +69,111 @@ float CalcShadow(float4 sc, float2 sp) {
     return lerp(1.0, s/16.0, ShadowStrength * fc.x * fc.y);
 }
 
-// ---- Wave height field ----
-float WaterHeight(float2 xz, float time) {
-    float2 w1 = float2( time*0.45,  time*0.30);
-    float2 w2 = float2(-time*0.35,  time*0.50);
-    float h = 0.0;
-    h += sin(xz.x*0.24+w1.x) * sin(xz.y*0.19+w1.y);
-    h += sin(xz.x*0.33+w2.x-xz.y*0.11) * 0.65;
-    h += sin(xz.x*0.80+w1.x*1.9+xz.y*0.58) * 0.40;
-    h += sin(xz.x*1.10-w2.x*2.1) * sin(xz.y*0.88+w2.y*1.4) * 0.35;
-    h += sin(xz.x*2.20+w1.x*3.3) * sin(xz.y*1.85-w1.y*2.7) * 0.15;
-    h += sin(xz.x*3.00-w2.x*4.2+xz.y*2.30) * 0.10;
-    return h;
+// ---- Waves (matches water_shader.frag): octaves derived from a few
+// parameters, each faded out once its wavelength drops under a few pixels ----
+#define PI                   3.14159265
+#define TWO_PI               (2.0 * PI)
+#define GRAVITY              9.81     // m/s^2
+#define WAVE_COUNT           12
+#define WAVE_BASE_LENGTH     13.0     // m, longest octave
+#define WAVE_LENGTH_RATIO    (1.0 / sqrt(2.0))  // irrational octave spacing
+#define WAVE_LENGTH_JITTER   0.12     // +- fraction added to each octave step
+#define WAVE_BASE_STEEPNESS  0.075    // slope amplitude of the longest octave
+#define WAVE_STEEPNESS_DECAY 0.8946   // per-octave steepness falloff
+#define WIND_ANGLE           0.2      // rad, mean travel direction in xz
+#define WIND_SPREAD_LONG     0.9      // rad, long octaves stay nearer the wind
+#define WIND_SPREAD_SHORT    1.4      // rad, short chop spreads wider
+#define WAVE_DIR_SEED        17.0     // hash streams per octave index
+#define WAVE_PHASE_SEED      31.0
+#define WAVE_LENGTH_SEED     47.0
+#define WAVE_SPEED_SCALE     0.55     // fraction of deep-water phase speed
+#define WAVE_FADE_START      0.08     // pixel footprint / wavelength
+#define WAVE_FADE_END        0.25     // 4 pixels per wavelength
+#define TOP_FACE_MIN_Y       0.5      // normal.y above which a face is the water top
+
+// ---- Wave field variation ----
+#define WARP_SCALE           (1.0 / 55.0)          // 1/m, domain warp noise
+#define WARP_AMPLITUDE       2.5                   // m the wave coordinates bend
+#define WARP_SPEED           0.03                  // noise units per second
+#define WARP_CHANNEL_OFFSET  float2(19.3, 7.7)     // decorrelates warp x and y
+#define SWELL_SCALE          (1.0 / 90.0)          // 1/m, long-octave amplitude patches
+#define SWELL_RANGE          float2(0.65, 1.15)    // min, max amplitude
+#define SWELL_DRIFT          float2(0.011, 0.007)  // noise units per second
+#define GUST_SCALE           (1.0 / 24.0)          // 1/m, short-octave gust patches
+#define GUST_RANGE           float2(0.35, 1.3)
+#define GUST_DRIFT           float2(-0.03, 0.02)
+#define CALM_START           30.0   // m from the camera where the surface settles
+#define CALM_END             100.0
+#define FAR_SLOPE_SCALE      0.35   // remaining wave slope far away
+
+// ---- Hash (Dave Hoskins, hash without sine) ----
+#define HASH_SCALE  0.1031
+#define HASH_OFFSET 33.33
+
+float Hash12(float2 p) {
+    float3 p3 = frac(float3(p.xyx) * HASH_SCALE);
+    p3 += dot(p3, p3.yzx + HASH_OFFSET);
+    return frac((p3.x + p3.y) * p3.z);
 }
-float3 WaveNormal(float3 wp, float3 origNorm, float time) {
-    if (origNorm.y < 0.5) return origNorm;
-    float d = 0.15;
-    float xd = (WaterHeight(wp.xz - float2(d,0),time) - WaterHeight(wp.xz + float2(d,0),time)) / (2.0*d);
-    float zd = (WaterHeight(wp.xz - float2(0,d),time) - WaterHeight(wp.xz + float2(0,d),time)) / (2.0*d);
-    return normalize(float3(xd*0.30, 1.0, zd*0.30));
+float ValueNoise(float2 p) {
+    float2 i = floor(p), f = frac(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(Hash12(i), Hash12(i + float2(1.0, 0.0)), u.x),
+                lerp(Hash12(i + float2(0.0, 1.0)), Hash12(i + float2(1.0, 1.0)), u.x), u.y);
+}
+float SignedNoise(float2 p) { return ValueNoise(p) * 2.0 - 1.0; }
+
+// xyz = normal, w = slope variance removed by the filter and the far calm
+float4 WaveNormal(float3 wp, float3 origNorm, float time, float footprint, float viewDist) {
+    if (origNorm.y < TOP_FACE_MIN_Y) return float4(origNorm, 0.0);
+    float2 xz = wp.xz;
+    // Slow domain warp keeps crests from lining up into periodic rows
+    float2 wn = xz * WARP_SCALE + time * WARP_SPEED;
+    float2 p = xz + float2(SignedNoise(wn), SignedNoise(wn + WARP_CHANNEL_OFFSET)) * WARP_AMPLITUDE;
+    // Patches of swell for the long octaves and gusts for the short ones
+    float swell = lerp(SWELL_RANGE.x, SWELL_RANGE.y, ValueNoise(xz * SWELL_SCALE + time * SWELL_DRIFT));
+    float gust  = lerp(GUST_RANGE.x, GUST_RANGE.y, ValueNoise(xz * GUST_SCALE + time * GUST_DRIFT));
+    // Distant water settles toward a mirror; the removed slope widens the glint
+    float calm = lerp(1.0, FAR_SLOPE_SCALE, smoothstep(CALM_START, CALM_END, viewDist));
+
+    float2 g = float2(0.0, 0.0);
+    float lost = 0.0;
+    float wavelength = WAVE_BASE_LENGTH;
+    float steepness = WAVE_BASE_STEEPNESS;
+    [unroll] for (int k = 0; k < WAVE_COUNT; k++) {
+        float octave = (float)k / (float)(WAVE_COUNT - 1);
+        float s = steepness * lerp(swell, gust, octave);
+        float fade = (1.0 - smoothstep(WAVE_FADE_START, WAVE_FADE_END, footprint / wavelength)) * calm;
+        lost += s * s * (1.0 - fade * fade);
+        float spread = lerp(WIND_SPREAD_LONG, WIND_SPREAD_SHORT, octave);
+        float angle = WIND_ANGLE + spread * (2.0 * Hash12(float2(k, WAVE_DIR_SEED)) - 1.0);
+        float2 dir = float2(cos(angle), sin(angle));
+        float wavenumber = TWO_PI / wavelength;
+        float omega = sqrt(GRAVITY * wavenumber) * WAVE_SPEED_SCALE;
+        float phase = Hash12(float2(k, WAVE_PHASE_SEED)) * TWO_PI;
+        g += dir * (s * fade * cos(dot(dir, p) * wavenumber - omega * time + phase));
+        float jitter = 2.0 * Hash12(float2(k, WAVE_LENGTH_SEED)) - 1.0;
+        wavelength *= WAVE_LENGTH_RATIO * (1.0 + WAVE_LENGTH_JITTER * jitter);
+        steepness *= WAVE_STEEPNESS_DECAY;
+    }
+    // Mean of cos^2 is one half
+    return float4(normalize(float3(-g.x, 1.0, -g.y)), 0.5 * lost);
 }
 
-// ---- Sky ----
+// ---- Sky: directions below the horizon reuse the horizon, never black ----
+#define SKY_MIN_Y  0.07
+
 float3 SampleSky(float3 dir, float3 sunDir, float3 sunCol, float3 amb) {
-    float y = max(dir.y, 0.0);
+    dir = normalize(float3(dir.x, max(dir.y, SKY_MIN_Y), dir.z));
     float3 horiz  = lerp(float3(0.70,0.82,0.95), amb, 0.30);
     float3 zenith = lerp(float3(0.22,0.42,0.82), amb*0.65, 0.25);
-    float3 sky = lerp(horiz, zenith, pow(y, 0.45));
+    float3 sky = lerp(horiz, zenith, pow(dir.y, 0.45));
     float sd = max(dot(dir,sunDir), 0.0);
     sky += sunCol*pow(sd,500.0)*5.0 + sunCol*pow(sd,60.0)*0.5;
-    if (dir.y < 0.0) sky = lerp(horiz*0.5, float3(0.02,0.04,0.08), saturate(-dir.y*4.0));
     return sky;
 }
+#define SUN_ROUGHNESS 0.07
+
 float3 ACESFilm(float3 x) { return saturate((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14)); }
 float  Fresnel(float c)   { return 0.02 + 0.98*pow(saturate(1.0-c),5.0); }
 float  GGX(float NdotH, float r) { float a=r*r*r*r; float d=NdotH*NdotH*(a-1.0)+1.0; return a/(3.14159265*d*d); }
@@ -139,7 +212,9 @@ VS_OUTPUT VS_Main(VS_INPUT i) {
 // ---- PS ----
 float4 PS_Main(VS_OUTPUT i) : SV_Target {
     float time = i.Time;
-    float3 N = WaveNormal(i.WorldPos, i.Normal, time);
+    float footprint = max(length(ddx(i.WorldPos.xz)), length(ddy(i.WorldPos.xz)));
+    float4 wave = WaveNormal(i.WorldPos, i.Normal, time, footprint, length(CameraPos - i.WorldPos));
+    float3 N = wave.xyz;
     float3 V = normalize(CameraPos - i.WorldPos);
 
     float3 sunDir = float3(0,1,0), sunCol = float3(1,1,1);
@@ -166,7 +241,8 @@ float4 PS_Main(VS_OUTPUT i) : SV_Target {
     float3 refl = SampleSky(R, sunDir, sunCol, amb);
 
     float NdotH = max(dot(N,normalize(V+sunDir)),0.0);
-    float spec  = GGX(NdotH,0.07)*fresnel*shadow;
+    // GGX here takes r with alpha = r^2; filtered wave slopes add to alpha^2
+    float spec  = GGX(NdotH, pow(pow(SUN_ROUGHNESS, 4.0) + wave.w, 0.25))*fresnel*shadow;
     float3 specC = sunCol * min(spec, 40.0);
 
     float3 final = lerp(waterBody, refl, fresnel) + specC;

@@ -2,6 +2,9 @@
 #define _PLAYER_CONTROLLER_HPP_
 
 #include <Events/KeyboardEvent.hpp>
+#include <Math/Vector.hpp>
+
+#include "Player/CameraPose.hpp"
 
 class ChunkManager;
 class MainScene;
@@ -23,10 +26,22 @@ public:
     void OnKeyReleased(const Sleak::Events::Input::KeyReleasedEvent& e);
     /// Applies fly vertical input and resolves voxel collision for this frame.
     void Update();
+    /// Starts a hands-free flight along +Z just above the build limit so
+    /// tests can drive chunk streaming. Speed is in m/s; zero or less is
+    /// ignored.
+    void StartAutoFly(float speed);
+    /// Freezes the camera at a fixed pose so captures frame the same view on
+    /// every backend.
+    void PinCamera(const CameraPose& pose);
 
 private:
     ChunkManager& m_chunkManager;
     MainScene& m_scene;
+
+    float m_autoFlySpeed = 0.0f;
+    bool m_pinned = false;
+    Sleak::Math::Vector3D m_pinPosition;
+    Sleak::Math::Vector3D m_pinDirection;
 
     // Minecraft-style double-tap space to toggle fly
     bool m_flying = false;
