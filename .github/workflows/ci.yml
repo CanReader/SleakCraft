@@ -50,8 +50,9 @@ jobs:
             os: windows-latest
             config: Release
     steps:
-      # Engine/ is a tracked symlink to ../SleakEngine, so the two repos must
-      # sit side by side in the workspace for it to resolve.
+      # Engine/ is a submodule. The game checkout leaves it empty, and the
+      # engine checkout below fills it with the ref this run should build
+      # against instead of the pinned commit.
       - name: Check out the game
         uses: actions/checkout@v7
         with:
@@ -63,20 +64,9 @@ jobs:
           repository: CanReader/SleakEngine
           ref: ${{ env.ENGINE_REF }}
           submodules: recursive
-          path: SleakEngine
+          path: SleakCraft/Engine
 
-      # Git on Windows materializes the Engine symlink as a plain text file,
-      # so CMake sees no directory there. A directory junction gives the same
-      # result as the symlink does on Linux and needs no elevation.
-      - name: Replace the Engine link with a junction (Windows)
-        if: runner.os == 'Windows'
-        shell: cmd
-        working-directory: SleakCraft
-        run: |
-          if exist Engine\NUL (rmdir /s /q Engine) else (if exist Engine del /f /q Engine)
-          mklink /J Engine ..\SleakEngine
-
-      - name: Verify the Engine symlink resolves
+      - name: Verify the Engine checkout resolves
         shell: bash
         run: |
           cd SleakCraft
@@ -177,7 +167,7 @@ jobs:
         with:
           repository: CanReader/SleakEngine
           ref: ${{ env.ENGINE_REF }}
-          path: SleakEngine
+          path: SleakCraft/Engine
 
       - name: Install glslc
         run: sudo apt-get update && sudo apt-get install -y glslc
@@ -235,7 +225,7 @@ jobs:
           repository: CanReader/SleakEngine
           ref: ${{ env.ENGINE_REF }}
           submodules: recursive
-          path: SleakEngine
+          path: SleakCraft/Engine
 
       - name: Install dependencies and software Vulkan
         run: |
