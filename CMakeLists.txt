@@ -3,7 +3,9 @@ project(SleakEngine)
 
 include(cmake/SleakCommon.cmake)
 
-if(NOT MSVC AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(MSVC)
+    add_compile_definitions($<$<CONFIG:Debug>:DEBUG>)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(_DEBUG DEBUG)
 endif()
 
