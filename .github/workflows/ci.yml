@@ -21,7 +21,8 @@ permissions:
 
 # Game staging builds against engine staging and main against main, so a
 # change that spans both repos is tested together before either reaches main.
-# A manual run can pick any engine branch or SHA.
+# A pull request builds against the engine branch with the same name when one
+# exists. A manual run can pick any engine branch or SHA.
 env:
   ENGINE_REF: ${{ github.event.inputs.engine_ref || ((github.base_ref || github.ref_name) == 'staging' && 'staging') || 'main' }}
 
@@ -29,8 +30,28 @@ env:
 # required status checks in .github/rulesets/. Rename both together, or pull
 # requests will wait on a check that never reports.
 jobs:
+  engine-ref:
+    name: Pick the engine ref
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.pick.outputs.ref }}
+    steps:
+      - name: Prefer the engine branch with the same name
+        id: pick
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          ref="$ENGINE_REF"
+          if [ -n "$BRANCH" ] && git ls-remote --exit-code --heads \
+              https://github.com/CanReader/SleakEngine.git "$BRANCH" > /dev/null; then
+            ref="$BRANCH"
+          fi
+          echo "Building against engine $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
   build:
     name: ${{ matrix.name }}
+    needs: engine-ref
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -50,8 +71,9 @@ jobs:
             os: windows-latest
             config: Release
     steps:
-      # Engine/ is a tracked symlink to ../SleakEngine, so the two repos must
-      # sit side by side in the workspace for it to resolve.
+      # Engine/ is a submodule. The game checkout leaves it empty, and the
+      # engine checkout below fills it with the ref this run should build
+      # against instead of the pinned commit.
       - name: Check out the game
         uses: actions/checkout@v7
         with:
@@ -61,22 +83,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: CanReader/SleakEngine
-          ref: ${{ env.ENGINE_REF }}
+          ref: ${{ needs.engine-ref.outputs.ref }}
           submodules: recursive
-          path: SleakEngine
+          path: SleakCraft/Engine
 
-      # Git on Windows materializes the Engine symlink as a plain text file,
-      # so CMake sees no directory there. A directory junction gives the same
-      # result as the symlink does on Linux and needs no elevation.
-      - name: Replace the Engine link with a junction (Windows)
-        if: runner.os == 'Windows'
-        shell: cmd
-        working-directory: SleakCraft
-        run: |
-          if exist Engine\NUL (rmdir /s /q Engine) else (if exist Engine del /f /q Engine)
-          mklink /J Engine ..\SleakEngine
-
-      - name: Verify the Engine symlink resolves
+      - name: Verify the Engine checkout resolves
         shell: bash
         run: |
           cd SleakCraft
@@ -165,6 +176,7 @@ jobs:
 
   shaders:
     name: Shaders compile and are committed
+    needs: engine-ref
     runs-on: ubuntu-latest
     steps:
       - name: Check out the game
@@ -176,8 +188,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: CanReader/SleakEngine
-          ref: ${{ env.ENGINE_REF }}
-          path: SleakEngine
+          ref: ${{ needs.engine-ref.outputs.ref }}
+          path: SleakCraft/Engine
 
       - name: Install glslc
         run: sudo apt-get update && sudo apt-get install -y glslc
@@ -221,6 +233,7 @@ jobs:
   # shaders and failed asset loads.
   smoke:
     name: Headless smoke test
+    needs: engine-ref
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -233,9 +246,9 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: CanReader/SleakEngine
-          ref: ${{ env.ENGINE_REF }}
+          ref: ${{ needs.engine-ref.outputs.ref }}
           submodules: recursive
-          path: SleakEngine
+          path: SleakCraft/Engine
 
       - name: Install dependencies and software Vulkan
         run: |

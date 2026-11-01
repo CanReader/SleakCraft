@@ -1,8 +1,8 @@
 name: Verify against engine main
 
 # The engine repository fires this after every push to its main branch.
-# Engine/ is a symlink rather than a pinned submodule, so nothing updates
-# here: the job proves the game still builds against the engine as it is now.
+# The pinned Engine/ submodule is replaced by the engine's current head, so
+# nothing updates here: the job proves the game still builds against the engine as it is now.
 on:
   repository_dispatch:
     types: [engine-updated]
@@ -32,7 +32,7 @@ jobs:
           repository: CanReader/SleakEngine
           ref: ${{ github.event.client_payload.sha || 'main' }}
           submodules: recursive
-          path: SleakEngine
+          path: SleakCraft/Engine
 
       - name: Install Linux dependencies
         run: |

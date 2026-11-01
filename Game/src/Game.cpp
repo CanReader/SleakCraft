@@ -3,6 +3,7 @@
 #include "MainScene.hpp"
 #include <Core/Application.hpp>
 #include <Core/CommandLine.hpp>
+#include <Debug/ShaderHotReload.hpp>
 #include "World/SaveManager.hpp"
 #include "World/VoxelVertex.hpp"
 #include <random>
@@ -18,6 +19,7 @@ Game::~Game() {
 bool Game::Initialize() {
     // Register the voxel vertex layout before any chunk mesh is created
     GetVoxelVertexFormat();
+    Sleak::Debug::ShaderHotReload::AddSourceDirectory(SLEAKCRAFT_SHADER_DIR);
 
     m_menuScene = new MainMenuScene("MainMenuScene");
     AddScene(m_menuScene);
