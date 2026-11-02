@@ -32,6 +32,7 @@ static void PrintHelp(const char* exe) {
         << "  --no-vsync         Disable VSync on launch\n"
         << "\nBenchmark\n"
         << "  --bench            Start benchmark recording immediately\n"
+        << "  --bench-postfx     Enable SSAO, SSR and bloom for the run\n"
         << "  --autofly <m/s>    Autopilot flight speed (Debug builds)\n"
         << "  -campose x,y,z,yaw,pitch\n"
         << "                     Pin the camera, degrees (Debug builds)\n"
