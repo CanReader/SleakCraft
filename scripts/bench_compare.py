@@ -13,6 +13,7 @@ import re
 import statistics
 
 TAG = re.compile(r"(?P<label>.+)_(?P<renderer>[a-z0-9]+)_(?P<res>\d+x\d+)_(?P<run>\d+)$")
+MIN_FRAMES = 500
 GPU_COLS = ["GPU_shadow_ms", "GPU_gbuffer_ms", "GPU_ssao_ms", "GPU_lighting_ms",
             "GPU_forward_ms", "GPU_taa_ms", "GPU_ssr_ms", "GPU_total_ms"]
 
@@ -28,6 +29,8 @@ def load_run(path, first_frame):
     with open(path, newline="") as f:
         rows = [r for r in csv.DictReader(f)]
     rows = [r for r in rows if r["Frame"].isdigit() and int(r["Frame"]) >= first_frame][:-5]
+    if len(rows) < MIN_FRAMES:
+        return None
     times = [float(r["Time_s"]) for r in rows]
     frame_ms = [(b - a) * 1000.0 for a, b in zip(times, times[1:])]
     out = {
@@ -64,7 +67,11 @@ def main():
         if not m:
             continue
         key = (m["renderer"], m["res"], m["label"])
-        groups[key].append(load_run(p, args.first))
+        run = load_run(p, args.first)
+        if run is None:
+            print(f"skipping truncated run {p.name}")
+            continue
+        groups[key].append(run)
         images[key].add(md5(p.with_suffix(".ppm")))
 
     metrics = ["fps", "frame_mean", "frame_p50", "frame_p99", "cpu_frame_ms", *GPU_COLS, "cull_ms", "tris"]
