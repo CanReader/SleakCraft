@@ -11,10 +11,14 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
     int bandMinY = yBand * BAND_SIZE;
     int bandMaxY = bandMinY + BAND_SIZE - 1;
 
-    VoxelVertexBuffer mergedVerts;
-    Sleak::IndexGroup mergedIndices;
-    VoxelVertexBuffer mergedWaterVerts;
-    Sleak::IndexGroup mergedWaterIndices;
+    VoxelVertexBuffer& mergedVerts = m_mergedVerts;
+    std::vector<uint32_t>& mergedIndices = m_mergedIndices;
+    VoxelVertexBuffer& mergedWaterVerts = m_mergedWaterVerts;
+    std::vector<uint32_t>& mergedWaterIndices = m_mergedWaterIndices;
+    mergedVerts.clear();
+    mergedIndices.clear();
+    mergedWaterVerts.clear();
+    mergedWaterIndices.clear();
 
     // Dispatch ALL consumed-mesh siblings in one batch so workers re-mesh
     // the band in parallel; dispatching one per attempt serialized a column
@@ -46,6 +50,11 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
     float meshMinY = 1e30f;
     float meshMaxY = -1e30f;
 
+    // Collect ready chunks first so the merged buffers are sized once
+    Chunk* ready[BAND_SIZE];
+    int readyCount = 0;
+    size_t vertexTotal = 0, indexTotal = 0;
+    size_t waterVertexTotal = 0, waterIndexTotal = 0;
     for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
         Chunk* chunk = m_mgr.GetChunk(cx, cy, cz);
         // Skip chunks not ready (in-flight or not yet generated)
@@ -61,47 +70,44 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
             chunk->GenerateMeshData();
         }
 
-        // Merge opaque mesh
-        {
-            auto& md = chunk->GetPendingMeshData();
-            chunk->ClearPendingMesh();
+        ready[readyCount++] = chunk;
+        vertexTotal += chunk->GetPendingMeshData().vertices.GetSize();
+        indexTotal += chunk->GetPendingMeshData().indices.GetSize();
+        waterVertexTotal += chunk->GetPendingWaterMeshData().vertices.GetSize();
+        waterIndexTotal += chunk->GetPendingWaterMeshData().indices.GetSize();
+    }
 
-            if (md.vertices.GetSize() > 0) {
-                uint32_t baseVertex = static_cast<uint32_t>(mergedVerts.GetSize());
-                const ::VoxelVertex* vdata = md.vertices.GetData();
-                for (size_t i = 0; i < md.vertices.GetSize(); ++i) {
-                    mergedVerts.AddVertex(vdata[i]);
-                    if (vdata[i].py < meshMinY) meshMinY = vdata[i].py;
-                    if (vdata[i].py > meshMaxY) meshMaxY = vdata[i].py;
-                }
-                const uint32_t* idata = md.indices.GetData();
-                for (size_t i = 0; i < md.indices.GetSize(); ++i)
-                    mergedIndices.add(idata[i] + baseVertex);
+    mergedVerts.Reserve(vertexTotal);
+    mergedIndices.reserve(indexTotal);
+    mergedWaterVerts.Reserve(waterVertexTotal);
+    mergedWaterIndices.reserve(waterIndexTotal);
+
+    auto append = [&](ChunkMeshData& md, VoxelVertexBuffer& verts,
+                      std::vector<uint32_t>& indices) {
+        const size_t vertexCount = md.vertices.GetSize();
+        if (vertexCount > 0) {
+            const uint32_t baseVertex = static_cast<uint32_t>(verts.GetSize());
+            const ::VoxelVertex* vdata = md.vertices.GetData();
+            for (size_t i = 0; i < vertexCount; ++i) {
+                if (vdata[i].py < meshMinY) meshMinY = vdata[i].py;
+                if (vdata[i].py > meshMaxY) meshMaxY = vdata[i].py;
             }
-            md.vertices.release();
-            md.indices.release();
+            verts.Append(vdata, vertexCount);
+            const uint32_t* idata = md.indices.GetData();
+            for (size_t i = 0; i < md.indices.GetSize(); ++i)
+                indices.push_back(idata[i] + baseVertex);
         }
+        md.vertices.release();
+        md.indices.release();
+    };
 
-        // Merge water mesh
-        {
-            auto& wd = chunk->GetPendingWaterMeshData();
-            chunk->ClearPendingWaterMesh();
-
-            if (wd.vertices.GetSize() > 0) {
-                uint32_t baseVertex = static_cast<uint32_t>(mergedWaterVerts.GetSize());
-                const ::VoxelVertex* vdata = wd.vertices.GetData();
-                for (size_t i = 0; i < wd.vertices.GetSize(); ++i) {
-                    mergedWaterVerts.AddVertex(vdata[i]);
-                    if (vdata[i].py < meshMinY) meshMinY = vdata[i].py;
-                    if (vdata[i].py > meshMaxY) meshMaxY = vdata[i].py;
-                }
-                const uint32_t* idata = wd.indices.GetData();
-                for (size_t i = 0; i < wd.indices.GetSize(); ++i)
-                    mergedWaterIndices.add(idata[i] + baseVertex);
-            }
-            wd.vertices.release();
-            wd.indices.release();
-        }
+    for (int i = 0; i < readyCount; ++i) {
+        Chunk* chunk = ready[i];
+        chunk->ClearPendingMesh();
+        append(chunk->GetPendingMeshData(), mergedVerts, mergedIndices);
+        chunk->ClearPendingWaterMesh();
+        append(chunk->GetPendingWaterMeshData(), mergedWaterVerts,
+               mergedWaterIndices);
     }
 
     if (mergedVerts.GetSize() == 0 && mergedWaterVerts.GetSize() == 0) {
@@ -120,13 +126,13 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
     if (mergedVerts.GetSize() > 0)
         col.mesh = Sleak::MeshBatch::CreateMesh(
             GetVoxelVertexFormat(), mergedVerts.GetData(),
-            mergedVerts.GetSizeInBytes(), mergedIndices.GetData(),
-            mergedIndices.GetSize());
+            mergedVerts.GetSizeInBytes(), mergedIndices.data(),
+            mergedIndices.size());
     if (mergedWaterVerts.GetSize() > 0)
         col.waterMesh = Sleak::MeshBatch::CreateMesh(
             GetVoxelVertexFormat(), mergedWaterVerts.GetData(),
-            mergedWaterVerts.GetSizeInBytes(), mergedWaterIndices.GetData(),
-            mergedWaterIndices.GetSize());
+            mergedWaterVerts.GetSizeInBytes(), mergedWaterIndices.data(),
+            mergedWaterIndices.size());
 
     if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) {
         m_mgr.SetOOMThisFrame(true);
