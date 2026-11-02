@@ -225,6 +225,7 @@ private:
     int m_chunksPerFrame = 32;    // remesh + unload budget per frame
     int m_dispatchPerFrame = 64;  // new-chunk generation dispatches per frame
     int m_uploadsPerFrame = 16;   // column mesh rebuilds (GPU uploads) per frame
+    static constexpr float UPLOAD_BUDGET_MS = 2.0f;  // column rebuild time per frame
     float m_drawDistance = 96.0f;
     float m_drawDistSq = 96.0f * 96.0f;
     float m_shadowCasterDistSq = 96.0f * 96.0f;
