@@ -3,6 +3,7 @@
 #include <Core/Logger.hpp>
 #include <Runtime/Material.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -784,12 +785,17 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                 }
             }
 
+            const auto uploadStart = std::chrono::steady_clock::now();
+            bool outOfTime = false;
             for (auto& key : toRebuild) {
-                if (m_oomThisFrame) {
+                if (m_oomThisFrame || outOfTime) {
                     m_dirtyColumns.insert(key);
                     continue;
                 }
                 RebuildColumnMesh(key.x, key.yBand, key.z);
+                outOfTime = std::chrono::duration<float, std::milli>(
+                                std::chrono::steady_clock::now() - uploadStart)
+                                .count() >= UPLOAD_BUDGET_MS;
             }
         }
     } else {
