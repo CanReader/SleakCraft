@@ -1,14 +1,14 @@
 #include "MainScene.hpp"
 
-#include <Events/Event.hpp>
-#include <Input/KeyCodes.hpp>
-
 #include <Camera/Camera.hpp>
 #include <Core/Application.hpp>
 #include <Core/CommandLine.hpp>
 #include <Core/GameObject.hpp>
+#include <Core/Logger.hpp>
 #include <Culling/CullingSystem.hpp>
 #include <ECS/Components/FirstPersonController.hpp>
+#include <Events/Event.hpp>
+#include <Input/KeyCodes.hpp>
 #include <Lighting/DirectionalLight.hpp>
 #include <Lighting/LightManager.hpp>
 #include <Math/Vector.hpp>
@@ -347,16 +347,14 @@ void MainScene::SetupMaterial() {
     Sleak::TextureFilter texFilter = m_settingsPanel.GetTextureFilter();
 
     // Build runtime atlas from individual block textures
-    auto* atlasTex = TextureAtlas::BuildAtlas();
-    if (atlasTex) {
+    RefPtr<Texture> atlasTex = TextureAtlas::BuildAtlas();
+    if (atlasTex.IsValid()) {
         atlasTex->SetFilter(texFilter);
         atlasTex->SetWrapMode(TextureWrapMode::ClampToEdge);
         mat->SetDiffuseTexture(atlasTex);
     } else {
-        // Fallback to old atlas file
-        mat->SetDiffuseTexture("assets/textures/block_atlas.png");
-        mat->GetDiffuseTexture()->SetFilter(texFilter);
-        mat->GetDiffuseTexture()->SetWrapMode(TextureWrapMode::ClampToEdge);
+        SLEAK_ERROR(
+            "Block atlas could not be created; terrain renders untextured");
     }
     mat->SetDiffuseColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
     mat->SetSpecularColor((uint8_t)0, (uint8_t)0, (uint8_t)0);
@@ -371,12 +369,7 @@ void MainScene::SetupMaterial() {
     // Water material
     auto* waterMat = new Material();
     waterMat->SetShader("assets/shaders/water_shader.hlsl");
-    auto* waterAtlasTex = TextureAtlas::BuildAtlas();
-    if (waterAtlasTex) {
-        waterAtlasTex->SetFilter(texFilter);
-        waterAtlasTex->SetWrapMode(TextureWrapMode::ClampToEdge);
-        waterMat->SetDiffuseTexture(waterAtlasTex);
-    }
+    if (atlasTex.IsValid()) waterMat->SetDiffuseTexture(atlasTex);
     waterMat->SetDiffuseColor((uint8_t)255, (uint8_t)255, (uint8_t)255);
     waterMat->SetOpacity(0.7f);
     waterMat->SetRenderMode(MaterialRenderMode::Transparent);
