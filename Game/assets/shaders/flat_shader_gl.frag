@@ -1,4 +1,5 @@
 #version 450 core
+#extension GL_GOOGLE_include_directive : require
 
 in vec3 fragWorldPos;
 in vec3 fragWorldNorm;
@@ -38,6 +39,8 @@ layout(std140, binding = 5) uniform ShadowUBO {
     uint  ShadowMapEnabled;
     float _shadowPad0, _shadowPad1;
 };
+
+#include "sleak/frame.glsl"
 
 layout(binding = 0) uniform sampler2D diffuseTexture;
 layout(binding = 3) uniform sampler2DShadow shadowMap;
@@ -142,5 +145,5 @@ void main() {
         lit = mix(FogColor.rgb, lit, fogFactor);
     }
 
-    outColor = vec4(lit, texColor.a);
+    outColor = SleakFrameGuard(vec4(lit, texColor.a));
 }

@@ -1,4 +1,5 @@
 #version 450 core
+#extension GL_GOOGLE_include_directive : require
 
 // Deferred lighting pass.
 // Reads the 4 GBuffer textures (bound at units 8-11),
@@ -25,6 +26,8 @@ layout(binding = 16) uniform sampler2D   brdfLUT;
 
 // Shadow map (already bound at unit 3 by the shadow pass)
 layout(binding = 3) uniform sampler2DShadow shadowMap;
+
+#include "sleak/frame.glsl"
 
 // ---- UBOs ----
 struct LightData {
@@ -138,7 +141,7 @@ float CalcShadowPCF(vec3 worldPos, float NdotL) {
     vec4 sc = ShadowLightVP * vec4(worldPos, 1.0);
     vec3 proj = sc.xyz / sc.w;
     proj.xy   = proj.xy * 0.5 + 0.5;
-    proj.z    = proj.z  * 0.5 + 0.5;   // remap [-1,1]->  [0,1] for OpenGL
+    proj.z    = SleakNdcToDepth(proj.z);
 
     if (proj.z > 1.0 || any(lessThan(proj.xy, vec2(0.0))) || any(greaterThan(proj.xy, vec2(1.0))))
         return 1.0;
@@ -160,11 +163,9 @@ float CalcShadowPCF(vec3 worldPos, float NdotL) {
     return mix(1.0, fadedShadow, ShadowStrength * edgeFade);
 }
 
-// Reconstruct world position from depth. OpenGL: no vertex Y-flip, and the
-// default clip depth range is [-1,1], so the stored [0,1] depth maps to
-// NDC.z = 2*depth-1 before InvViewProj.
+// World position of a GBuffer texel from its depth
 vec3 ReconstructWorldPos(vec2 uv, float depth) {
-    vec4 ndc   = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec4 ndc   = vec4(SleakUvToNdc(uv), SleakDepthToNdc(depth), 1.0);
     vec4 world = InvViewProj * ndc;
     return world.xyz / world.w;
 }
@@ -305,5 +306,5 @@ void main() {
     // ---- Fog ----
     color = ApplyFog(color, worldPos);
 
-    outColor = vec4(color, 1.0);
+    outColor = SleakFrameGuard(vec4(color, 1.0));
 }

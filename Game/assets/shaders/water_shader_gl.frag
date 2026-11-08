@@ -1,4 +1,5 @@
 #version 450 core
+#extension GL_GOOGLE_include_directive : require
 
 in vec3  fragWorldPos;
 in vec3  fragNormal;
@@ -46,6 +47,8 @@ layout(std140, binding = 5) uniform ShadowUBO {
 };
 
 layout(binding = 3) uniform sampler2DShadow shadowMap;
+
+#include "sleak/frame.glsl"
 
 // Scene read (VertexLayoutDesc::transparentReadsScene)
 layout(binding = 4) uniform sampler2D   sceneColor;  // tonemapped + fogged
@@ -598,5 +601,5 @@ void main() {
         color = mix(w.backdrop, color, w.edge);
     else
         alpha = FallbackAlpha(P, fragNormal);
-    outColor = vec4(color, alpha);
+    outColor = SleakFrameGuard(vec4(color, alpha));
 }
