@@ -298,11 +298,6 @@ void MainScene::Update(float deltaTime) {
         m_chunkManager.SetShadowLightVP(lm ? lm->GetShadowLightVP() : nullptr);
         m_chunkManager.Update(pos.GetX(), pos.GetY(), pos.GetZ());
         m_chunkManager.RenderColumns();
-
-        // Animate water — pass game time through material tiling.x
-        if (m_waterMaterial) {
-            m_waterMaterial->SetTiling(m_gameTime, 1.0f);
-        }
         m_chunkManager.RenderWater();
 
         m_blockInteraction.RenderOutline();
