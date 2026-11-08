@@ -47,10 +47,27 @@ function(sleak_track_asset_dir SRC_DIR LABEL)
 endfunction()
 
 set(SLEAK_ASSET_OUTPUTS "")
+# Game SPIR-V built from source claims its outputs first, so the committed
+# fallback copies are skipped
+get_property(_game_spirv GLOBAL PROPERTY GAME_SPIRV_FILES)
+foreach(_spv ${_game_spirv})
+    get_filename_component(_name "${_spv}" NAME)
+    set(_dst "${_asset_out_dir}/shaders/${_name}")
+    add_custom_command(
+        OUTPUT "${_dst}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_spv}" "${_dst}"
+        DEPENDS "${_spv}"
+        COMMENT "Copy game SPIR-V: ${_name}"
+        VERBATIM
+    )
+    list(APPEND SLEAK_ASSET_OUTPUTS "${_dst}")
+    list(APPEND _sleak_seen_outputs "${_dst}")
+endforeach()
 sleak_track_asset_dir("${CMAKE_SOURCE_DIR}/Game/assets"          "game")
 sleak_track_asset_dir("${CMAKE_SOURCE_DIR}/Engine/assets" "engine")
 
 add_custom_target(CopyAssets ALL DEPENDS ${SLEAK_ASSET_OUTPUTS})
+add_dependencies(CopyAssets GameShaders)
 add_dependencies(SleakCraft CopyAssets)
 
 # --- Post-build: copy runtime DLLs (Windows) ---
