@@ -347,8 +347,8 @@ void MainScene::SetupMaterial() {
     Sleak::TextureFilter texFilter = m_settingsPanel.GetTextureFilter();
 
     // Build runtime atlas from individual block textures
-    auto* atlasTex = TextureAtlas::BuildAtlas();
-    if (atlasTex) {
+    RefPtr<Texture> atlasTex = TextureAtlas::BuildAtlas();
+    if (atlasTex.IsValid()) {
         atlasTex->SetFilter(texFilter);
         atlasTex->SetWrapMode(TextureWrapMode::ClampToEdge);
         mat->SetDiffuseTexture(atlasTex);
@@ -371,8 +371,8 @@ void MainScene::SetupMaterial() {
     // Water material
     auto* waterMat = new Material();
     waterMat->SetShader("assets/shaders/water_shader.hlsl");
-    auto* waterAtlasTex = TextureAtlas::BuildAtlas();
-    if (waterAtlasTex) {
+    RefPtr<Texture> waterAtlasTex = TextureAtlas::BuildAtlas();
+    if (waterAtlasTex.IsValid()) {
         waterAtlasTex->SetFilter(texFilter);
         waterAtlasTex->SetWrapMode(TextureWrapMode::ClampToEdge);
         waterMat->SetDiffuseTexture(waterAtlasTex);

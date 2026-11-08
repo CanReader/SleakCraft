@@ -1,11 +1,11 @@
 #ifndef _TEXTURE_ATLAS_HPP_
 #define _TEXTURE_ATLAS_HPP_
 
+#include <Memory/RefPtr.hpp>
+#include <Runtime/Texture.hpp>
 #include <cstdint>
-#include <vector>
 #include <string>
-
-namespace Sleak { class Texture; }
+#include <vector>
 
 /// UV rectangle for one atlas tile's content, inside its gutter-padded cell.
 struct AtlasUV {
@@ -21,9 +21,9 @@ class TextureAtlas {
 public:
     static constexpr int TILES_PER_ROW = 4;
 
-    /// Loads every block texture (in BlockTile enum order, must match),
-    /// resamples each to a common tile size, and packs them into one atlas.
-    static Sleak::Texture* BuildAtlas();
+    /// Loads every block texture in BlockTile order, packs the gutter-padded
+    /// atlas and uploads it with its mip chain; null if the upload fails.
+    static Sleak::RefPtr<Sleak::Texture> BuildAtlas();
 
     /// UVs address the tile content inside its gutter-padded cell.
     static AtlasUV GetTileUV(uint8_t tileIndex) {

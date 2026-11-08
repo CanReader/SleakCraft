@@ -52,7 +52,7 @@ static void ResampleNearest(const unsigned char* src, int srcW, int srcH,
     }
 }
 
-Texture* TextureAtlas::BuildAtlas() {
+Sleak::RefPtr<Sleak::Texture> TextureAtlas::BuildAtlas() {
     constexpr int tileCount = TILE_COUNT;
     s_rows = (tileCount + TILES_PER_ROW - 1) / TILES_PER_ROW;
 
@@ -125,5 +125,11 @@ Texture* TextureAtlas::BuildAtlas() {
     // Cap mips so the gutter stays >=1px at the deepest level
     uint32_t maxMips = 1;
     for (int p = pad; p > 1; p >>= 1) ++maxMips;
-    return CreateTextureFromPixels(atlasW, atlasH, atlas.data(), maxMips);
+
+    Sleak::TextureDesc desc;
+    desc.width = static_cast<uint32_t>(atlasW);
+    desc.height = static_cast<uint32_t>(atlasH);
+    desc.mipLevels = maxMips;
+    const Sleak::TextureMipLevel level0{atlas.data(), atlas.size()};
+    return Sleak::CreateTexture(desc, &level0, 1);
 }
