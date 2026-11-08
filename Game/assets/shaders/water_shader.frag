@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 layout(location = 0) in vec3  fragWorldPos;
 layout(location = 1) in vec3  fragNormal;
@@ -7,28 +8,8 @@ layout(location = 4) in float fragTime;
 
 layout(location = 0) out vec4 outColor;
 
-// NOTE: see water_shader.vert — no MaterialUBO in the Vulkan layout.
-// Time comes from uCameraPos.w (interpolated via fragTime).
-layout(set = 2, binding = 0) uniform ShadowLightUBO {
-    vec4  uLightDir;
-    vec4  uLightColor;
-    vec4  uAmbient;
-    vec4  uCameraPos;
-    mat4  uLightVP;
-    float uShadowBias;
-    float uShadowStrength;
-    float uShadowTexelSize;
-    float uLightSize;
-    vec4  uFogColor;       // horizon
-    float uFogStart;
-    float uFogEnd;
-    vec2  _fogPad;         // std140: must be vec2 (8B), NOT float[2] (stride-16 = 32B)
-    vec4  uFogZenithColor; // zenith
-    float uHeightFogTop;
-    float uHeightFogDensity;
-    float uHeightFogFalloff;
-    float uHeightFogEnabled;
-};
+#include "sleak/shadow_light.glsl"
+#include "sleak/frame.glsl"
 
 layout(set = 3, binding = 0) uniform sampler2DShadow shadowMap;
 
@@ -553,5 +534,5 @@ void main() {
         color = mix(w.backdrop, color, w.edge);
     else
         alpha = FallbackAlpha(P, fragNormal);
-    outColor = vec4(clamp(color, vec3(0.0), vec3(MAX_HDR)), alpha);
+    outColor = SleakFrameGuard(vec4(clamp(color, vec3(0.0), vec3(MAX_HDR)), alpha));
 }

@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -10,24 +11,8 @@ layout(push_constant) uniform TransformPC {
     mat4 World;
 };
 
-// NOTE: The engine's Vulkan pipeline layout has no MaterialUBO slot (set 1 is
-// the bone UBO, used only by skinned shaders). Time is transported via
-// uCameraPos.w, which LightManager populates with a monotonic scene clock.
-layout(set = 2, binding = 0) uniform ShadowLightUBO {
-    vec4  uLightDir;
-    vec4  uLightColor;
-    vec4  uAmbient;
-    vec4  uCameraPos;
-    mat4  uLightVP;
-    float uShadowBias;
-    float uShadowStrength;
-    float uShadowTexelSize;
-    float uLightSize;
-    vec4  uFogColor;
-    float uFogStart;
-    float uFogEnd;
-    vec2  _fogPad;            // std140: must be vec2 (8B) not float[2] (stride-16 = 32B)
-};
+#include "sleak/shadow_light.glsl"
+#include "sleak/frame.glsl"
 
 // Scene read block (VertexLayoutDesc::transparentReadsScene)
 layout(set = 3, binding = 5) uniform SceneReadUBO {
@@ -53,7 +38,7 @@ void main() {
 
     fragWorldPos   = inPosition;
     fragNormal     = inNormal;
-    fragTime       = uCameraPos.w;    // scene clock stashed in cam.w by LightManager
+    fragTime       = uFrame.Time;
 
     float normalBias = uLightDir.w;
     fragShadowCoord  = uLightVP * (vec4(inPosition, 1.0) + vec4(inNormal * normalBias, 0.0));
