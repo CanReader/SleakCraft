@@ -30,7 +30,9 @@ bool Game::Initialize() {
 void Game::Begin() {
     // If -world <name> was passed on the command line, jump straight into that
     // world instead of showing the main menu.
-    #ifdef DEBUG
+    #ifndef DEBUG
+    if (!Sleak::CommandLine::HasFlag("--bench")) return;
+    #endif
     const std::string worldName = Sleak::CommandLine::GetValue("-world");
     if (worldName.empty()) return;
 
@@ -52,7 +54,6 @@ void Game::Begin() {
     }
 
     StartWorld(savePath, worldName, seed, isNew);
-  #endif
 }
 
 void Game::Loop(float DeltaTime) {

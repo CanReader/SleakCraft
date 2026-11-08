@@ -56,6 +56,14 @@ public:
         m_vertices.push_back(vertex);
     }
 
+    /// Reserves room for at least count vertices.
+    void Reserve(size_t count) { m_vertices.reserve(count); }
+
+    /// Appends count vertices in one copy.
+    void Append(const VoxelVertex* vertices, size_t count) {
+        m_vertices.insert(m_vertices.end(), vertices, vertices + count);
+    }
+
     const VoxelVertex* GetData() const {
         return m_vertices.data();
     }

@@ -419,6 +419,11 @@ void MainScene::SetupLighting() {
         400.0f;  // pull-back > frustum, else near-clip eats shadows
     cfg.frustumCullingEnabled = m_frustumCulling;
     cfg.occlusionCullingEnabled = m_occlusionCulling;
+    if (Sleak::CommandLine::HasFlag("--bench-postfx")) {
+        cfg.ssaoEnabled = true;
+        cfg.ssrEnabled = true;
+        cfg.bloomEnabled = true;
+    }
     cfg.occlusionBufferWidth = 256;
     cfg.occlusionBufferHeight = 144;
     cfg.maxOccluders = 192;
