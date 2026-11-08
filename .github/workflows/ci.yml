@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, staging]
+    branches: [main, staging, Advanced-Shaders]
   pull_request:
-    branches: [main, staging]
+    branches: [main, staging, Advanced-Shaders]
   workflow_dispatch:
     inputs:
       engine_ref:
@@ -19,12 +19,13 @@ concurrency:
 permissions:
   contents: read
 
-# Game staging builds against engine staging and main against main, so a
-# change that spans both repos is tested together before either reaches main.
-# A pull request builds against the engine branch with the same name when one
-# exists. A manual run can pick any engine branch or SHA.
+# Game staging builds against engine staging, main against main and
+# Advanced-Shaders against Advanced-Techniques, so a change that spans both
+# repos is tested together before either reaches main. A pull request builds
+# against the engine branch with the same name when one exists. A manual run
+# can pick any engine branch or SHA.
 env:
-  ENGINE_REF: ${{ github.event.inputs.engine_ref || ((github.base_ref || github.ref_name) == 'staging' && 'staging') || 'main' }}
+  ENGINE_REF: ${{ github.event.inputs.engine_ref || ((github.base_ref || github.ref_name) == 'staging' && 'staging') || ((github.base_ref || github.ref_name) == 'Advanced-Shaders' && 'Advanced-Techniques') || 'main' }}
 
 # The check names here (the build matrix names and the other jobs' names) are
 # required status checks in .github/rulesets/. Rename both together, or pull
