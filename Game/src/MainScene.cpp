@@ -412,8 +412,8 @@ void MainScene::SetupLighting() {
     cfg.bloomEnabled = false;  // match OpenGL ref (no post-FX bloom chain)
     cfg.taaEnabled = true;      // VK only for now
     cfg.sharpenStrength = DEFAULT_SHARPEN_STRENGTH;
-    cfg.shadowMapResolution = 1072;  // BSL ULTRA tier; 4096 spiked VK frames
-    cfg.shadowFrustumSize = 256.0f;  // half-extent → 256m ≈ fog range; 2x texel density
+    cfg.shadowMapResolution = 3072;  // BSL ULTRA tier; 4096 spiked VK frames
+    cfg.shadowFrustumSize = 128.0f;  // half-extent, 256 m ≈ fog range
     cfg.shadowCasterDistance = 256.0f;
     cfg.shadowDistance =
         400.0f;  // pull-back > frustum, else near-clip eats shadows
