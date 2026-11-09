@@ -52,8 +52,7 @@ function(sleak_track_asset_dir SRC_DIR LABEL)
 endfunction()
 
 set(SLEAK_ASSET_OUTPUTS "")
-# Game SPIR-V built from source claims its outputs first, so the committed
-# fallback copies are skipped
+# Built game SPIR-V wins over the committed copies
 get_property(_game_spirv GLOBAL PROPERTY GAME_SPIRV_FILES)
 foreach(_spv ${_game_spirv})
     get_filename_component(_name "${_spv}" NAME)
