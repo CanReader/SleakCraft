@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // Shadow Depth Pass - Voxel Vertex Only
 // Compact VoxelVertex layout: only position needed for shadow map
@@ -8,6 +9,8 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec4 inColor;
 layout(location = 3) in vec2 inUV;
 
+#include "sleak/frame.glsl"
+
 // Push constant: LightVP*World in slot 0, World in slot 1
 layout(push_constant) uniform TransformPC {
     mat4 WVP;
@@ -15,5 +18,5 @@ layout(push_constant) uniform TransformPC {
 };
 
 void main() {
-    gl_Position = WVP * vec4(inPosition, 1.0);
+    gl_Position = SleakFrameGuardClip(WVP * vec4(inPosition, 1.0));
 }

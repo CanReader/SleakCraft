@@ -1,4 +1,5 @@
 #version 450 core
+#extension GL_GOOGLE_include_directive : require
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -10,16 +11,8 @@ layout(std140, binding = 0) uniform TransformUBO {
     mat4 World;
 };
 
-layout(std140, binding = 5) uniform ShadowUBO {
-    mat4  ShadowLightVP;
-    float ShadowBias;
-    float ShadowStrength;
-    float ShadowTexelSize;
-    float ShadowLightSize;
-    uint  PCSSEnabled;
-    uint  ShadowMapEnabled;
-    float _shadowPad0, _shadowPad1;
-};
+#include "sleak/shadow_light.glsl"
+#include "sleak/frame.glsl"
 
 out vec3 fragWorldPos;
 out vec3 fragWorldNorm;
@@ -28,7 +21,7 @@ out vec2 fragUV;
 out vec4 fragShadowCoord;
 
 void main() {
-    gl_Position = WVP * vec4(inPosition, 1.0);
+    gl_Position = SleakFrameGuardClip(WVP * vec4(inPosition, 1.0));
 
     vec4 worldPos = World * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
@@ -39,5 +32,5 @@ void main() {
     fragColor = inColor;
     fragUV    = inUV;
 
-    fragShadowCoord = ShadowLightVP * worldPos;
+    fragShadowCoord = uLightVP * worldPos;
 }

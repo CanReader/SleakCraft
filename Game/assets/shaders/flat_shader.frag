@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragWorldNorm;
@@ -10,21 +11,8 @@ layout(location = 0) out vec4 outColor;
 
 layout(set = 0, binding = 0) uniform sampler2D diffuseTexture;
 
-layout(set = 2, binding = 0) uniform ShadowLightUBO {
-    vec4  uLightDir;
-    vec4  uLightColor;
-    vec4  uAmbient;        // rgb = sky ambient color, a = intensity
-    vec4  uCameraPos;
-    mat4  uLightVP;
-    float uShadowBias;
-    float uShadowStrength;
-    float uShadowTexelSize;
-    float uLightSize;
-    vec4  uFogColor;
-    float uFogStart;
-    float uFogEnd;
-    vec2  _fogPad;            // std140: must be vec2 (8B) not float[2] (stride-16 = 32B)
-};
+#include "sleak/shadow_light.glsl"
+#include "sleak/frame.glsl"
 
 layout(set = 3, binding = 0) uniform sampler2DShadow shadowMap;
 
@@ -120,5 +108,5 @@ void main() {
         lit = mix(uFogColor.rgb, lit, fogFactor);
     }
 
-    outColor = vec4(lit, texColor.a);
+    outColor = SleakFrameGuard(vec4(lit, texColor.a));
 }

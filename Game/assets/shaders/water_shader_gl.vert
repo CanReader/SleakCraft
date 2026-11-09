@@ -1,4 +1,5 @@
 #version 450 core
+#extension GL_GOOGLE_include_directive : require
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -20,6 +21,8 @@ layout(std140, binding = 1) uniform MaterialUBO {
     vec2  MatTiling; vec2 MatOffset;
     float MatOpacity; float MatAlphaCutoff; float _matPad1, _matPad2;
 };
+
+#include "sleak/frame.glsl"
 
 layout(std140, binding = 5) uniform ShadowUBO {
     mat4  ShadowLightVP;
@@ -45,6 +48,6 @@ void main() {
     fragWorldPos  = inPosition;
     fragNormal    = inNormal;
     fragColor     = inColor;
-    fragTime      = MatTiling.x;     // game time from SetTiling()
+    fragTime      = uFrame.Time;
     fragShadowCoord = ShadowLightVP * vec4(inPosition, 1.0);
 }

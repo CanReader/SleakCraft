@@ -11,6 +11,11 @@ SHADER_DIRS=(
   "$ROOT_DIR/Engine/assets/shaders"
   "$ROOT_DIR/Game/assets/shaders"
 )
+# Include libraries: engine sleak/, game craft/
+INCLUDE_FLAGS=(
+  -I "$ROOT_DIR/Engine/assets/shaders/include"
+  -I "$ROOT_DIR/Game/assets/shaders/include"
+)
 
 if ! command -v glslc >/dev/null; then
   echo "error: glslc not found" >&2
@@ -28,7 +33,7 @@ for dir in "${SHADER_DIRS[@]}"; do
   for shader in "$dir"/*.vert "$dir"/*.frag "$dir"/*.comp; do
     [[ -f "$shader" ]] || continue
     case "$(basename "$shader")" in *_gl.*) continue ;; esac
-    if glslc "$shader" -o "$shader.spv"; then
+    if glslc "${INCLUDE_FLAGS[@]}" "$shader" -o "$shader.spv"; then
       echo "compiled ${shader#$ROOT_DIR/} -> ${shader#$ROOT_DIR/}.spv"
       count=$((count + 1))
     else
