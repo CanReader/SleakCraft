@@ -104,6 +104,8 @@ inline Sleak::VertexFormatHandle GetVoxelVertexFormat() {
         desc.gbufferShaderStem = "gbuffer_voxel";
         desc.transparentShaderStem = "water_shader";
         desc.transparentReadsScene = true;
+        // Writes RT3 with CRAFT_SHADING_MODEL_VOXEL
+        desc.gbufferFragmentStem = "gbuffer_voxel";
         return Sleak::VertexFormatRegistry::Register(desc);
     }();
     return handle;
