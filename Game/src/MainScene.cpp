@@ -93,7 +93,7 @@ bool MainScene::Initialize() {
 
     m_saveManager.SetSavePath(m_savePath);
     m_chunkManager.Initialize(this, m_blockMaterial);
-    m_blockEffects.Initialize(this, m_blockMaterial);
+    m_blockEffects.Initialize(m_blockMaterial);
 
     // Captures load synchronously
     if (!Sleak::CommandLine::GetValue("-capture").empty())
@@ -320,6 +320,7 @@ void MainScene::Update(float deltaTime) {
         m_chunkManager.SetShadowLightVP(lm ? lm->GetShadowLightVP() : nullptr);
         m_chunkManager.Update(pos.GetX(), pos.GetY(), pos.GetZ());
         m_chunkManager.RenderColumns();
+        m_blockEffects.Render();
         m_chunkManager.RenderWater();
 
         m_blockInteraction.RenderOutline();
