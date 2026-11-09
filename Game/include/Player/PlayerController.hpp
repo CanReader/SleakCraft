@@ -24,8 +24,8 @@ public:
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
     /// Clears held movement-key state.
     void OnKeyReleased(const Sleak::Events::Input::KeyReleasedEvent& e);
-    /// Applies fly vertical input and resolves voxel collision for this frame.
-    void Update();
+    /// Applies fly input and sweeps voxel collision from the frame's start.
+    void Update(const Sleak::Math::Vector3D& sweepStart);
     /// Starts a hands-free flight along +Z just above the build limit so
     /// tests can drive chunk streaming. Speed is in m/s; zero or less is
     /// ignored.
