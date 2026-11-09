@@ -130,6 +130,7 @@ Sleak::RefPtr<Sleak::Texture> TextureAtlas::BuildAtlas() {
     desc.width = static_cast<uint32_t>(atlasW);
     desc.height = static_cast<uint32_t>(atlasH);
     desc.mipLevels = maxMips;
+    desc.srgb = true;  // sampled as linear albedo
     const Sleak::TextureMipLevel level0{atlas.data(), atlas.size()};
     return Sleak::CreateTexture(desc, &level0, 1);
 }

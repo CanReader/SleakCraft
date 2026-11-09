@@ -13,6 +13,7 @@ layout(set = 0, binding = 0) uniform sampler2D diffuseTexture;
 
 #include "sleak/shadow_light.glsl"
 #include "sleak/frame.glsl"
+#include "sleak/color.glsl"
 
 layout(set = 3, binding = 0) uniform sampler2DShadow shadowMap;
 
@@ -73,7 +74,7 @@ void main() {
 
     // AO is stored in vertex color. Apply only to ambient.
     float ao       = fragColor.r;
-    vec3 baseColor = texColor.rgb;
+    vec3 baseColor = SleakLinearToSrgb(texColor.rgb);
 
     vec3  N            = normalize(fragWorldNorm);
     vec3  lightDir     = normalize(uLightDir.xyz);
