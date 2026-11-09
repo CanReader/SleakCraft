@@ -17,7 +17,7 @@ constexpr AuthoredKey TORCH_KEY{255.0f, 212.0f, 160.0f, 0.85f};
 // Cave floor: grey authored like the palette, then scaled down
 constexpr float MIN_LIGHT_GREY = 128.0f;
 constexpr float MIN_LIGHT_SCALE = 0.04f;
-// Desaturation keeps 1 - this * factor of the color's chroma
+// Desaturation removes 1 - this * factor of the color's chroma
 constexpr float DESAT_PER_FACTOR = 0.4f;
 // Emissive gain, albedo balancing, SSAO exponent (BSL defaults)
 constexpr float EMISSION_GAIN = 4.0f;
