@@ -56,7 +56,7 @@ struct TileGrade {
 constexpr TileGrade TILE_GRADES[] = {
     {TILE_GRASS_TOP, {66.0f, 89.0f, 45.0f}, false},
     {TILE_GRASS_SIDE, {66.0f, 89.0f, 45.0f}, true},
-    {TILE_OAK_LEAVES, {61.0f, 88.0f, 24.0f}, false},
+    {TILE_OAK_LEAVES, {68.0f, 92.0f, 42.0f}, false},
 };
 
 // Grass fringe texels: green above red and blue by this ratio
