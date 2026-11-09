@@ -18,6 +18,12 @@ target_link_libraries(SleakGame PRIVATE Engine)
 # --- SPIR-V shaders (committed .spv are only the fallback without glslc) ---
 set(GAME_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders")
 set(GAME_SHADER_INCLUDE_DIR "${GAME_SHADER_DIR}/include")
+# sleak/ is the engine's include namespace
+if(EXISTS "${GAME_SHADER_INCLUDE_DIR}/sleak")
+    message(FATAL_ERROR
+        "${GAME_SHADER_INCLUDE_DIR}/sleak would shadow the engine include "
+        "library. Put game includes in include/craft/ instead.")
+endif()
 file(GLOB GAME_VULKAN_SHADERS CONFIGURE_DEPENDS
     "${GAME_SHADER_DIR}/*.vert"
     "${GAME_SHADER_DIR}/*.frag"

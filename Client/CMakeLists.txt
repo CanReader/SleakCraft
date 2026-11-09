@@ -22,12 +22,17 @@ set(_asset_out_dir "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/assets")
 
 set(_sleak_seen_outputs "")
 
+# Optional third argument: subfolder of bin/assets to copy into
 function(sleak_track_asset_dir SRC_DIR LABEL)
+    set(_dst_root "${_asset_out_dir}")
+    if(ARGC GREATER 2)
+        set(_dst_root "${_asset_out_dir}/${ARGV2}")
+    endif()
     file(GLOB_RECURSE _files CONFIGURE_DEPENDS "${SRC_DIR}/*")
     set(_outputs "")
     foreach(_src ${_files})
         file(RELATIVE_PATH _rel "${SRC_DIR}" "${_src}")
-        set(_dst "${_asset_out_dir}/${_rel}")
+        set(_dst "${_dst_root}/${_rel}")
         list(FIND _sleak_seen_outputs "${_dst}" _seen_idx)
         if(NOT _seen_idx EQUAL -1)
             continue()
@@ -63,6 +68,9 @@ foreach(_spv ${_game_spirv})
     list(APPEND SLEAK_ASSET_OUTPUTS "${_dst}")
     list(APPEND _sleak_seen_outputs "${_dst}")
 endforeach()
+# Include libraries resolve engine first, as glslc -I does
+sleak_track_asset_dir("${CMAKE_SOURCE_DIR}/Engine/assets/shaders/include"
+                      "engine" "shaders/include")
 sleak_track_asset_dir("${CMAKE_SOURCE_DIR}/Game/assets"          "game")
 sleak_track_asset_dir("${CMAKE_SOURCE_DIR}/Engine/assets" "engine")
 
