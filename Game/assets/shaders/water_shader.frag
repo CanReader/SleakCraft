@@ -10,6 +10,7 @@ layout(location = 0) out vec4 outColor;
 
 #include "sleak/shadow_light.glsl"
 #include "sleak/frame.glsl"
+#include "sleak/frame_output.glsl"
 
 layout(set = 3, binding = 0) uniform sampler2DShadow shadowMap;
 
@@ -46,7 +47,9 @@ vec3 Reconstruct(vec2 uv, float depth) {
     return w.xyz / w.w;
 }
 float DepthToNdc(float depth) { return depth; }
-vec3 SceneToLinear(vec3 c) { return c; }
+vec3 SceneToLinear(vec3 c) {
+    return SleakSceneToLegacy(c, SleakFrameOutput());
+}
 vec3 SkyRadiance(vec3 dir, float lod) {
     return textureLod(skyCube, dir, lod).rgb;
 }
@@ -102,10 +105,14 @@ float FogAmount(vec3 p) {
     }
     return 1.0 - (1.0 - distFog) * (1.0 - heightFog);
 }
-vec3 FogColorAt(vec3 p) {
+vec3 LegacyFogColorAt(vec3 p) {
     vec3 viewDir = normalize(p - uCameraPos.xyz);
     float t = smoothstep(0.0, 1.0, clamp(SignedToUnit(viewDir.y), 0.0, 1.0));
     return mix(uFogColor.rgb, uFogZenithColor.rgb, t);
+}
+// Fog color as the lighting pass applied it to the snapshot
+vec3 FogColorAt(vec3 p) {
+    return SleakLegacyToScene(LegacyFogColorAt(p), SleakFrameOutput());
 }
 
 // ==== SHARED WATER BODY (keep identical in water_shader_gl.frag) ====
@@ -528,7 +535,8 @@ void main() {
     float footprint = max(length(dFdx(P.xz)), length(dFdy(P.xz)));
     WaterResult w = ShadeWater(P, fragNormal, fragTime, footprint);
 
-    vec3 color = mix(w.color, FogColorAt(P), FogAmount(P));
+    vec3 color = mix(w.color, LegacyFogColorAt(P), FogAmount(P));
+    color = SleakLegacyToScene(color, SleakFrameOutput());
     float alpha = 1.0;
     if (IsSet(uSceneFlags.x))
         color = mix(w.backdrop, color, w.edge);
