@@ -286,6 +286,9 @@ void MainScene::Update(float deltaTime) {
 
     Scene::Update(deltaTime);
 
+    if (auto* app = Sleak::Application::GetInstance())
+        m_voxelLighting.Upload(app->GetGraphicsConfig());
+
     m_hudPanel.Update(deltaTime);
 
     if (cam) {
