@@ -81,8 +81,8 @@ private:
     bool isDeferredEnabled = false;
     bool isTAAEnabled = false;
 
-    // Sun state (live-editable)
-    float m_sunElevation  = 65.0f;   // degrees above horizon (0=sunrise, 90=noon)
+    // Sun direction (live-editable); 50 degrees is BSL's noon height
+    float m_sunElevation = 50.0f;    // degrees above the horizon
     float m_sunAzimuth    = 255.0f;  // degrees clockwise from north
 
     // Multipliers on the voxel palette's sun and sky ambient (1 = palette)
