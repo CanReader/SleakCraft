@@ -1,10 +1,11 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// GBuffer pass, voxel format: engine gbuffer.frag plus RT3 (voxel model)
+// GBuffer pass, voxel format: engine gbuffer.frag with the voxel RT2 and RT3
+// (craft/voxel_surface.glsl)
 
 #include "sleak/frame.glsl"
-#include "craft/shading_models.glsl"
+#include "craft/voxel_surface.glsl"
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragWorldNorm;
@@ -90,14 +91,11 @@ void main() {
         : fragColor.r * aoFactor;
     ao = clamp(ao, 0.0, 1.0);
 
-    // --- Emissive (HDR in RT2.gba) ---
-    vec3 emissive = hasEmissiveMap != 0u
-        ? texture(texEmissive, uv).rgb * emissiveFactor.rgb * emissiveFactor.w
-        : emissiveFactor.rgb * emissiveFactor.w;
-
     outAlbedoAO    = SleakFrameGuard(vec4(albedoSample.rgb, ao));
     outNormalRough = vec4(N * 0.5 + 0.5, roughness);
-    outMetalEmit   = vec4(metallic, emissive);
-    outMotionModel = SleakEncodeMotionModel(vec2(0.0), 0.0,
-                                            CRAFT_SHADING_MODEL_VOXEL);
+    outMetalEmit   = CraftEncodeVoxelRT2(metallic,
+                                         CraftTexelEmission(albedoSample.rgb),
+                                         CRAFT_NO_BLOCK_LIGHT);
+    outMotionModel = CraftEncodeVoxelRT3(CRAFT_SKY_LIGHT_OPEN,
+                                         CRAFT_SHADING_MODEL_VOXEL);
 }
