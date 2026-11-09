@@ -8,6 +8,13 @@
 #include "World/VoxelVertex.hpp"
 #include <random>
 
+namespace {
+
+/// Deferred lighting stem that shades the voxel GBuffer stem's output.
+constexpr const char* VOXEL_LIGHTING_STEM = "lighting_voxel";
+
+}  // namespace
+
 Game::Game() {
   bIsGameRunning = true;
 }
@@ -19,6 +26,7 @@ Game::~Game() {
 bool Game::Initialize() {
     // Register the voxel vertex layout before any chunk mesh is created
     GetVoxelVertexFormat();
+    Sleak::Application::GetInstance()->SetLightingShader(VOXEL_LIGHTING_STEM);
     Sleak::Debug::ShaderHotReload::AddSourceDirectory(SLEAKCRAFT_SHADER_DIR);
 
     m_menuScene = new MainMenuScene("MainMenuScene");

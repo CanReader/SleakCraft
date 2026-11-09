@@ -1,9 +1,7 @@
 #version 450 core
+#extension GL_GOOGLE_include_directive : require
 
-// GBuffer geometry pass — outputs material properties to 3 render targets.
-// RT0: AlbedoRGB + AO           (RGBA8)
-// RT1: WorldNormalXYZ + Rough   (RGBA16F, normal packed to [0,1])
-// RT2: Metallic + EmissiveScale  (RGBA8)
+// GBuffer pass, OpenGL, voxel format: engine gbuffer_gl.frag plus RT3
 
 in vec3 fragWorldPos;
 in vec3 fragWorldNorm;
@@ -16,6 +14,7 @@ in vec4 fragShadowCoord;
 layout(location = 0) out vec4 outAlbedoAO;
 layout(location = 1) out vec4 outNormalRough;
 layout(location = 2) out vec4 outMetalEmit;
+layout(location = 3) out vec4 outMotionModel;
 
 // Material textures (binding must match TEXTURE_SLOT defines)
 layout(binding = 0) uniform sampler2D diffuseTexture;
@@ -52,11 +51,15 @@ layout(std140, binding = 1) uniform MaterialUBO {
     vec2 _pad1;
 };
 
+#include "sleak/frame.glsl"
+#include "craft/shading_models.glsl"
+
 void main() {
     vec2 uv = fragUV * matTiling + matOffset;
 
     // Albedo
-    vec4 albedo = (HasDiffuseMap != 0u) ? texture(diffuseTexture, uv) : matDiffuseColor;
+    vec4 albedo = (HasDiffuseMap != 0u) ? texture(diffuseTexture, uv)
+                                        : matDiffuseColor;
     if (albedo.a < matAlphaCutoff) discard;
 
     // Normal (world space)
@@ -70,13 +73,19 @@ void main() {
     }
 
     // PBR scalars
-    float roughness  = (HasRoughnessMap != 0u) ? texture(roughnessTexture, uv).r : matRoughness;
-    float metallic   = (HasMetallicMap  != 0u) ? texture(metallicTexture,  uv).r : matMetallic;
-    float ao         = (HasAOMap        != 0u) ? texture(aoTexture,        uv).r : (matAO * fragColor.r);
-    float emitScale  = (HasEmissiveMap  != 0u) ? length(texture(emissiveTexture, uv).rgb) :
-                        length(matEmissiveColor) * matEmissiveIntensity;
+    float roughness  = (HasRoughnessMap != 0u) ? texture(roughnessTexture, uv).r
+                                               : matRoughness;
+    float metallic   = (HasMetallicMap  != 0u) ? texture(metallicTexture,  uv).r
+                                               : matMetallic;
+    float ao         = (HasAOMap        != 0u) ? texture(aoTexture,        uv).r
+                                               : (matAO * fragColor.r);
+    float emitScale  = (HasEmissiveMap  != 0u)
+                           ? length(texture(emissiveTexture, uv).rgb)
+                           : length(matEmissiveColor) * matEmissiveIntensity;
 
-    outAlbedoAO    = vec4(albedo.rgb, ao);
+    outAlbedoAO    = SleakFrameGuard(vec4(albedo.rgb, ao));
     outNormalRough = vec4(N * 0.5 + 0.5, roughness);  // pack normal to [0,1]
     outMetalEmit   = vec4(metallic, clamp(emitScale, 0.0, 1.0), 0.0, 1.0);
+    outMotionModel = SleakEncodeMotionModel(vec2(0.0), 0.0,
+                                            CRAFT_SHADING_MODEL_VOXEL);
 }
