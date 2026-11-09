@@ -96,7 +96,7 @@ private:
     void SetupMaterial();
     void SetupSkybox();
     /// Creates the sun light and applies the voxel-tuned GraphicsConfig
-    /// (shadows on, SSAO/SSR/IBL/bloom off) plus fog and culling settings.
+    /// (BSL output, shadows, SSAO, blend bloom) plus fog and culling settings.
     void SetupLighting();
     void RenderUI();
 
