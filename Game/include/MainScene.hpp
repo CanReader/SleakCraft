@@ -158,7 +158,7 @@ private:
     std::string m_keyReleasedHandlerId;
 
     // Sun light created here (needs Scene::AddObject/shadow config); live
-    // elevation/azimuth/color/intensity edits live on SettingsPanel.
+    // elevation/azimuth edits live on SettingsPanel.
     Sleak::DirectionalLight* m_sun = nullptr;
 };
 
