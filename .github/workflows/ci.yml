@@ -142,7 +142,7 @@ jobs:
 
       - name: Upload build logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-logs-${{ matrix.name }}
           retention-days: 7
@@ -167,7 +167,7 @@ jobs:
       # next to its assets, the same folder a release packages.
       - name: Upload the staging test build
         if: github.event_name == 'push' && github.ref == 'refs/heads/staging' && matrix.config == 'Release'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: SleakCraft-staging-${{ runner.os }}
           retention-days: 14
@@ -326,7 +326,7 @@ jobs:
 
       - name: Upload the smoke log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-log
           retention-days: 7
