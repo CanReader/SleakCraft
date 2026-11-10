@@ -15,6 +15,29 @@
 using namespace Sleak;
 using namespace Sleak::Math;
 
+namespace {
+
+// Voxel palette multiplier sliders
+constexpr float MULTIPLIER_CHANNEL_STEP = 0.005f;
+constexpr float MULTIPLIER_CHANNEL_MAX = 2.0f;
+constexpr float MULTIPLIER_SCALE_STEP = 0.01f;
+constexpr float MULTIPLIER_SCALE_MAX = 4.0f;
+
+/// Intensity and RGB sliders of one multiplier; true when any changed.
+bool DragMultiplier(const char* intensity, const char* r, const char* g,
+                    const char* b, LightMultiplier& m) {
+    bool changed = UI::DragFloat(intensity, &m.scale, MULTIPLIER_SCALE_STEP,
+                                 0.0f, MULTIPLIER_SCALE_MAX);
+    changed |= UI::DragFloat(r, &m.r, MULTIPLIER_CHANNEL_STEP, 0.0f,
+                             MULTIPLIER_CHANNEL_MAX);
+    changed |= UI::DragFloat(g, &m.g, MULTIPLIER_CHANNEL_STEP, 0.0f,
+                             MULTIPLIER_CHANNEL_MAX);
+    changed |= UI::DragFloat(b, &m.b, MULTIPLIER_CHANNEL_STEP, 0.0f,
+                             MULTIPLIER_CHANNEL_MAX);
+    return changed;
+}
+
+}  // namespace
 
   SettingsPanel::SettingsPanel(ChunkManager& chunkManager, MainScene& scene)
         : m_chunkManager(chunkManager), m_scene(scene) {
@@ -163,35 +186,19 @@ void SettingsPanel::RenderLightingSection() {
         UI::DragFloat("Azimuth", &m_sunAzimuth, 1.0f, 0.0f, 360.0f);
     if (sunDirChanged && m_sun) m_sun->SetDirection(ComputeSunDirection());
 
-    if (UI::DragFloat("Sun Intensity", &m_sunIntensity, 0.01f, 0.0f, 5.0f) &&
-        m_sun)
-        m_sun->SetIntensity(m_sunIntensity);
-
-    bool sunColorChanged = false;
-    sunColorChanged |= UI::DragFloat("Sun R", &m_sunColorR, 0.005f, 0.0f, 1.0f);
-    sunColorChanged |= UI::DragFloat("Sun G", &m_sunColorG, 0.005f, 0.0f, 1.0f);
-    sunColorChanged |= UI::DragFloat("Sun B", &m_sunColorB, 0.005f, 0.0f, 1.0f);
-    if (sunColorChanged && m_sun)
-        m_sun->SetColor(m_sunColorR, m_sunColorG, m_sunColorB);
+    bool paletteChanged = DragMultiplier("Sun Intensity", "Sun R", "Sun G",
+                                         "Sun B", m_sunMultiplier);
 
     UI::Separator();
     UI::Text("-- Ambient --");
 
-    auto* lm = m_scene.GetLightManager();
-    if (UI::DragFloat("Amb Intensity", &m_ambientIntensity, 0.005f, 0.0f,
-                      2.0f) &&
-        lm)
-        lm->SetAmbientIntensity(m_ambientIntensity);
+    paletteChanged |= DragMultiplier("Amb Intensity", "Amb R", "Amb G", "Amb B",
+                                     m_ambientMultiplier);
+    if (paletteChanged)
+        m_scene.GetVoxelLighting().SetMultipliers(m_sunMultiplier,
+                                                  m_ambientMultiplier);
 
-    bool ambColorChanged = false;
-    ambColorChanged |=
-        UI::DragFloat("Amb R", &m_ambientColorR, 0.005f, 0.0f, 1.0f);
-    ambColorChanged |=
-        UI::DragFloat("Amb G", &m_ambientColorG, 0.005f, 0.0f, 1.0f);
-    ambColorChanged |=
-        UI::DragFloat("Amb B", &m_ambientColorB, 0.005f, 0.0f, 1.0f);
-    if (ambColorChanged && lm)
-        lm->SetAmbientColor(m_ambientColorR, m_ambientColorG, m_ambientColorB);
+    auto* lm = m_scene.GetLightManager();
 
     UI::Separator();
     UI::Text("-- Fog --");

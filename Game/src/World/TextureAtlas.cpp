@@ -1,9 +1,12 @@
 #include "World/TextureAtlas.hpp"
-#include "World/Block.hpp"
+
 #include <Runtime/Texture.hpp>
 #include <UI/UI.hpp>
-#include <cstring>
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+
+#include "World/Block.hpp"
 
 using namespace Sleak;
 using namespace Sleak::UI;
@@ -39,6 +42,99 @@ static const char* s_tilePaths[] = {
 static_assert(sizeof(s_tilePaths) / sizeof(s_tilePaths[0]) == TILE_COUNT,
               "Tile path count must match TILE_COUNT");
 
+namespace {
+
+/// Per-channel linear-light grade that moves a tile's mean to a target.
+struct TileGrade {
+    int tile;
+    float target[3];  // sRGB 0-255 of the graded texels' mean linear color
+    bool fringeOnly;  // only the grass fringe of a side tile
+};
+
+// Grass and leaves toward vanilla plains colors under the BSL noon light;
+// other tiles keep their colors. Tune against the BSL noon references.
+constexpr TileGrade TILE_GRADES[] = {
+    {TILE_GRASS_TOP, {66.0f, 89.0f, 45.0f}, false},
+    {TILE_GRASS_SIDE, {66.0f, 89.0f, 45.0f}, true},
+    {TILE_OAK_LEAVES, {68.0f, 92.0f, 42.0f}, false},
+};
+
+// Grass fringe texels: green above red and blue by this ratio
+constexpr float FRINGE_GREEN_RATIO = 1.15f;
+// Texels below this alpha are cut out and stay out of the mean
+constexpr unsigned char GRADE_MIN_ALPHA = 128;
+// Gain range that keeps a bad target from wiping out a channel
+constexpr float GRADE_GAIN_MIN = 0.05f;
+constexpr float GRADE_GAIN_MAX = 8.0f;
+// sRGB transfer (IEC 61966-2-1)
+constexpr float SRGB_LINEAR_KNEE = 0.04045f;
+constexpr float SRGB_ENCODE_KNEE = 0.0031308f;
+constexpr float SRGB_LINEAR_SLOPE = 12.92f;
+constexpr float SRGB_SCALE = 1.055f;
+constexpr float SRGB_OFFSET = 0.055f;
+constexpr float SRGB_GAMMA = 2.4f;
+constexpr float CHANNEL_MAX = 255.0f;
+constexpr float ROUND_HALF = 0.5f;
+constexpr int RGBA = 4;
+constexpr int RGB = 3;
+constexpr int ALPHA = 3;
+
+/// Linear light of an sRGB channel in [0, 1].
+float SrgbToLinear(float c) {
+    return c <= SRGB_LINEAR_KNEE
+               ? c / SRGB_LINEAR_SLOPE
+               : std::pow((c + SRGB_OFFSET) / SRGB_SCALE, SRGB_GAMMA);
+}
+
+/// sRGB encoding of a linear channel, clamped to [0, 1].
+float LinearToSrgb(float c) {
+    c = std::clamp(c, 0.0f, 1.0f);
+    return c <= SRGB_ENCODE_KNEE
+               ? c * SRGB_LINEAR_SLOPE
+               : SRGB_SCALE * std::pow(c, 1.0f / SRGB_GAMMA) - SRGB_OFFSET;
+}
+
+/// True for the green grass fringe texels of a side tile.
+bool IsGrassFringe(const unsigned char* px) {
+    return px[1] > px[0] * FRINGE_GREEN_RATIO &&
+           px[1] > px[2] * FRINGE_GREEN_RATIO;
+}
+
+/// Grades a tile's RGBA8 texels in place, in linear light.
+void GradeTile(unsigned char* pixels, int texels, const TileGrade& grade) {
+    double sum[RGB] = {};
+    int counted = 0;
+    for (int i = 0; i < texels; ++i) {
+        const unsigned char* px = pixels + i * RGBA;
+        if (px[ALPHA] < GRADE_MIN_ALPHA) continue;
+        if (grade.fringeOnly && !IsGrassFringe(px)) continue;
+        for (int c = 0; c < RGB; ++c)
+            sum[c] += SrgbToLinear(px[c] / CHANNEL_MAX);
+        ++counted;
+    }
+    if (counted == 0) return;
+
+    float gain[RGB];
+    for (int c = 0; c < RGB; ++c) {
+        const float mean = static_cast<float>(sum[c] / counted);
+        const float target = SrgbToLinear(grade.target[c] / CHANNEL_MAX);
+        gain[c] = mean > 0.0f ? std::clamp(target / mean, GRADE_GAIN_MIN,
+                                           GRADE_GAIN_MAX)
+                              : 1.0f;
+    }
+    for (int i = 0; i < texels; ++i) {
+        unsigned char* px = pixels + i * RGBA;
+        if (grade.fringeOnly && !IsGrassFringe(px)) continue;
+        for (int c = 0; c < RGB; ++c) {
+            const float lin = SrgbToLinear(px[c] / CHANNEL_MAX) * gain[c];
+            px[c] = static_cast<unsigned char>(LinearToSrgb(lin) * CHANNEL_MAX +
+                                               ROUND_HALF);
+        }
+    }
+}
+
+}  // namespace
+
 /// Resamples src (srcW x srcH) into dst (dstW x dstH) using nearest neighbor.
 static void ResampleNearest(const unsigned char* src, int srcW, int srcH,
                             unsigned char* dst, int dstW, int dstH) {
@@ -69,6 +165,12 @@ Sleak::RefPtr<Sleak::Texture> TextureAtlas::BuildAtlas() {
         if (tiles[i].pixels) {
             tileSize = std::max(tileSize, std::max(tiles[i].w, tiles[i].h));
         }
+    }
+
+    // Level-0 grades; the GPU builds the mips from the graded texels
+    for (const TileGrade& grade : TILE_GRADES) {
+        TileData& t = tiles[grade.tile];
+        if (t.pixels) GradeTile(t.pixels, t.w * t.h, grade);
     }
 
     if (tileSize == 0) tileSize = 16; // fallback
@@ -130,6 +232,7 @@ Sleak::RefPtr<Sleak::Texture> TextureAtlas::BuildAtlas() {
     desc.width = static_cast<uint32_t>(atlasW);
     desc.height = static_cast<uint32_t>(atlasH);
     desc.mipLevels = maxMips;
+    desc.srgb = true;  // sampled as linear albedo
     const Sleak::TextureMipLevel level0{atlas.data(), atlas.size()};
     return Sleak::CreateTexture(desc, &level0, 1);
 }

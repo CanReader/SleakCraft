@@ -196,7 +196,7 @@ jobs:
       - name: Install shader tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y glslc glslang-tools
+          sudo apt-get install -y glslc glslang-tools spirv-tools
 
       # Byte comparison against the committed .spv is not usable here: glslc
       # embeds its own generator version, so a different toolchain produces
@@ -296,6 +296,15 @@ jobs:
             fi
           done
           exit $fail
+
+      - name: Game frame block matches its C++ mirror
+        working-directory: SleakCraft
+        run: |
+          python3 Engine/scripts/check_ubo_layout.py \
+            --header Game/include/World/VoxelLighting.hpp \
+            --include-dir Engine/assets/shaders/include \
+            --include-dir Game/assets/shaders/include \
+            --check CraftFrameData:craft/frame.glsl:CraftFrameUBO
 
   # Compiling proves nothing about whether the game runs. Runners have no GPU,
   # but Mesa's software Vulkan (lavapipe) plus a virtual display is enough to

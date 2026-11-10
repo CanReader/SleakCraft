@@ -1,139 +1,154 @@
 #include "World/BlockEffects.hpp"
-#include "World/TextureAtlas.hpp"
+
 #include <Core/GameObject.hpp>
 #include <Core/SceneBase.hpp>
-#include <ECS/Components/TransformComponent.hpp>
-#include <ECS/Components/MeshComponent.hpp>
 #include <ECS/Components/MaterialComponent.hpp>
-#include <Runtime/MeshData.hpp>
+#include <ECS/Components/MeshComponent.hpp>
+#include <ECS/Components/TransformComponent.hpp>
 #include <Runtime/Material.hpp>
+#include <algorithm>
 #include <cstdlib>
+
+#include "World/TextureAtlas.hpp"
+#include "World/VoxelVertex.hpp"
 
 using namespace Sleak;
 using namespace Sleak::Math;
 
+namespace {
+
+constexpr int QUAD_CORNERS = 4;
+constexpr int QUAD_INDICES = 6;
+
+/// One cube face: corners in the chunk mesher's order, normal, atlas face.
+struct FaceInfo {
+    float positions[QUAD_CORNERS][3];
+    float nx, ny, nz;
+    BlockFace face;
+};
+
+// Same corner order and winding as Chunk::GenerateMeshData
+constexpr int CUBE_FACE_COUNT = 6;
+constexpr FaceInfo CUBE_FACES[CUBE_FACE_COUNT] = {
+    {{{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}}, 0, 1, 0, BlockFace::Top},
+    {{{0, 0, 1}, {0, 0, 0}, {1, 0, 0}, {1, 0, 1}}, 0, -1, 0, BlockFace::Bottom},
+    {{{1, 0, 1}, {1, 1, 1}, {0, 1, 1}, {0, 0, 1}}, 0, 0, 1, BlockFace::North},
+    {{{0, 0, 0}, {0, 1, 0}, {1, 1, 0}, {1, 0, 0}}, 0, 0, -1, BlockFace::South},
+    {{{1, 0, 0}, {1, 1, 0}, {1, 1, 1}, {1, 0, 1}}, 1, 0, 0, BlockFace::East},
+    {{{0, 0, 1}, {0, 1, 1}, {0, 1, 0}, {0, 0, 0}}, -1, 0, 0, BlockFace::West},
+};
+// Front faces of a quad, and the same triangles seen from behind
+constexpr uint32_t QUAD_FRONT[QUAD_INDICES] = {0, 2, 1, 0, 3, 2};
+constexpr uint32_t QUAD_BACK[QUAD_INDICES] = {0, 1, 2, 0, 2, 3};
+constexpr float HALF = 0.5f;
+// Unit particle quad on z = 0, corners in the north-face order
+constexpr float PARTICLE_CORNERS[QUAD_CORNERS][2] = {
+    {HALF, -HALF}, {HALF, HALF}, {-HALF, HALF}, {-HALF, -HALF}};
+// Particle sides: front faces toward +z, back faces toward -z
+constexpr float PARTICLE_SIDE_NORMALS[] = {1.0f, -1.0f};
+
 /// Uniform random float in [lo, hi).
-static float RandFloat(float lo, float hi) {
+float RandFloat(float lo, float hi) {
     float t = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
     return lo + t * (hi - lo);
 }
 
-/// Builds a unit cube (0..1) with correct per-face textures.
-static void BuildBlockCube(BlockType type, VertexGroup& verts, IndexGroup& inds) {
-    struct FaceInfo {
-        float positions[4][3];
-        float nx, ny, nz;
-        BlockFace face;
-    };
-
-    FaceInfo faces[6] = {
-        {{{0,1,0}, {0,1,1}, {1,1,1}, {1,1,0}}, 0, 1, 0, BlockFace::Top},
-        {{{0,0,1}, {0,0,0}, {1,0,0}, {1,0,1}}, 0, -1, 0, BlockFace::Bottom},
-        {{{1,0,1}, {1,1,1}, {0,1,1}, {0,0,1}}, 0, 0, 1, BlockFace::North},
-        {{{0,0,0}, {0,1,0}, {1,1,0}, {1,0,0}}, 0, 0, -1, BlockFace::South},
-        {{{1,0,0}, {1,1,0}, {1,1,1}, {1,0,1}}, 1, 0, 0, BlockFace::East},
-        {{{0,0,1}, {0,1,1}, {0,1,0}, {0,0,0}}, -1, 0, 0, BlockFace::West},
-    };
-
-    for (int f = 0; f < 6; f++) {
-        AtlasUV uv = TextureAtlas::GetTileUV(
-            GetBlockTextureTile(type, faces[f].face));
-
-        float uvs[4][2] = {
-            {uv.u0, uv.v1}, {uv.u0, uv.v0}, {uv.u1, uv.v0}, {uv.u1, uv.v1}
-        };
-
-        uint32_t base = static_cast<uint32_t>(verts.GetSize());
-        for (int i = 0; i < 4; i++) {
-            Vertex v(faces[f].positions[i][0],
-                     faces[f].positions[i][1],
-                     faces[f].positions[i][2],
-                     faces[f].nx, faces[f].ny, faces[f].nz,
-                     1, 0, 0, 1,
-                     uvs[i][0], uvs[i][1]);
-            v.SetColor(1.0f, 1.0f, 1.0f, 1.0f);
-            verts.AddVertex(v);
-        }
-        inds.add(base);     inds.add(base + 2); inds.add(base + 1);
-        inds.add(base);     inds.add(base + 3); inds.add(base + 2);
-    }
+/// Atlas UVs of a quad's corners in the chunk mesher's order.
+void QuadUVs(const AtlasUV& uv, float out[QUAD_CORNERS][2]) {
+    out[0][0] = uv.u0;
+    out[0][1] = uv.v1;
+    out[1][0] = uv.u0;
+    out[1][1] = uv.v0;
+    out[2][0] = uv.u1;
+    out[2][1] = uv.v0;
+    out[3][0] = uv.u1;
+    out[3][1] = uv.v1;
 }
 
-void BlockEffects::Initialize(SceneBase* scene, const RefPtr<Material>& material) {
+/// Appends a quad's six indices, offset to its first vertex.
+void AppendIndices(std::vector<uint32_t>& indices, uint32_t base,
+                   const uint32_t (&order)[QUAD_INDICES]) {
+    for (uint32_t i : order) indices.push_back(base + i);
+}
+
+/// GPU mesh of voxel vertices and indices.
+MeshHandle UploadVoxelMesh(const VoxelVertexBuffer& vertices,
+                           const std::vector<uint32_t>& indices) {
+    return MeshBatch::CreateMesh(GetVoxelVertexFormat(), vertices.GetData(),
+                                 vertices.GetSizeInBytes(), indices.data(),
+                                 indices.size());
+}
+
+}  // namespace
+
+void BlockEffects::Initialize(SceneBase* scene,
+                              const RefPtr<Material>& material) {
     m_scene = scene;
     m_material = material;
 }
 
-GameObject* BlockEffects::CreatePlaceCube(BlockType type) {
-    VertexGroup verts;
-    IndexGroup inds;
-    BuildBlockCube(type, verts, inds);
+const MeshHandle& BlockEffects::CubeMesh(BlockType type) {
+    auto it = m_cubeMeshes.find(type);
+    if (it != m_cubeMeshes.end()) return it->second;
 
-    MeshData meshData;
-    meshData.vertices = std::move(verts);
-    meshData.indices = std::move(inds);
-
-    auto* obj = new GameObject("PlaceEffect");
-    obj->AddComponent<TransformComponent>(Vector3D(0, 0, 0));
-    obj->AddComponent<MaterialComponent>(m_material);
-    obj->AddComponent<MeshComponent>(std::move(meshData));
-    obj->Initialize();
-    return obj;
+    VoxelVertexBuffer vertices;
+    std::vector<uint32_t> indices;
+    for (const FaceInfo& f : CUBE_FACES) {
+        float uvs[QUAD_CORNERS][2];
+        QuadUVs(TextureAtlas::GetTileUV(GetBlockTextureTile(type, f.face)),
+                uvs);
+        const uint32_t base = static_cast<uint32_t>(vertices.GetSize());
+        for (int i = 0; i < QUAD_CORNERS; i++) {
+            vertices.AddVertex(VoxelVertex(f.positions[i][0], f.positions[i][1],
+                                           f.positions[i][2], f.nx, f.ny, f.nz,
+                                           uvs[i][0], uvs[i][1]));
+        }
+        AppendIndices(indices, base, QUAD_FRONT);
+    }
+    return m_cubeMeshes.emplace(type, UploadVoxelMesh(vertices, indices))
+        .first->second;
 }
 
-GameObject* BlockEffects::CreateParticleQuad(uint8_t tileIndex) {
-    VertexGroup verts;
-    IndexGroup inds;
+const MeshHandle& BlockEffects::QuadMesh(uint8_t tile) {
+    auto it = m_quadMeshes.find(tile);
+    if (it != m_quadMeshes.end()) return it->second;
 
-    AtlasUV uv = TextureAtlas::GetTileUV(tileIndex);
+    float uvs[QUAD_CORNERS][2];
+    QuadUVs(TextureAtlas::GetTileUV(tile), uvs);
+    VoxelVertexBuffer vertices;
+    std::vector<uint32_t> indices;
+    for (float nz : PARTICLE_SIDE_NORMALS) {
+        const uint32_t base = static_cast<uint32_t>(vertices.GetSize());
+        for (int i = 0; i < QUAD_CORNERS; i++) {
+            vertices.AddVertex(VoxelVertex(PARTICLE_CORNERS[i][0],
+                                           PARTICLE_CORNERS[i][1], 0.0f, 0.0f,
+                                           0.0f, nz, uvs[i][0], uvs[i][1]));
+        }
+        AppendIndices(indices, base, nz > 0.0f ? QUAD_FRONT : QUAD_BACK);
+    }
+    return m_quadMeshes.emplace(tile, UploadVoxelMesh(vertices, indices))
+        .first->second;
+}
 
-    // Two-sided quad on XY plane facing +Z, centered at origin
-    // Rotated each frame to face camera via TransformComponent
-    float h = 0.5f;
-    uint32_t base = 0;
-    Vertex v0(-h, -h, 0,  0, 0, 1,  1, 0, 0, 1,  uv.u0, uv.v1);
-    Vertex v1(-h,  h, 0,  0, 0, 1,  1, 0, 0, 1,  uv.u0, uv.v0);
-    Vertex v2( h,  h, 0,  0, 0, 1,  1, 0, 0, 1,  uv.u1, uv.v0);
-    Vertex v3( h, -h, 0,  0, 0, 1,  1, 0, 0, 1,  uv.u1, uv.v1);
-    v0.SetColor(1, 1, 1, 1); v1.SetColor(1, 1, 1, 1);
-    v2.SetColor(1, 1, 1, 1); v3.SetColor(1, 1, 1, 1);
-    verts.AddVertex(v0); verts.AddVertex(v1);
-    verts.AddVertex(v2); verts.AddVertex(v3);
-
-    // Front
-    inds.add(base);     inds.add(base + 2); inds.add(base + 1);
-    inds.add(base);     inds.add(base + 3); inds.add(base + 2);
-    // Back (reverse winding)
-    inds.add(base);     inds.add(base + 1); inds.add(base + 2);
-    inds.add(base);     inds.add(base + 2); inds.add(base + 3);
-
-    MeshData meshData;
-    meshData.vertices = std::move(verts);
-    meshData.indices = std::move(inds);
-
-    auto* obj = new GameObject("BreakParticle");
+GameObject* BlockEffects::CreateEffectObject(const char* name,
+                                             const MeshHandle& mesh) {
+    auto* obj = new GameObject(name);
     obj->AddComponent<TransformComponent>(Vector3D(0, 0, 0));
     obj->AddComponent<MaterialComponent>(m_material);
-    obj->AddComponent<MeshComponent>(std::move(meshData));
+    obj->AddComponent<MeshComponent>(mesh);
     obj->Initialize();
-
-    auto* tr = obj->GetComponent<TransformComponent>();
-    if (tr) tr->SetScale(Vector3D(PARTICLE_SIZE, PARTICLE_SIZE, PARTICLE_SIZE));
-
     return obj;
 }
 
 void BlockEffects::SpawnPlaceEffect(int x, int y, int z, BlockType type) {
-    auto* obj = CreatePlaceCube(type);
+    auto* obj = CreateEffectObject("PlaceEffect", CubeMesh(type));
 
-    float startScale = 0.3f;
-    float offset = (1.0f - startScale) * 0.5f;
-    auto* tr = obj->GetComponent<TransformComponent>();
-    if (tr) {
+    const float offset = (1.0f - PLACE_START_SCALE) * HALF;
+    if (auto* tr = obj->GetComponent<TransformComponent>()) {
         tr->SetPosition(Vector3D(x + offset, y + offset, z + offset));
-        tr->SetScale(Vector3D(startScale, startScale, startScale));
+        tr->SetScale(
+            Vector3D(PLACE_START_SCALE, PLACE_START_SCALE, PLACE_START_SCALE));
     }
-
     m_scene->AddObject(obj);
 
     PlaceEffect effect;
@@ -148,89 +163,80 @@ void BlockEffects::SpawnPlaceEffect(int x, int y, int z, BlockType type) {
 }
 
 void BlockEffects::SpawnBreakEffect(int x, int y, int z, BlockType type) {
-    uint8_t tile = GetBlockTextureTile(type, BlockFace::South);
-    float cx = static_cast<float>(x) + 0.5f;
-    float cy = static_cast<float>(y) + 0.5f;
-    float cz = static_cast<float>(z) + 0.5f;
+    const MeshHandle& quad =
+        QuadMesh(GetBlockTextureTile(type, BlockFace::South));
+    const Vector3D center(static_cast<float>(x) + HALF,
+                          static_cast<float>(y) + HALF,
+                          static_cast<float>(z) + HALF);
 
     for (int i = 0; i < PARTICLES_PER_BLOCK; i++) {
-        float px = cx + RandFloat(-0.3f, 0.3f);
-        float py = cy + RandFloat(-0.3f, 0.3f);
-        float pz = cz + RandFloat(-0.3f, 0.3f);
-
-        auto* obj = CreateParticleQuad(tile);
-        auto* tr = obj->GetComponent<TransformComponent>();
-        if (tr) tr->SetPosition(Vector3D(px, py, pz));
-        m_scene->AddObject(obj);
-
         BreakParticle p;
-        p.pos = Vector3D(px, py, pz);
-        p.vel = Vector3D(RandFloat(-1.5f, 1.5f),
-                         RandFloat(1.5f, 4.0f),
-                         RandFloat(-1.5f, 1.5f));
+        p.pos = center + Vector3D(RandFloat(-BREAK_SPREAD, BREAK_SPREAD),
+                                  RandFloat(-BREAK_SPREAD, BREAK_SPREAD),
+                                  RandFloat(-BREAK_SPREAD, BREAK_SPREAD));
+        p.vel = Vector3D(RandFloat(-BREAK_SIDE_SPEED, BREAK_SIDE_SPEED),
+                         RandFloat(BREAK_UP_SPEED_MIN, BREAK_UP_SPEED_MAX),
+                         RandFloat(-BREAK_SIDE_SPEED, BREAK_SIDE_SPEED));
         p.life = 0.0f;
-        p.maxLife = BREAK_LIFETIME + RandFloat(-0.1f, 0.1f);
-        p.obj = obj;
+        p.maxLife = BREAK_LIFETIME +
+                    RandFloat(-BREAK_LIFETIME_JITTER, BREAK_LIFETIME_JITTER);
+
+        p.obj = CreateEffectObject("BreakParticle", quad);
+        if (auto* tr = p.obj->GetComponent<TransformComponent>()) {
+            tr->SetPosition(p.pos);
+            tr->SetScale(Vector3D(PARTICLE_SIZE, PARTICLE_SIZE, PARTICLE_SIZE));
+        }
+        m_scene->AddObject(p.obj);
         m_breakParticles.push_back(p);
     }
 }
 
 void BlockEffects::Update(float deltaTime, const Vector3D& cameraPos) {
-    // Update place effects — animate scale
+    // Place effects: ease-out scale-in, centered on the block
     for (auto& effect : m_placeEffects) {
+        if (!effect.obj) continue;
         effect.timer += deltaTime;
         if (effect.timer >= effect.duration) {
-            if (effect.obj) {
-                m_scene->RemoveObject(effect.obj);
-                effect.obj = nullptr;
-            }
+            m_scene->RemoveObject(effect.obj);
+            effect.obj = nullptr;
             continue;
         }
 
         float t = effect.timer / effect.duration;
         t = 1.0f - (1.0f - t) * (1.0f - t);
-        float scale = 0.3f + t * 0.7f;
-        float offset = (1.0f - scale) * 0.5f;
-
-        auto* tr = effect.obj->GetComponent<TransformComponent>();
-        if (tr) {
-            tr->SetPosition(Vector3D(effect.x + offset,
-                                     effect.y + offset,
+        const float scale = PLACE_START_SCALE + t * (1.0f - PLACE_START_SCALE);
+        const float offset = (1.0f - scale) * HALF;
+        if (auto* tr = effect.obj->GetComponent<TransformComponent>()) {
+            tr->SetPosition(Vector3D(effect.x + offset, effect.y + offset,
                                      effect.z + offset));
             tr->SetScale(Vector3D(scale, scale, scale));
         }
     }
 
-    // Update break particles — move via TransformComponent
+    // Break particles: gravity, then face the camera
     for (auto& p : m_breakParticles) {
         p.life += deltaTime;
         if (p.life >= p.maxLife) {
-            if (p.obj) {
-                m_scene->RemoveObject(p.obj);
-                p.obj = nullptr;
-            }
+            m_scene->RemoveObject(p.obj);
+            p.obj = nullptr;
             continue;
         }
 
         p.vel = p.vel + Vector3D(0, PARTICLE_GRAVITY, 0) * deltaTime;
         p.pos = p.pos + p.vel * deltaTime;
-
-        auto* tr = p.obj->GetComponent<TransformComponent>();
-        if (tr) {
+        if (auto* tr = p.obj->GetComponent<TransformComponent>()) {
             tr->SetPosition(p.pos);
             tr->LookAt(cameraPos);
         }
     }
-
-    // Remove dead particles from list
     m_breakParticles.erase(
         std::remove_if(m_breakParticles.begin(), m_breakParticles.end(),
-            [](const BreakParticle& p) { return p.obj == nullptr; }),
+                       [](const BreakParticle& p) { return p.obj == nullptr; }),
         m_breakParticles.end());
 }
 
-
-std::vector<BlockEffects::CompletedPlace> BlockEffects::PopCompletedPlacements() {
+std::vector<BlockEffects::CompletedPlace>
+BlockEffects::PopCompletedPlacements() {
     std::vector<CompletedPlace> result;
     for (auto it = m_placeEffects.begin(); it != m_placeEffects.end();) {
         if (it->obj == nullptr) {
@@ -244,7 +250,7 @@ std::vector<BlockEffects::CompletedPlace> BlockEffects::PopCompletedPlacements()
 }
 
 std::vector<BlockEffects::CompletedPlace> BlockEffects::DrainAllPlacements() {
-    // Commit everything still animating — used by save/exit paths
+    // Commit everything still animating, for the save and exit paths
     std::vector<CompletedPlace> result;
     result.reserve(m_placeEffects.size());
     for (auto& e : m_placeEffects) {
