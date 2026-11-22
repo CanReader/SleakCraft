@@ -4,6 +4,8 @@
 #include <Math/Vector.hpp>
 #include <Runtime/Texture.hpp>
 
+#include "World/VoxelLighting.hpp"
+
 class ChunkManager;
 class MainScene;
 namespace Sleak { class DirectionalLight; class Application; }
@@ -31,18 +33,6 @@ public:
     // Initial-value accessors for MainScene::SetupMaterial/SetupLighting.
     /// Converts the elevation/azimuth sliders into a light direction vector.
     Sleak::Math::Vector3D ComputeSunDirection() const;
-    void GetSunColor(float& r, float& g, float& b) const {
-        r = m_sunColorR;
-        g = m_sunColorG;
-        b = m_sunColorB;
-    }
-    float GetSunIntensity() const { return m_sunIntensity; }
-    void GetAmbientColor(float& r, float& g, float& b) const {
-        r = m_ambientColorR;
-        g = m_ambientColorG;
-        b = m_ambientColorB;
-    }
-    float GetAmbientIntensity() const { return m_ambientIntensity; }
     void GetFogHorizonColor(float& r, float& g, float& b) const {
         r = m_fogHorizonR;
         g = m_fogHorizonG;
@@ -72,7 +62,7 @@ private:
     void RenderMSAASection();
     /// Render distance slider; also re-derives fog distances on change.
     void RenderRenderDistanceSection();
-    /// Sun, ambient, and fog sliders; pushes live edits to the light manager.
+    /// Sun direction, voxel sun and ambient multipliers, and fog sliders.
     void RenderLightingSection();
     /// SSAO toggle and radius/bias/power sliders.
     void RenderSSAOSection();
@@ -91,19 +81,13 @@ private:
     bool isDeferredEnabled = false;
     bool isTAAEnabled = false;
 
-    // Sun state (live-editable)
-    float m_sunElevation  = 65.0f;   // degrees above horizon (0=sunrise, 90=noon)
+    // Sun direction (live-editable); 50 degrees is BSL's noon height
+    float m_sunElevation = 50.0f;    // degrees above the horizon
     float m_sunAzimuth    = 255.0f;  // degrees clockwise from north
-    float m_sunIntensity  = 0.69f;
-    float m_sunColorR     = 1.00f;
-    float m_sunColorG     = 0.96f;
-    float m_sunColorB     = 0.88f;
 
-    // Ambient state
-    float m_ambientIntensity = 0.725f;
-    float m_ambientColorR    = 0.45f;
-    float m_ambientColorG    = 0.62f;
-    float m_ambientColorB    = 1.00f;
+    // Multipliers on the voxel palette's sun and sky ambient (1 = palette)
+    LightMultiplier m_sunMultiplier;
+    LightMultiplier m_ambientMultiplier;
 
     // Texture quality state
     Sleak::TextureFilter m_texFilter = Sleak::TextureFilter::Nearest;

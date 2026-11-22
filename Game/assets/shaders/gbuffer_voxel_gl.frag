@@ -1,7 +1,8 @@
 #version 450 core
 #extension GL_GOOGLE_include_directive : require
 
-// GBuffer pass, OpenGL, voxel format: engine gbuffer_gl.frag plus RT3
+// GBuffer pass, OpenGL, voxel format: engine gbuffer_gl.frag with the voxel
+// RT2 and RT3 (craft/voxel_surface.glsl)
 
 in vec3 fragWorldPos;
 in vec3 fragWorldNorm;
@@ -52,7 +53,7 @@ layout(std140, binding = 1) uniform MaterialUBO {
 };
 
 #include "sleak/frame.glsl"
-#include "craft/shading_models.glsl"
+#include "craft/voxel_surface.glsl"
 
 void main() {
     vec2 uv = fragUV * matTiling + matOffset;
@@ -79,13 +80,12 @@ void main() {
                                                : matMetallic;
     float ao         = (HasAOMap        != 0u) ? texture(aoTexture,        uv).r
                                                : (matAO * fragColor.r);
-    float emitScale  = (HasEmissiveMap  != 0u)
-                           ? length(texture(emissiveTexture, uv).rgb)
-                           : length(matEmissiveColor) * matEmissiveIntensity;
 
     outAlbedoAO    = SleakFrameGuard(vec4(albedo.rgb, ao));
     outNormalRough = vec4(N * 0.5 + 0.5, roughness);  // pack normal to [0,1]
-    outMetalEmit   = vec4(metallic, clamp(emitScale, 0.0, 1.0), 0.0, 1.0);
-    outMotionModel = SleakEncodeMotionModel(vec2(0.0), 0.0,
-                                            CRAFT_SHADING_MODEL_VOXEL);
+    outMetalEmit   = CraftEncodeVoxelRT2(metallic,
+                                         CraftTexelEmission(albedo.rgb),
+                                         CRAFT_NO_BLOCK_LIGHT);
+    outMotionModel = CraftEncodeVoxelRT3(CRAFT_SKY_LIGHT_OPEN,
+                                         CRAFT_SHADING_MODEL_VOXEL);
 }

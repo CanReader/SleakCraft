@@ -233,25 +233,27 @@ and `Game/assets/shaders`. The engine's own `CompileShaders` CMake target only w
 one before them:
 
 ```
-BlockEffects::Update                    // advance break/place animations
+BlockEffects::Update                    // move break/place effect objects
 BlockInteraction::DrainCompletedPlacements   // finished placements become real blocks
-Sleak::Scene::Update                     // engine objects, lights, physics
+Sleak::Scene::Update                     // engine objects (effects too), lights, physics
+VoxelLighting::Upload                    // voxel palette into the game frame block
 HudPanel::Update
 PlayerController::Update                 // movement + voxel collision
 ChunkManager::Update                     // streaming, meshing, visibility
 ChunkManager::RenderColumns
-water material tiling, then ChunkManager::RenderWater
+ChunkManager::RenderWater
 BlockInteraction::RenderOutline
 auto-save check, message timers
 HudPanel::RenderCrosshair, HudPanel::Render, SettingsPanel::Render, Hotbar::Render
 ```
 
 Placements drain before the engine update so a block finishing its animation
-this frame is solid by the time collision runs. The player moves before
+this frame is solid by the time collision runs. The voxel palette is sent
+every frame because activating a scene clears the game frame block; the
+lighting stem reads it in the same frame. The player moves before
 `ChunkManager::Update` so streaming centers on the position the player
-actually reached. Water submits after the solid columns and after its
-material tiling is advanced by the game clock, which is what animates the
-surface.
+actually reached. Water submits after the solid columns; its shader animates
+the surface from the engine clock in `FrameData`.
 
 ---
 

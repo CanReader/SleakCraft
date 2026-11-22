@@ -2,21 +2,23 @@
 #define _MAIN_SCENE_HPP_
 
 #include <Core/Scene.hpp>
-#include <Runtime/Texture.hpp>
-#include <Memory/RefPtr.hpp>
-#include <Events/MouseEvent.hpp>
-#include <Events/KeyboardEvent.hpp>
 #include <Events/ApplicationEvent.hpp>
-#include "World/ChunkManager.hpp"
-#include "World/Block.hpp"
-#include "World/SaveManager.hpp"
-#include "World/BlockEffects.hpp"
-#include "World/WorldPersistence.hpp"
-#include "Player/PlayerController.hpp"
+#include <Events/KeyboardEvent.hpp>
+#include <Events/MouseEvent.hpp>
+#include <Memory/RefPtr.hpp>
+#include <Runtime/Texture.hpp>
+
 #include "Player/BlockInteraction.hpp"
+#include "Player/PlayerController.hpp"
+#include "UI/Hotbar.hpp"
 #include "UI/HudPanel.hpp"
 #include "UI/SettingsPanel.hpp"
-#include "UI/Hotbar.hpp"
+#include "World/Block.hpp"
+#include "World/BlockEffects.hpp"
+#include "World/ChunkManager.hpp"
+#include "World/SaveManager.hpp"
+#include "World/VoxelLighting.hpp"
+#include "World/WorldPersistence.hpp"
 
 namespace Sleak { class Material; class DirectionalLight; }
 
@@ -69,6 +71,8 @@ public:
     float GetSaveMessageTimer() const { return m_saveMessageTimer; }
     const std::string& GetSaveMessage() const { return m_saveMessage; }
     float GetGameTime() const { return m_gameTime; }
+    /// Voxel palette the settings panel scales.
+    VoxelLighting& GetVoxelLighting() { return m_voxelLighting; }
 
     // Accessors for HudPanel/SettingsPanel (toggles that engine setup code
     // in MainScene also reads at Initialize time)
@@ -92,7 +96,7 @@ private:
     void SetupMaterial();
     void SetupSkybox();
     /// Creates the sun light and applies the voxel-tuned GraphicsConfig
-    /// (shadows on, SSAO/SSR/IBL/bloom off) plus fog and culling settings.
+    /// (BSL output, shadows, SSAO, blend bloom) plus fog and culling settings.
     void SetupLighting();
     void RenderUI();
 
@@ -116,6 +120,7 @@ private:
     Sleak::RefPtr<Sleak::Material> m_waterMaterial;
     ChunkManager m_chunkManager;
     BlockEffects m_blockEffects;
+    VoxelLighting m_voxelLighting;
     SaveManager m_saveManager;
     WorldPersistence m_worldPersistence;
     PlayerController m_playerController;
@@ -153,7 +158,7 @@ private:
     std::string m_keyReleasedHandlerId;
 
     // Sun light created here (needs Scene::AddObject/shadow config); live
-    // elevation/azimuth/color/intensity edits live on SettingsPanel.
+    // elevation/azimuth edits live on SettingsPanel.
     Sleak::DirectionalLight* m_sun = nullptr;
 };
 

@@ -28,6 +28,25 @@
 // Post-TAA RCAS strength (0 = off, 1 = strongest)
 #define DEFAULT_SHARPEN_STRENGTH 0.5f
 
+namespace {
+
+// Engine sun and ambient as before the voxel palette (water, forward path)
+constexpr float LEGACY_SUN_COLOR[3] = {1.00f, 0.96f, 0.88f};
+constexpr float LEGACY_SUN_INTENSITY = 0.69f;
+constexpr float LEGACY_AMBIENT_COLOR[3] = {0.45f, 0.62f, 1.00f};
+constexpr float LEGACY_AMBIENT_INTENSITY = 0.725f;
+// Output look (BSL v10 defaults)
+constexpr float LOOK_EXPOSURE = 4.0f;
+constexpr float LOOK_GAMMA = 2.2f;
+constexpr float LOOK_SATURATION = 1.0f;
+constexpr float LOOK_WHITE_CURVE = 2.0f;
+constexpr float LOOK_WHITE_PATH = 1.0f;
+constexpr float LOOK_BLOOM_BLEND = 0.2f;
+constexpr float LOOK_DESATURATION_FACTOR = 1.5f;
+constexpr float LOOK_MIN_LIGHT = 0.5f;
+
+}  // namespace
+
 using namespace Sleak;
 using namespace Sleak::Math;
 
@@ -286,6 +305,9 @@ void MainScene::Update(float deltaTime) {
 
     Scene::Update(deltaTime);
 
+    if (auto* app = Sleak::Application::GetInstance())
+        m_voxelLighting.Upload(app->GetGraphicsConfig());
+
     m_hudPanel.Update(deltaTime);
 
     if (cam) {
@@ -384,22 +406,37 @@ void MainScene::SetupSkybox() {
 void MainScene::SetupLighting() {
     m_sun = new DirectionalLight("Sun");
     m_sun->SetDirection(m_settingsPanel.ComputeSunDirection());
-    float sunR, sunG, sunB;
-    m_settingsPanel.GetSunColor(sunR, sunG, sunB);
-    m_sun->SetColor(sunR, sunG, sunB);
-    m_sun->SetIntensity(m_settingsPanel.GetSunIntensity());
+    m_sun->SetColor(LEGACY_SUN_COLOR[0], LEGACY_SUN_COLOR[1],
+                    LEGACY_SUN_COLOR[2]);
+    m_sun->SetIntensity(LEGACY_SUN_INTENSITY);
     m_sun->SetLightSize(4.0f);
     m_settingsPanel.AttachSun(m_sun);
 
-    // Voxel-tuned graphics config: shadows on, no SSAO/SSR/IBL/bloom.
+    // Voxel-tuned graphics config: shadows and SSAO on, no SSR/IBL.
     Sleak::GraphicsConfig cfg =
         Sleak::GraphicsConfig::Preset(Sleak::GraphicsQuality::Medium);
-    cfg.ssaoEnabled = false;
+    cfg.ssaoEnabled = true;
     cfg.ssrEnabled = false;
     cfg.iblEnabled = false;
-    cfg.bloomEnabled = false;  // match OpenGL ref (no post-FX bloom chain)
     cfg.taaEnabled = true;      // VK only for now
     cfg.sharpenStrength = DEFAULT_SHARPEN_STRENGTH;
+    // BSL output: soft curve, x4 exposure, gamma 2.2, blend bloom, dither
+    cfg.tonemapEnabled = true;
+    cfg.tonemapOperator = Sleak::TonemapOperator::SoftRational;
+    cfg.exposure = LOOK_EXPOSURE;
+    cfg.gamma = LOOK_GAMMA;
+    cfg.saturation = LOOK_SATURATION;
+    cfg.tonemapWhiteCurve = LOOK_WHITE_CURVE;
+    cfg.tonemapWhitePath = LOOK_WHITE_PATH;
+    cfg.filmGrainEnabled = true;
+    cfg.bloomEnabled = true;
+    cfg.bloomMode = Sleak::BloomMode::Blend;
+    cfg.bloomBlend = LOOK_BLOOM_BLEND;
+    cfg.desaturationEnabled = true;
+    cfg.desaturationFactor = LOOK_DESATURATION_FACTOR;
+    cfg.minLight = LOOK_MIN_LIGHT;
+    // Linear albedo keeps sRGB precision in RT0
+    cfg.gbufferAlbedoSRGB = true;
     cfg.shadowMapResolution = 3072;  // BSL ULTRA tier; 4096 spiked VK frames
     cfg.shadowFrustumSize = 128.0f;  // half-extent, 256 m ≈ fog range
     cfg.shadowCasterDistance = 256.0f;
@@ -437,10 +474,9 @@ void MainScene::SetupLighting() {
 
     auto* lm = GetLightManager();
     if (lm) {
-        float ambR, ambG, ambB;
-        m_settingsPanel.GetAmbientColor(ambR, ambG, ambB);
-        lm->SetAmbientColor(ambR, ambG, ambB);
-        lm->SetAmbientIntensity(m_settingsPanel.GetAmbientIntensity());
+        lm->SetAmbientColor(LEGACY_AMBIENT_COLOR[0], LEGACY_AMBIENT_COLOR[1],
+                            LEGACY_AMBIENT_COLOR[2]);
+        lm->SetAmbientIntensity(LEGACY_AMBIENT_INTENSITY);
 
         float horizonR, horizonG, horizonB;
         m_settingsPanel.GetFogHorizonColor(horizonR, horizonG, horizonB);
