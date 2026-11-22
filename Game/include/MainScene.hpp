@@ -17,6 +17,7 @@
 #include "World/BlockEffects.hpp"
 #include "World/ChunkManager.hpp"
 #include "World/SaveManager.hpp"
+#include "World/TimeOfDay.hpp"
 #include "World/VoxelLighting.hpp"
 #include "World/WorldClock.hpp"
 #include "World/WorldPersistence.hpp"
@@ -101,6 +102,10 @@ private:
     /// Creates the sun light and applies the voxel-tuned GraphicsConfig
     /// (BSL output, shadows, SSAO, blend bloom) plus fog and culling settings.
     void SetupLighting();
+    /// Advances the clock and drives palette, engine light and atmosphere.
+    void UpdateSky(float deltaTime);
+    /// Smooths whether the eye is under open sky into the fog's outdoor factor.
+    void UpdateOutdoorFactor(float deltaTime);
     void RenderUI();
 
     void OnMousePressed(const Sleak::Events::Input::MouseButtonPressedEvent& e);
@@ -126,6 +131,9 @@ private:
     BlockEffects m_blockEffects;
     VoxelLighting m_voxelLighting;
     WorldClock m_worldClock;
+    SkyOptions m_skyOptions;
+    float m_outdoor = 1.0f;  // 1 open sky at the eye, 0 enclosed
+    bool m_outdoorPrimed = false;
     SaveManager m_saveManager;
     WorldPersistence m_worldPersistence;
     PlayerController m_playerController;
@@ -162,8 +170,8 @@ private:
     std::string m_keyPressedHandlerId;
     std::string m_keyReleasedHandlerId;
 
-    // Sun light created here (needs Scene::AddObject/shadow config); live
-    // elevation/azimuth edits live on SettingsPanel.
+    // Sun or moon light created here (needs Scene::AddObject/shadow config);
+    // UpdateSky aims and colors it from the world clock.
     Sleak::DirectionalLight* m_sun = nullptr;
 };
 
