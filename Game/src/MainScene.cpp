@@ -297,9 +297,12 @@ void MainScene::Update(float deltaTime) {
     if (deltaTime > 0.05f) deltaTime = 0.05f;
     m_gameTime += deltaTime;
 
+    // Where this frame's movement starts, swept for collision below
     auto* cam = GetActiveCamera();
+    const Math::Vector3D sweepStart =
+        cam ? cam->GetPosition() : Math::Vector3D();
     if (cam) {
-        m_blockEffects.Update(deltaTime, cam->GetPosition());
+        m_blockEffects.Update(deltaTime, sweepStart);
         m_blockInteraction.DrainCompletedPlacements();
     }
 
@@ -313,7 +316,7 @@ void MainScene::Update(float deltaTime) {
     if (cam) {
         auto pos = cam->GetPosition();
 
-        m_playerController.Update();
+        m_playerController.Update(sweepStart);
 
         // Next shadow pass matrix
         auto* lm = GetLightManager();

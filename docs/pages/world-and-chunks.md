@@ -192,9 +192,18 @@ axis, in one pass over the overlap set.
 > This must stay single-pass. Splitting it into a Y-first phase produces a
 > teleport-on-top bug, where the player snaps onto a block's top surface while walking
 > into its side. Splitting it into an XZ-first phase produces ground-shake jitter on
-> slopes. `PlayerController::Update` calls `ResolveVoxelCollision` every frame and
-> applies its correction directly to the camera position; there is no intermediate
-> physics step to absorb a bad resolution.
+> slopes. `PlayerController::Update` applies the corrections directly to the camera
+> position; there is no intermediate physics step to absorb a bad resolution.
+
+`PlayerController::Update` sweeps the frame's motion instead of resolving only where it
+ends: `MainScene::Update` reads the camera position before the scene moves it, and the
+controller walks from there to the new position in substeps of at most 0.25 m per axis.
+Each substep starts from the corrections of the ones before, so it sinks less than the
+0.3 m half-width and a fast fall lands on top of the column the player stands in rather
+than being pushed sideways into the next one. Teleports (world load, F6) happen in key
+handlers before that read, so they are never swept. A frame that would need more than
+16 substeps (4 m, more than a fall at terminal velocity covers under the 0.05 s frame
+cap) resolves in place.
 
 ---
 

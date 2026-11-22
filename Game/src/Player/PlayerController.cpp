@@ -8,6 +8,7 @@
 #include <Math/Math.hpp>
 #include <Math/Vector.hpp>
 #include <Physics/RigidbodyComponent.hpp>
+#include <algorithm>
 #include <cmath>
 
 using namespace Sleak;
@@ -16,6 +17,64 @@ namespace {
 // Autopilot view, about 27 degrees below its +Z heading
 #define AUTOFLY_CLEARANCE 8.0f
 const Math::Vector3D kAutoFlyLook(0.0f, -0.5f, 1.0f);
+
+// Player box around the eye
+constexpr float PLAYER_HALF_WIDTH = 0.3f;
+constexpr float PLAYER_HEIGHT = 1.8f;
+constexpr float PLAYER_EYE_HEIGHT = 1.62f;
+
+// Swept collision: longest per-axis substep, most substeps per frame
+constexpr float MAX_COLLISION_STEP = 0.25f;
+constexpr int MAX_COLLISION_SUBSTEPS = 16;
+static_assert(MAX_COLLISION_STEP < PLAYER_HALF_WIDTH,
+              "a substep must sink less than the half-width so MTV picks Y");
+
+/// Voxel collision merged over the substeps of one frame's motion.
+struct CollisionSweep {
+    Math::Vector3D position;
+    bool onGround = false;
+    bool hitCeiling = false;
+    bool hitWall = false;
+    bool correctedX = false;
+    bool correctedZ = false;
+};
+
+/// Resolves collision at substeps from `from` to `to`; each substep starts
+/// from the previous one's corrections, so it sinks at most one step deep.
+CollisionSweep SweepVoxelCollision(const ChunkManager& chunks,
+                                   const Math::Vector3D& from,
+                                   const Math::Vector3D& to) {
+    const Math::Vector3D delta = to - from;
+    const float needed = std::ceil(
+        std::max({std::fabs(delta.GetX()), std::fabs(delta.GetY()),
+                  std::fabs(delta.GetZ())}) /
+        MAX_COLLISION_STEP);
+    // NaN or beyond any frame's reach: a teleport, resolved in place
+    const bool teleport = !std::isfinite(needed) ||
+                          needed > static_cast<float>(MAX_COLLISION_SUBSTEPS);
+    const int steps = teleport ? 1 : std::max(1, static_cast<int>(needed));
+
+    CollisionSweep sweep;
+    Math::Vector3D correction;
+    for (int i = 1; i <= steps; ++i) {
+        // Last substep lands on the unresolved position plus corrections
+        const Math::Vector3D path =
+            i == steps ? to
+                       : from + delta * (static_cast<float>(i) /
+                                         static_cast<float>(steps));
+        const VoxelCollisionResult hit = chunks.ResolveVoxelCollision(
+            path + correction, PLAYER_HALF_WIDTH, PLAYER_HEIGHT,
+            PLAYER_EYE_HEIGHT);
+        correction += hit.correction;
+        sweep.onGround = sweep.onGround || hit.onGround;
+        sweep.hitCeiling = sweep.hitCeiling || hit.hitCeiling;
+        sweep.hitWall = sweep.hitWall || hit.hitWall;
+        sweep.correctedX = sweep.correctedX || hit.correction.GetX() != 0.0f;
+        sweep.correctedZ = sweep.correctedZ || hit.correction.GetZ() != 0.0f;
+    }
+    sweep.position = to + correction;
+    return sweep;
+}
 }  // namespace
 
 void PlayerController::ApplyTuning() {
@@ -124,7 +183,7 @@ void PlayerController::PinCamera(const CameraPose& pose) {
         rb->SetUseGravity(false);
 }
 
-void PlayerController::Update() {
+void PlayerController::Update(const Math::Vector3D& sweepStart) {
     auto* cam = m_scene.GetActiveCamera();
     if (!cam) return;
 
@@ -166,35 +225,30 @@ void PlayerController::Update() {
         if (fpc) fpc->SetVerticalFlyInput(0.0f);
     }
 
-    // Collision resolution (always active)
+    // Collision resolution (always active), swept from the frame's start
     {
-        auto curPos = cam->GetPosition();
-        auto collision =
-            m_chunkManager.ResolveVoxelCollision(curPos, 0.3f, 1.8f, 1.62f);
+        const CollisionSweep collision =
+            SweepVoxelCollision(m_chunkManager, sweepStart, cam->GetPosition());
         if (collision.onGround || collision.hitCeiling ||
             collision.hitWall) {
-            cam->SetPosition({curPos.GetX() + collision.correction.GetX(),
-                              curPos.GetY() + collision.correction.GetY(),
-                              curPos.GetZ() + collision.correction.GetZ()});
+            cam->SetPosition(collision.position);
             if (!m_flying) {
                 auto* rb = cam->GetComponent<RigidbodyComponent>();
                 if (rb) {
-                    auto vel = rb->GetVelocity();
-                    if (collision.onGround && vel.GetY() < 0.0f) {
-                        rb->SetVelocity({vel.GetX(), 0.0f, vel.GetZ()});
+                    const auto vel = rb->GetVelocity();
+                    float vx = vel.GetX();
+                    float vy = vel.GetY();
+                    float vz = vel.GetZ();
+                    if (collision.onGround && vy < 0.0f) {
+                        vy = 0.0f;
                         rb->SetGrounded(true);
                     }
-                    if (collision.hitCeiling && vel.GetY() > 0.0f)
-                        rb->SetVelocity({vel.GetX(), 0.0f, vel.GetZ()});
+                    if (collision.hitCeiling && vy > 0.0f) vy = 0.0f;
                     if (collision.hitWall) {
-                        float vx = (collision.correction.GetX() != 0.0f)
-                                       ? 0.0f
-                                       : vel.GetX();
-                        float vz = (collision.correction.GetZ() != 0.0f)
-                                       ? 0.0f
-                                       : vel.GetZ();
-                        rb->SetVelocity({vx, vel.GetY(), vz});
+                        if (collision.correctedX) vx = 0.0f;
+                        if (collision.correctedZ) vz = 0.0f;
                     }
+                    rb->SetVelocity({vx, vy, vz});
                 }
             }
         }
