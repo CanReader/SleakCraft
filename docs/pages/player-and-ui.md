@@ -103,14 +103,15 @@ ENGINE_API void Text(const char* fmt, ...);
   system metrics and refreshes them on a 0.5s timer, independent of whether the HUD is
   currently visible.
 - **`SettingsPanel`** (`Game/src/UI/SettingsPanel.cpp`) renders general, culling, MSAA,
-  render-distance, lighting, SSAO, IBL, and texture-filter sections, and pushes live
-  edits straight to the light manager and block material. Its sun elevation and
-  azimuth turn the engine sun; its sun and ambient intensity and RGB sliders are
-  multipliers (1 = unchanged) on the voxel palette (`VoxelLighting::SetMultipliers`),
-  so they change the voxel lighting while the engine sun and ambient that water still
-  reads stay fixed. It owns that slider state and the fog state itself; crosshair,
-  vsync, and multithreaded-loading toggles are read and written through `MainScene`,
-  because `MainScene::SetupLighting` also reads them once at scene initialize time.
+  render-distance, sky, lighting, SSAO, IBL, and texture-filter sections, and pushes
+  live edits straight to the world clock, sky options and block material. Its sky
+  section sets the time of day, pauses the clock, changes the day length and toggles
+  fog, fog density, height fog and stars; its sun and ambient intensity and RGB
+  sliders are multipliers (1 = unchanged) on the voxel palette
+  (`VoxelLighting::SetMultipliers`), so they change the voxel lighting while the engine
+  sun and ambient that water reads follow the time of day only. It owns the multiplier
+  and texture state itself; the clock, the sky options and the crosshair, vsync, and
+  multithreaded-loading toggles are read and written through `MainScene`.
 - **`Hotbar`** (`Game/src/UI/Hotbar.cpp`) lazily loads the nine slot icon textures on
   first render, then draws the strip; selection state lives on `BlockInteraction`, which
   `Hotbar` reads by reference rather than duplicating.

@@ -8,7 +8,8 @@ The on-disk save format and the code that keeps it in sync with the chunk grid.
 | `SaveManager` | Owns I/O for one save directory: `world.dat` plus its region files. |
 | `RegionFile` | All-static reader and writer for one 8x8 region file, with RLE and CRC32. |
 | `ChunkSaveData` | One chunk on disk: coordinates plus its 4096 block bytes. |
-| `WorldMeta` | Header record: version, seed, world name, player state, region index. |
+| `WorldMeta` | Header record: version, seed, world name, player state, world clock, region index. |
+| `WorldClockState` | Day fraction, day count, day length, pause flag (since version 2). |
 | `WorldMeta::PlayerState` | Position, pitch, yaw, selected block, render distance. |
 | `HeightmapCache` | Separate seed-tagged cache file, saved alongside the world. |
 
@@ -22,7 +23,7 @@ digraph savepath {
   ms   [label="MainScene::SaveGame()"];
   wp   [label="WorldPersistence::SaveGame()", fillcolor="#22d3ee22", color="#22d3ee"];
   drain[label="BlockEffects::DrainAllPlacements\nChunkManager::SetBlockAt\nChunkManager::FlushPendingEdits"];
-  meta [label="build WorldMeta\nseed, player state, render distance"];
+  meta [label="build WorldMeta\nseed, player state, world clock"];
   dirty[label="ChunkManager::GetDirtyChunks\n-> vector<ChunkSaveData>"];
   sm   [label="SaveManager::SaveWorld(meta, dirtyChunks)"];
   grp  [label="group by region\nRegionFile::RegionCoord"];
@@ -118,7 +119,8 @@ touching region files, `DeleteSaveDirectory` removes a save.
 
 ## 4. `WorldMeta`
 
-`Game/include/World/WorldMeta.hpp`: magic `0x534C4B57` ("SLKW"), `CURRENT_VERSION = 1`.
+`Game/include/World/WorldMeta.hpp`: magic `0x534C4B57` ("SLKW"), `CURRENT_VERSION = 2`,
+`MIN_VERSION = 1`.
 
 ```cpp
 struct WorldMeta {
@@ -128,13 +130,22 @@ struct WorldMeta {
     std::string worldName = "Default";
     uint32_t seed = 0;
     PlayerState player;             // posX/Y/Z, pitch, yaw, selectedBlock, renderDistance
+    WorldClockState clock;          // dayFraction, day, dayLengthSeconds, paused
     std::vector<RegionEntry> regions;  // {rx, rz, chunkCount}
 };
 ```
 
-Any field change must bump `CURRENT_VERSION`. `SaveManager::ReadWorldDat` currently
-rejects a mismatched version outright, so introducing a new version needs an explicit
-legacy-load path added there at the same time, not after.
+Version 2 stores the world clock between the player state and the region index:
+the day fraction as an IEEE-754 double (0 is 06:00, 0.25 noon), the day count as an
+`int64`, the day length in seconds as a float and the pause flag as one byte.
+`SaveManager::ReadWorldDat` loads versions `MIN_VERSION` to `CURRENT_VERSION`; a
+version 1 file has no clock and loads at noon, and `WorldClock::SetState` repairs
+out-of-range values. `WriteWorldDat` always writes the current version, so a version 1
+world is upgraded by its first save. A build that only knows version 1 refuses a
+version 2 file and locks saving (section 6), so it never overwrites one.
+
+Any field change must bump `CURRENT_VERSION` and add its legacy path to
+`ReadWorldDat` at the same time, not after.
 
 ---
 
@@ -144,10 +155,10 @@ legacy-load path added there at the same time, not after.
 `ChunkManager` / `SaveManager` / `BlockEffects`:
 
 - `SaveGame()` drains completed block-placement animations (`BlockEffects`), collects
-  dirty chunks and current player state into a `WorldMeta`, writes it through
-  `SaveManager::SaveWorld`, and calls `ChunkManager::SaveHeightmapCache`.
-- `LoadGame()` reloads `world.dat` and region data, then reinitializes the chunk grid and
-  player state, driving the fixed order `ForceReload -> SetSeed -> LoadChunkData ->
+  dirty chunks, current player state and the world clock into a `WorldMeta`, writes it
+  through `SaveManager::SaveWorld`, and calls `ChunkManager::SaveHeightmapCache`.
+- `LoadGame()` reloads `world.dat` and region data, then reinitializes the chunk grid,
+  player state and world clock, driving the fixed order `ForceReload -> SetSeed -> LoadChunkData ->
   LoadHeightmapCache`. That order matters: `ForceReload` drops the existing chunk grid
   before anything is reseeded, and the heightmap cache is only meaningful once the seed
   and chunk data it was built against are in place.
@@ -159,7 +170,9 @@ Four things trigger a save, and all of them funnel through the same
 `MainScene::SaveGame()` entry point: the `F5` key, the window close event,
 the 120-second auto-save timer in `MainScene::Update`, and
 `Game::ReturnToMenu`. There is no separate quit-save path that could diverge
-from the manual one.
+from the manual one. Closing the window saves even without block edits, so
+the player position and the time of day survive; `--bench` and `-capture`
+runs skip that save.
 
 The full load order is longer than the four-call core, because the render
 distance is deliberately collapsed and restored around it:
