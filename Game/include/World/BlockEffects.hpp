@@ -71,8 +71,8 @@ class BlockEffects {
    private:
     /// Unit cube of a block type in the voxel format, built on first use.
     const Sleak::MeshHandle& CubeMesh(BlockType type);
-    /// Two-sided quad of an atlas tile in the voxel format, built on first
-    /// use.
+    /// Camera-facing quad of an atlas tile in the voxel format, built on
+    /// first use.
     const Sleak::MeshHandle& QuadMesh(uint8_t tile);
     /// Scene-ready object drawing a mesh with the block material.
     Sleak::GameObject* CreateEffectObject(const char* name,
