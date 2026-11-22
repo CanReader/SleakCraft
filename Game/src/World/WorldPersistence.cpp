@@ -39,6 +39,7 @@ void WorldPersistence::SaveGame() {
     meta.player.selectedBlock =
         static_cast<uint8_t>(m_scene.GetSelectedBlock());
     meta.player.renderDistance = m_chunkManager.GetRenderDistance();
+    meta.clock = m_scene.GetWorldClock().GetState();
 
     // Commit placements still inside the 0.15s animation window
     for (auto& p : m_blockEffects.DrainAllPlacements())
@@ -99,6 +100,7 @@ void WorldPersistence::LoadGame() {
     }
 
     m_scene.SetSelectedBlock(static_cast<BlockType>(meta.player.selectedBlock));
+    m_scene.GetWorldClock().SetState(meta.clock);
 
     // ForceReload first: drains workers so reseed/data swap can't race Generate
     m_chunkManager.ForceReload();

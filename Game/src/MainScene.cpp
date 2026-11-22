@@ -296,6 +296,7 @@ void MainScene::OnKeyReleased(const Events::Input::KeyReleasedEvent& e) {
 void MainScene::Update(float deltaTime) {
     if (deltaTime > 0.05f) deltaTime = 0.05f;
     m_gameTime += deltaTime;
+    m_worldClock.Advance(deltaTime);
 
     // Where this frame's movement starts, swept for collision below
     auto* cam = GetActiveCamera();
@@ -352,8 +353,10 @@ void MainScene::RenderUI() {
 }
 
 void MainScene::OnWindowClose(const Sleak::Events::WindowCloseEvent&) {
-    // Renderer is still alive here — last safe point to persist the world
-    if (!m_chunkManager.GetDirtyChunks().empty()) SaveGame();
+    // Renderer still alive: save, except in bench and capture runs
+    if (!Sleak::CommandLine::HasFlag("--bench") &&
+        Sleak::CommandLine::GetValue("-capture").empty())
+        SaveGame();
 }
 
 void MainScene::SaveGame() { m_worldPersistence.SaveGame(); }

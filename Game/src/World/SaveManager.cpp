@@ -308,7 +308,7 @@ bool SaveManager::WriteWorldDat(const WorldMeta& meta,
     std::vector<uint8_t> buf;
 
     WriteU32(buf, WorldMeta::MAGIC);
-    WriteU16(buf, meta.version);
+    WriteU16(buf, WorldMeta::CURRENT_VERSION);
     WriteU16(buf, meta.flags);
 
     auto now = std::chrono::system_clock::now();
@@ -328,6 +328,14 @@ bool SaveManager::WriteWorldDat(const WorldMeta& meta,
     WriteU8(buf, meta.player.selectedBlock);
     WriteI32(buf, meta.player.renderDistance);
 
+    // World clock (version 2): the day fraction as its IEEE-754 bits
+    int64_t fractionBits;
+    std::memcpy(&fractionBits, &meta.clock.dayFraction, sizeof(fractionBits));
+    WriteI64(buf, fractionBits);
+    WriteI64(buf, meta.clock.day);
+    WriteFloat(buf, meta.clock.dayLengthSeconds);
+    WriteU8(buf, meta.clock.paused ? 1 : 0);
+
     // Region index — all known regions
     WriteU32(buf, static_cast<uint32_t>(allRegions.size()));
     for (const auto& [key, r] : allRegions) {
@@ -345,6 +353,9 @@ bool SaveManager::WriteWorldDat(const WorldMeta& meta,
 bool SaveManager::LoadWorld(WorldMeta& meta,
                             std::unordered_map<int64_t, std::array<uint8_t, 4096>>& chunkData) {
     if (!ReadWorldDat(meta)) return false;
+    if (meta.version < WorldMeta::CLOCK_VERSION)
+        SLEAK_INFO("World load: version {} save, the clock starts at noon",
+                   meta.version);
 
     chunkData.clear();
 
@@ -394,7 +405,8 @@ bool SaveManager::ReadWorldDat(WorldMeta& meta) const {
     uint32_t magic;
     if (!ReadU32(p, end, magic) || magic != WorldMeta::MAGIC) return false;
     if (!ReadU16(p, end, meta.version) ||
-        meta.version != WorldMeta::CURRENT_VERSION) {
+        meta.version < WorldMeta::MIN_VERSION ||
+        meta.version > WorldMeta::CURRENT_VERSION) {
         SLEAK_ERROR("World load: unsupported version in {}", worldDat);
         return false;
     }
@@ -411,6 +423,20 @@ bool SaveManager::ReadWorldDat(WorldMeta& meta) const {
     if (!ReadFloat(p, end, meta.player.yaw)) return false;
     if (!ReadU8(p, end, meta.player.selectedBlock)) return false;
     if (!ReadI32(p, end, meta.player.renderDistance)) return false;
+
+    // World clock: stored since version 2, noon before
+    meta.clock = WorldClockState{.dayFraction = NOON_DAY_FRACTION};
+    if (meta.version >= WorldMeta::CLOCK_VERSION) {
+        int64_t fractionBits = 0;
+        uint8_t paused = 0;
+        if (!ReadI64(p, end, fractionBits)) return false;
+        if (!ReadI64(p, end, meta.clock.day)) return false;
+        if (!ReadFloat(p, end, meta.clock.dayLengthSeconds)) return false;
+        if (!ReadU8(p, end, paused)) return false;
+        std::memcpy(&meta.clock.dayFraction, &fractionBits,
+                    sizeof(fractionBits));
+        meta.clock.paused = paused != 0;
+    }
 
     // Region index
     uint32_t regionCount;

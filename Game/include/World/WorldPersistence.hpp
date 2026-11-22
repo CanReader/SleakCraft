@@ -21,11 +21,11 @@ public:
           m_blockEffects(blockEffects),
           m_scene(scene) {}
 
-    /// Drains completed placements, collects dirty chunks and player state
-    /// into a WorldMeta, and writes it via SaveManager.
+    /// Drains completed placements, collects dirty chunks, player state and
+    /// the world clock into a WorldMeta, and writes it via SaveManager.
     void SaveGame();
-    /// Reloads world.dat and region data, then reinitializes the chunk grid
-    /// and player state from it.
+    /// Reloads world.dat and region data, then reinitializes the chunk grid,
+    /// player state and world clock from it.
     void LoadGame();
 
 private:
