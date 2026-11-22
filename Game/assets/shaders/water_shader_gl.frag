@@ -49,6 +49,8 @@ layout(std140, binding = 5) uniform ShadowUBO {
 layout(binding = 3) uniform sampler2DShadow shadowMap;
 
 #include "sleak/frame.glsl"
+#include "sleak/frame_output.glsl"
+#include "sleak/atmosphere_pass.glsl"
 
 // Scene read (VertexLayoutDesc::transparentReadsScene)
 layout(binding = 4) uniform sampler2D   sceneColor;  // tonemapped + fogged
@@ -103,8 +105,10 @@ vec3 SceneToLinear(vec3 c) {
     vec3 k = ACES_E * y;
     return (-b - sqrt(max(b * b - 4.0 * a * k, vec3(0.0)))) / (2.0 * a);
 }
+// The atmosphere's sky probe is display-referred, like the snapshot
 vec3 SkyRadiance(vec3 dir, float lod) {
-    return textureLod(skyCube, dir, lod).rgb;
+    vec3 sky = textureLod(skyCube, dir, lod).rgb;
+    return SleakAtmosphereEnabled() ? SceneToLinear(sky) : sky;
 }
 
 // ============================================================
@@ -157,6 +161,9 @@ vec3 CameraPosition()  { return CameraPos; }
 
 // Fog terms of lighting_pass_gl ApplyFog, split so the snapshot can be unfogged
 float FogAmount(vec3 p) {
+    // shortcut: fog mixed in display space, scene units when phase 13 lands
+    if (SleakAtmosphereEnabled())
+        return 1.0 - SleakAtmosphereScatterWorld(p).a;
     if (FogEnd <= 0.0) return 0.0;
     float dist = length(p.xz - CameraPos.xz);
     float distFog = clamp((dist - FogStart) / max(FogEnd - FogStart, EPSILON), 0.0, 1.0);
@@ -169,6 +176,11 @@ float FogAmount(vec3 p) {
     return 1.0 - (1.0 - distFog) * (1.0 - heightFog);
 }
 vec3 FogColorAt(vec3 p) {
+    if (SleakAtmosphereEnabled()) {
+        vec4 scatter = SleakAtmosphereScatterWorld(p);
+        vec3 tint = scatter.rgb / max(1.0 - scatter.a, SLEAK_ATMO_EPSILON);
+        return SleakOutputTransform(tint, SleakFrameOutput());
+    }
     vec3 viewDir = normalize(p - CameraPos);
     float t = smoothstep(0.0, 1.0, clamp(SignedToUnit(viewDir.y), 0.0, 1.0));
     return mix(FogColor.rgb, FogColorZenith.rgb, t);
