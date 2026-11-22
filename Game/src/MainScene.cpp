@@ -21,6 +21,7 @@
 #include <UI/UI.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 #include "Game.hpp"
@@ -139,6 +140,7 @@ bool MainScene::Initialize() {
     } else {
         LoadGame();
     }
+    ApplyClockOverrides();
 
     if (auto* lm = GetLightManager()) {
         float fogDist = m_chunkManager.GetDrawDistance();
@@ -355,6 +357,22 @@ void MainScene::Update(float deltaTime) {
 
         if (m_showHud) m_hotbar.Render();
     }
+}
+
+void MainScene::ApplyClockOverrides() {
+#ifndef DEBUG
+    if (!Sleak::CommandLine::HasFlag("--bench")) return;
+#endif
+    const std::string time = Sleak::CommandLine::GetValue("-time");
+    char* end = nullptr;
+    const double hours = std::strtod(time.c_str(), &end);
+    if (end != time.c_str() && *end == '\0' && hours >= 0.0 &&
+        hours <= HOURS_PER_DAY)
+        m_worldClock.SetDayFraction(WorldClock::HoursToDayFraction(hours));
+    else if (!time.empty())
+        SLEAK_WARN("-time {}: expected an hour from 0 to 24", time);
+    m_worldClock.SetFrozenForSession(
+        Sleak::CommandLine::HasFlag("--freeze-time"));
 }
 
 void MainScene::UpdateSky(float deltaTime) {

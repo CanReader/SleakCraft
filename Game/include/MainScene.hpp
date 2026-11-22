@@ -106,6 +106,8 @@ private:
     void UpdateSky(float deltaTime);
     /// Smooths whether the eye is under open sky into the fog's outdoor factor.
     void UpdateOutdoorFactor(float deltaTime);
+    /// Applies -time and --freeze-time after the world is loaded.
+    void ApplyClockOverrides();
     void RenderUI();
 
     void OnMousePressed(const Sleak::Events::Input::MouseButtonPressedEvent& e);
