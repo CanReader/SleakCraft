@@ -77,6 +77,8 @@ public:
     VoxelLighting& GetVoxelLighting() { return m_voxelLighting; }
     /// Day and night clock of this world (saved in world.dat).
     WorldClock& GetWorldClock() { return m_worldClock; }
+    /// Sky and fog options the settings panel edits.
+    SkyOptions& GetSkyOptions() { return m_skyOptions; }
 
     // Accessors for HudPanel/SettingsPanel (toggles that engine setup code
     // in MainScene also reads at Initialize time)
