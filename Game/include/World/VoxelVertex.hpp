@@ -47,13 +47,29 @@ static_assert(offsetof(VoxelVertex, nx) == 12);
 static_assert(offsetof(VoxelVertex, r) == 24);
 static_assert(offsetof(VoxelVertex, u) == 40);
 
-/// Growable CPU-side buffer of VoxelVertex, handed to MeshBatch::CreateMesh as raw bytes.
+/// Vertices per voxel quad.
+inline constexpr uint32_t VOXEL_QUAD_CORNERS = 4;
+/// Indices per voxel quad.
+inline constexpr uint32_t VOXEL_QUAD_INDICES = 6;
+/// Indices of quad q are 4q plus these: two triangles sharing stored corners
+/// 1 and 3 (QuadIndexBuffer).
+inline constexpr uint32_t VOXEL_QUAD_PATTERN[VOXEL_QUAD_INDICES] = {0, 3, 1,
+                                                                    1, 3, 2};
+/// First stored corner of a quad split along its 0-2 diagonal.
+inline constexpr uint32_t VOXEL_QUAD_START_02 = 3;
+
+/// Growable CPU-side buffer of voxel quads, uploaded by
+/// QuadIndexBuffer::CreateMesh.
 class VoxelVertexBuffer {
 public:
     VoxelVertexBuffer() = default;
 
-    void AddVertex(const VoxelVertex& vertex) {
-        m_vertices.push_back(vertex);
+    /// Appends a quad's corners from corner start on; the shared index
+    /// pattern splits it between corners start + 1 and start + 3.
+    void AddQuad(const VoxelVertex (&quad)[VOXEL_QUAD_CORNERS],
+                 uint32_t start) {
+        for (uint32_t i = 0; i < VOXEL_QUAD_CORNERS; ++i)
+            m_vertices.push_back(quad[(start + i) % VOXEL_QUAD_CORNERS]);
     }
 
     /// Reserves room for at least count vertices.

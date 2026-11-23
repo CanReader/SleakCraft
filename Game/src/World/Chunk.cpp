@@ -106,7 +106,6 @@ bool Chunk::IsBlockOpaqueAt(int x, int y, int z) const {
 
 void Chunk::GenerateMeshData() {
     VoxelVertexBuffer vertices;
-    IndexGroup indices;
 
     bool opaque[18][18][18];
     bool solid[18][18][18];
@@ -226,7 +225,6 @@ void Chunk::GenerateMeshData() {
 
     auto fastAddFace = [&](BlockFace face, int x, int y, int z, BlockType type) {
         AtlasUV uv = TextureAtlas::GetTileUV(GetBlockTextureTile(type, face));
-        uint32_t base = static_cast<uint32_t>(vertices.GetSize());
         float bx = static_cast<float>(x + m_cx * SIZE);
         float by = static_cast<float>(y + m_cy * SIZE);
         float bz = static_cast<float>(z + m_cz * SIZE);
@@ -274,23 +272,14 @@ void Chunk::GenerateMeshData() {
                 break;
         }
 
-        for (int i = 0; i < 4; ++i) {
-            v[i].SetColor(ao[i], ao[i], ao[i], 1.0f);
-            vertices.AddVertex(v[i]);
-        }
-
-        if (ao[0] + ao[2] > ao[1] + ao[3]) {
-            indices.add(base + 3); indices.add(base + 2); indices.add(base);
-            indices.add(base); indices.add(base + 2); indices.add(base + 1);
-        } else {
-            indices.add(base); indices.add(base + 3); indices.add(base + 1);
-            indices.add(base + 1); indices.add(base + 3); indices.add(base + 2);
-        }
+        for (int i = 0; i < 4; ++i) v[i].SetColor(ao[i], ao[i], ao[i], 1.0f);
+        // Split along the brighter diagonal
+        const bool split02 = ao[0] + ao[2] > ao[1] + ao[3];
+        vertices.AddQuad(v, split02 ? VOXEL_QUAD_START_02 : 0);
     };
 
     // Water mesh gets separate buffers
     VoxelVertexBuffer waterVertices;
-    IndexGroup waterIndices;
 
     // Helper to check if neighbor is water
     auto isWater = [&](int x, int y, int z) -> bool {
@@ -313,7 +302,6 @@ void Chunk::GenerateMeshData() {
     // Water face emitter — lowered top, no AO, blue tint vertex color
     auto addWaterFace = [&](BlockFace face, int x, int y, int z) {
         AtlasUV uv = TextureAtlas::GetTileUV(GetBlockTextureTile(BlockType::Water, face));
-        uint32_t base = static_cast<uint32_t>(waterVertices.GetSize());
         float bx = static_cast<float>(x + m_cx * SIZE);
         float by = static_cast<float>(y + m_cy * SIZE);
         float bz = static_cast<float>(z + m_cz * SIZE);
@@ -362,13 +350,8 @@ void Chunk::GenerateMeshData() {
         }
 
         // Color g is the water shader's sky light (open sky until phase 8)
-        for (int i = 0; i < 4; ++i) {
-            v[i].SetColor(1.0f, 1.0f, 1.0f, 1.0f);
-            waterVertices.AddVertex(v[i]);
-        }
-
-        waterIndices.add(base + 3); waterIndices.add(base + 2); waterIndices.add(base);
-        waterIndices.add(base); waterIndices.add(base + 2); waterIndices.add(base + 1);
+        for (int i = 0; i < 4; ++i) v[i].SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+        waterVertices.AddQuad(v, VOXEL_QUAD_START_02);
     };
 
     for (int y = 0; y < SIZE; ++y) {
@@ -405,11 +388,9 @@ void Chunk::GenerateMeshData() {
     }
 
     m_pendingMesh.vertices = std::move(vertices);
-    m_pendingMesh.indices = std::move(indices);
     m_hasPendingMesh = true;
 
     m_pendingWaterMesh.vertices = std::move(waterVertices);
-    m_pendingWaterMesh.indices = std::move(waterIndices);
     m_hasPendingWaterMesh = true;
 
     // Publish occluder runs alongside the mesh data

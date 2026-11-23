@@ -1,5 +1,6 @@
 #include "World/ChunkMesher.hpp"
 #include "World/ChunkManager.hpp"
+#include "World/QuadIndexBuffer.hpp"
 #include <Runtime/Material.hpp>
 #include <Runtime/MeshBatch.hpp>
 #include <mutex>
@@ -12,13 +13,9 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
     int bandMaxY = bandMinY + BAND_SIZE - 1;
 
     VoxelVertexBuffer& mergedVerts = m_mergedVerts;
-    std::vector<uint32_t>& mergedIndices = m_mergedIndices;
     VoxelVertexBuffer& mergedWaterVerts = m_mergedWaterVerts;
-    std::vector<uint32_t>& mergedWaterIndices = m_mergedWaterIndices;
     mergedVerts.clear();
-    mergedIndices.clear();
     mergedWaterVerts.clear();
-    mergedWaterIndices.clear();
 
     // Dispatch ALL consumed-mesh siblings in one batch so workers re-mesh
     // the band in parallel; dispatching one per attempt serialized a column
@@ -53,8 +50,8 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
     // Collect ready chunks first so the merged buffers are sized once
     Chunk* ready[BAND_SIZE];
     int readyCount = 0;
-    size_t vertexTotal = 0, indexTotal = 0;
-    size_t waterVertexTotal = 0, waterIndexTotal = 0;
+    size_t vertexTotal = 0;
+    size_t waterVertexTotal = 0;
     for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
         Chunk* chunk = m_mgr.GetChunk(cx, cy, cz);
         // Skip chunks not ready (in-flight or not yet generated)
@@ -72,42 +69,31 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
 
         ready[readyCount++] = chunk;
         vertexTotal += chunk->GetPendingMeshData().vertices.GetSize();
-        indexTotal += chunk->GetPendingMeshData().indices.GetSize();
         waterVertexTotal += chunk->GetPendingWaterMeshData().vertices.GetSize();
-        waterIndexTotal += chunk->GetPendingWaterMeshData().indices.GetSize();
     }
 
     mergedVerts.Reserve(vertexTotal);
-    mergedIndices.reserve(indexTotal);
     mergedWaterVerts.Reserve(waterVertexTotal);
-    mergedWaterIndices.reserve(waterIndexTotal);
 
-    auto append = [&](ChunkMeshData& md, VoxelVertexBuffer& verts,
-                      std::vector<uint32_t>& indices) {
+    auto append = [&](ChunkMeshData& md, VoxelVertexBuffer& verts) {
         const size_t vertexCount = md.vertices.GetSize();
         if (vertexCount > 0) {
-            const uint32_t baseVertex = static_cast<uint32_t>(verts.GetSize());
             const ::VoxelVertex* vdata = md.vertices.GetData();
             for (size_t i = 0; i < vertexCount; ++i) {
                 if (vdata[i].py < meshMinY) meshMinY = vdata[i].py;
                 if (vdata[i].py > meshMaxY) meshMaxY = vdata[i].py;
             }
             verts.Append(vdata, vertexCount);
-            const uint32_t* idata = md.indices.GetData();
-            for (size_t i = 0; i < md.indices.GetSize(); ++i)
-                indices.push_back(idata[i] + baseVertex);
         }
         md.vertices.release();
-        md.indices.release();
     };
 
     for (int i = 0; i < readyCount; ++i) {
         Chunk* chunk = ready[i];
         chunk->ClearPendingMesh();
-        append(chunk->GetPendingMeshData(), mergedVerts, mergedIndices);
+        append(chunk->GetPendingMeshData(), mergedVerts);
         chunk->ClearPendingWaterMesh();
-        append(chunk->GetPendingWaterMeshData(), mergedWaterVerts,
-               mergedWaterIndices);
+        append(chunk->GetPendingWaterMeshData(), mergedWaterVerts);
     }
 
     if (mergedVerts.GetSize() == 0 && mergedWaterVerts.GetSize() == 0) {
@@ -124,15 +110,9 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
 
     ColumnMesh col;
     if (mergedVerts.GetSize() > 0)
-        col.mesh = Sleak::MeshBatch::CreateMesh(
-            GetVoxelVertexFormat(), mergedVerts.GetData(),
-            mergedVerts.GetSizeInBytes(), mergedIndices.data(),
-            mergedIndices.size());
+        col.mesh = QuadIndexBuffer::CreateMesh(mergedVerts);
     if (mergedWaterVerts.GetSize() > 0)
-        col.waterMesh = Sleak::MeshBatch::CreateMesh(
-            GetVoxelVertexFormat(), mergedWaterVerts.GetData(),
-            mergedWaterVerts.GetSizeInBytes(), mergedWaterIndices.data(),
-            mergedWaterIndices.size());
+        col.waterMesh = QuadIndexBuffer::CreateMesh(mergedWaterVerts);
 
     if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) {
         m_mgr.SetOOMThisFrame(true);

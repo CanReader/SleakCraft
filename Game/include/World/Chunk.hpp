@@ -6,7 +6,6 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
-#include <Runtime/MeshData.hpp>
 #include <Memory/RefPtr.hpp>
 
 namespace Sleak {
@@ -15,10 +14,9 @@ namespace Sleak {
     class SceneBase;
 }
 
-/// Vertex/index buffers produced by GenerateMeshData, staged for GPU upload.
+/// Quads produced by GenerateMeshData, staged for GPU upload.
 struct ChunkMeshData {
     VoxelVertexBuffer vertices;
-    Sleak::IndexGroup indices;
 };
 
 /// One 16x16x16 block of the voxel grid. Owns its block data and produces

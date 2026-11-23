@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "World/QuadIndexBuffer.hpp"
 #include "World/TextureAtlas.hpp"
 #include "World/VoxelVertex.hpp"
 
@@ -18,7 +19,6 @@ using namespace Sleak::Math;
 namespace {
 
 constexpr int QUAD_CORNERS = 4;
-constexpr int QUAD_INDICES = 6;
 
 /// One cube face: corners in the chunk mesher's order, normal, atlas face.
 struct FaceInfo {
@@ -37,8 +37,6 @@ constexpr FaceInfo CUBE_FACES[CUBE_FACE_COUNT] = {
     {{{1, 0, 0}, {1, 1, 0}, {1, 1, 1}, {1, 0, 1}}, 1, 0, 0, BlockFace::East},
     {{{0, 0, 1}, {0, 1, 1}, {0, 1, 0}, {0, 0, 0}}, -1, 0, 0, BlockFace::West},
 };
-// Front faces of a quad
-constexpr uint32_t QUAD_FRONT[QUAD_INDICES] = {3, 2, 0, 0, 2, 1};
 constexpr float HALF = 0.5f;
 // Unit quad facing -z, the side LookAt turns to the camera (south-face order)
 constexpr float PARTICLE_CORNERS[QUAD_CORNERS][2] = {
@@ -63,19 +61,6 @@ void QuadUVs(const AtlasUV& uv, float out[QUAD_CORNERS][2]) {
     out[3][1] = uv.v1;
 }
 
-/// Appends a quad's six indices, offset to its first vertex.
-void AppendIndices(std::vector<uint32_t>& indices, uint32_t base) {
-    for (uint32_t i : QUAD_FRONT) indices.push_back(base + i);
-}
-
-/// GPU mesh of voxel vertices and indices.
-MeshHandle UploadVoxelMesh(const VoxelVertexBuffer& vertices,
-                           const std::vector<uint32_t>& indices) {
-    return MeshBatch::CreateMesh(GetVoxelVertexFormat(), vertices.GetData(),
-                                 vertices.GetSizeInBytes(), indices.data(),
-                                 indices.size());
-}
-
 }  // namespace
 
 void BlockEffects::Initialize(SceneBase* scene,
@@ -89,20 +74,19 @@ const MeshHandle& BlockEffects::CubeMesh(BlockType type) {
     if (it != m_cubeMeshes.end()) return it->second;
 
     VoxelVertexBuffer vertices;
-    std::vector<uint32_t> indices;
     for (const FaceInfo& f : CUBE_FACES) {
         float uvs[QUAD_CORNERS][2];
         QuadUVs(TextureAtlas::GetTileUV(GetBlockTextureTile(type, f.face)),
                 uvs);
-        const uint32_t base = static_cast<uint32_t>(vertices.GetSize());
+        VoxelVertex quad[QUAD_CORNERS];
         for (int i = 0; i < QUAD_CORNERS; i++) {
-            vertices.AddVertex(VoxelVertex(f.positions[i][0], f.positions[i][1],
-                                           f.positions[i][2], f.nx, f.ny, f.nz,
-                                           uvs[i][0], uvs[i][1]));
+            quad[i] = VoxelVertex(f.positions[i][0], f.positions[i][1],
+                                  f.positions[i][2], f.nx, f.ny, f.nz,
+                                  uvs[i][0], uvs[i][1]);
         }
-        AppendIndices(indices, base);
+        vertices.AddQuad(quad, VOXEL_QUAD_START_02);
     }
-    return m_cubeMeshes.emplace(type, UploadVoxelMesh(vertices, indices))
+    return m_cubeMeshes.emplace(type, QuadIndexBuffer::CreateMesh(vertices))
         .first->second;
 }
 
@@ -112,15 +96,15 @@ const MeshHandle& BlockEffects::QuadMesh(uint8_t tile) {
 
     float uvs[QUAD_CORNERS][2];
     QuadUVs(TextureAtlas::GetTileUV(tile), uvs);
-    VoxelVertexBuffer vertices;
-    std::vector<uint32_t> indices;
+    VoxelVertex quad[QUAD_CORNERS];
     for (int i = 0; i < QUAD_CORNERS; i++) {
-        vertices.AddVertex(
+        quad[i] =
             VoxelVertex(PARTICLE_CORNERS[i][0], PARTICLE_CORNERS[i][1], 0.0f,
-                        0.0f, 0.0f, PARTICLE_NORMAL_Z, uvs[i][0], uvs[i][1]));
+                        0.0f, 0.0f, PARTICLE_NORMAL_Z, uvs[i][0], uvs[i][1]);
     }
-    AppendIndices(indices, 0);
-    return m_quadMeshes.emplace(tile, UploadVoxelMesh(vertices, indices))
+    VoxelVertexBuffer vertices;
+    vertices.AddQuad(quad, VOXEL_QUAD_START_02);
+    return m_quadMeshes.emplace(tile, QuadIndexBuffer::CreateMesh(vertices))
         .first->second;
 }
 

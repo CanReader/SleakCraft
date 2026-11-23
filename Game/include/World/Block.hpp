@@ -33,6 +33,9 @@ enum class BlockFace : uint8_t {
     West
 };
 
+/// Faces of a block, one per BlockFace.
+inline constexpr int BLOCK_FACE_COUNT = 6;
+
 /// Tile indices into the atlas (must match TextureAtlas build order)
 enum BlockTile : uint8_t {
     TILE_GRASS_TOP = 0,
