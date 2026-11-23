@@ -73,14 +73,16 @@ LightingPalette VoxelLighting::NoonPalette() {
     return p;
 }
 
+float VoxelLighting::MinLightLinear(float minLight) {
+    const float grey = MIN_LIGHT_GREY * (minLight / CHANNEL_MAX);
+    return grey * grey * MIN_LIGHT_SCALE;
+}
+
 void VoxelLighting::Upload(const Sleak::GraphicsConfig& config) const {
     CraftFrameData d{};
     WriteScaled(m_palette.sun, m_sunMultiplier, d.SunColor);
     WriteScaled(m_palette.ambient, m_ambientMultiplier, d.AmbientColor);
-    const SqrtColor grey = ToSqrtColor(
-        {MIN_LIGHT_GREY, MIN_LIGHT_GREY, MIN_LIGHT_GREY, config.minLight});
-    WriteLinear(grey, d.MinLightColor);
-    for (int i = 0; i < RGB; ++i) d.MinLightColor[i] *= MIN_LIGHT_SCALE;
+    std::fill_n(d.MinLightColor, RGB, MinLightLinear(config.minLight));
     WriteLinear(m_palette.blockLight, d.BlockLightColor);
     WriteHue(m_palette.moon, d.NightTint);
     WriteHue(m_palette.weather, d.WeatherTint);

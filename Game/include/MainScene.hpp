@@ -17,7 +17,9 @@
 #include "World/BlockEffects.hpp"
 #include "World/ChunkManager.hpp"
 #include "World/SaveManager.hpp"
+#include "World/TimeOfDay.hpp"
 #include "World/VoxelLighting.hpp"
+#include "World/WorldClock.hpp"
 #include "World/WorldPersistence.hpp"
 
 namespace Sleak { class Material; class DirectionalLight; }
@@ -73,6 +75,10 @@ public:
     float GetGameTime() const { return m_gameTime; }
     /// Voxel palette the settings panel scales.
     VoxelLighting& GetVoxelLighting() { return m_voxelLighting; }
+    /// Day and night clock of this world (saved in world.dat).
+    WorldClock& GetWorldClock() { return m_worldClock; }
+    /// Sky and fog options the settings panel edits.
+    SkyOptions& GetSkyOptions() { return m_skyOptions; }
 
     // Accessors for HudPanel/SettingsPanel (toggles that engine setup code
     // in MainScene also reads at Initialize time)
@@ -98,6 +104,12 @@ private:
     /// Creates the sun light and applies the voxel-tuned GraphicsConfig
     /// (BSL output, shadows, SSAO, blend bloom) plus fog and culling settings.
     void SetupLighting();
+    /// Advances the clock and drives palette, engine light and atmosphere.
+    void UpdateSky(float deltaTime);
+    /// Smooths whether the eye is under open sky into the fog's outdoor factor.
+    void UpdateOutdoorFactor(float deltaTime);
+    /// Applies -time and --freeze-time after the world is loaded.
+    void ApplyClockOverrides();
     void RenderUI();
 
     void OnMousePressed(const Sleak::Events::Input::MouseButtonPressedEvent& e);
@@ -106,7 +118,8 @@ private:
     /// scene-level keys (ESC to menu, F3 UI toggle, F5 save, F6 reload).
     void OnKeyPressed(const Sleak::Events::Input::KeyPressedEvent& e);
     void OnKeyReleased(const Sleak::Events::Input::KeyReleasedEvent& e);
-    /// Persists dirty chunks before the renderer tears down.
+    /// Saves the world (chunks, player, clock) before the renderer tears
+    /// down, except in --bench and -capture runs.
     void OnWindowClose(const Sleak::Events::WindowCloseEvent& e);
 
     void LoadGame();
@@ -121,6 +134,10 @@ private:
     ChunkManager m_chunkManager;
     BlockEffects m_blockEffects;
     VoxelLighting m_voxelLighting;
+    WorldClock m_worldClock;
+    SkyOptions m_skyOptions;
+    float m_outdoor = 1.0f;  // 1 open sky at the eye, 0 enclosed
+    bool m_outdoorPrimed = false;
     SaveManager m_saveManager;
     WorldPersistence m_worldPersistence;
     PlayerController m_playerController;
@@ -157,8 +174,8 @@ private:
     std::string m_keyPressedHandlerId;
     std::string m_keyReleasedHandlerId;
 
-    // Sun light created here (needs Scene::AddObject/shadow config); live
-    // elevation/azimuth edits live on SettingsPanel.
+    // Sun or moon light created here (needs Scene::AddObject/shadow config);
+    // UpdateSky aims and colors it from the world clock.
     Sleak::DirectionalLight* m_sun = nullptr;
 };
 

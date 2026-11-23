@@ -17,6 +17,8 @@ Flags are parsed by `Sleak::CommandLine::Parse` in `Client/src/main.cpp` and rea
 | `--vsync` | | Enable VSync on launch. |
 | `--no-vsync` | | Disable VSync on launch. |
 | `--bench` | | Start benchmark recording immediately. This only starts the recorder; it does not load a world. Combine with `-world <name> -seed <n>` for an unattended gameplay run. |
+| `-time` | `<hours>` | Debug builds, or with `--bench`. Start the world at an hour of the day, 0 to 24 (12 is noon). |
+| `--freeze-time` | | Debug builds, or with `--bench`. Stop the day clock for this session; the pause is not saved. |
 | `--validate` | | Enable the Vulkan validation layer. |
 | `--help` | | Print this table and exit. |
 

@@ -6,14 +6,11 @@
 #include <Core/Application.hpp>
 #include <Culling/CullingSystem.hpp>
 #include <ECS/Components/FirstPersonController.hpp>
-#include <Lighting/DirectionalLight.hpp>
 #include <Lighting/LightManager.hpp>
 #include <Runtime/Material.hpp>
 #include <UI/UI.hpp>
-#include <cmath>
 
 using namespace Sleak;
-using namespace Sleak::Math;
 
 namespace {
 
@@ -22,6 +19,11 @@ constexpr float MULTIPLIER_CHANNEL_STEP = 0.005f;
 constexpr float MULTIPLIER_CHANNEL_MAX = 2.0f;
 constexpr float MULTIPLIER_SCALE_STEP = 0.01f;
 constexpr float MULTIPLIER_SCALE_MAX = 4.0f;
+// Time and sky sliders
+constexpr float TIME_STEP_HOURS = 0.05f;
+constexpr float DAY_LENGTH_STEP_SECONDS = 15.0f;
+constexpr float FOG_DENSITY_STEP = 0.01f;
+constexpr float FOG_DENSITY_MAX = 4.0f;
 
 /// Intensity and RGB sliders of one multiplier; true when any changed.
 bool DragMultiplier(const char* intensity, const char* r, const char* g,
@@ -46,14 +48,6 @@ bool DragMultiplier(const char* intensity, const char* r, const char* g,
   isTAAEnabled = m_app->IsTAAEnabled();
 }
 
-Vector3D SettingsPanel::ComputeSunDirection() const {
-    const float deg2rad = 0.01745329f;
-    float eRad = m_sunElevation * deg2rad;
-    float aRad = m_sunAzimuth * deg2rad;
-    return Vector3D(-cosf(eRad) * sinf(aRad), -sinf(eRad),
-                    -cosf(eRad) * cosf(aRad));
-}
-
 void SettingsPanel::Render() {
     auto* cam = m_scene.GetActiveCamera();
     if (!cam || !m_app) return;
@@ -70,6 +64,7 @@ void SettingsPanel::Render() {
     RenderCullingSection();
     RenderMSAASection();
     RenderRenderDistanceSection();
+    RenderSkySection();
     RenderLightingSection();
     RenderSSAOSection();
     RenderIBLSection();
@@ -175,16 +170,34 @@ void SettingsPanel::RenderRenderDistanceSection() {
     }
 }
 
+void SettingsPanel::RenderSkySection() {
+    UI::Separator();
+    UI::Text("-- Sky --");
+
+    WorldClock& clock = m_scene.GetWorldClock();
+    float hours = static_cast<float>(
+        WorldClock::DayFractionToHours(clock.GetDayFraction()));
+    if (UI::DragFloat("Time of day (h)", &hours, TIME_STEP_HOURS, 0.0f,
+                      HOURS_PER_DAY))
+        clock.SetDayFraction(WorldClock::HoursToDayFraction(hours));
+    bool paused = clock.IsPaused();
+    if (UI::Checkbox("Pause time", &paused)) clock.SetPaused(paused);
+    float dayLength = clock.GetDayLength();
+    if (UI::DragFloat("Day length (s)", &dayLength, DAY_LENGTH_STEP_SECONDS,
+                      MIN_DAY_LENGTH_SECONDS, MAX_DAY_LENGTH_SECONDS))
+        clock.SetDayLength(dayLength);
+
+    SkyOptions& sky = m_scene.GetSkyOptions();
+    UI::Checkbox("Fog", &sky.fogEnabled);
+    UI::DragFloat("Fog density", &sky.fogDensity, FOG_DENSITY_STEP, 0.0f,
+                  FOG_DENSITY_MAX);
+    UI::Checkbox("Height fog", &sky.heightFogEnabled);
+    UI::Checkbox("Stars", &sky.starsEnabled);
+}
+
 void SettingsPanel::RenderLightingSection() {
     UI::Separator();
     UI::Text("-- Sun --");
-
-    bool sunDirChanged = false;
-    sunDirChanged |=
-        UI::DragFloat("Elevation", &m_sunElevation, 0.5f, -10.0f, 90.0f);
-    sunDirChanged |=
-        UI::DragFloat("Azimuth", &m_sunAzimuth, 1.0f, 0.0f, 360.0f);
-    if (sunDirChanged && m_sun) m_sun->SetDirection(ComputeSunDirection());
 
     bool paletteChanged = DragMultiplier("Sun Intensity", "Sun R", "Sun G",
                                          "Sun B", m_sunMultiplier);
@@ -197,49 +210,6 @@ void SettingsPanel::RenderLightingSection() {
     if (paletteChanged)
         m_scene.GetVoxelLighting().SetMultipliers(m_sunMultiplier,
                                                   m_ambientMultiplier);
-
-    auto* lm = m_scene.GetLightManager();
-
-    UI::Separator();
-    UI::Text("-- Fog --");
-
-    if (UI::Checkbox("Fog Enabled", &m_fogEnabled) && lm)
-        lm->SetFogEnabled(m_fogEnabled);
-
-    bool horizonChanged = false;
-    horizonChanged |=
-        UI::DragFloat("Horizon R", &m_fogHorizonR, 0.005f, 0.0f, 1.0f);
-    horizonChanged |=
-        UI::DragFloat("Horizon G", &m_fogHorizonG, 0.005f, 0.0f, 1.0f);
-    horizonChanged |=
-        UI::DragFloat("Horizon B", &m_fogHorizonB, 0.005f, 0.0f, 1.0f);
-    if (horizonChanged && lm)
-        lm->SetFogColor(m_fogHorizonR, m_fogHorizonG, m_fogHorizonB);
-
-    bool zenithChanged = false;
-    zenithChanged |=
-        UI::DragFloat("Zenith R", &m_fogZenithR, 0.005f, 0.0f, 1.0f);
-    zenithChanged |=
-        UI::DragFloat("Zenith G", &m_fogZenithG, 0.005f, 0.0f, 1.0f);
-    zenithChanged |=
-        UI::DragFloat("Zenith B", &m_fogZenithB, 0.005f, 0.0f, 1.0f);
-    if (zenithChanged && lm)
-        lm->SetFogZenithColor(m_fogZenithR, m_fogZenithG, m_fogZenithB);
-
-    if (UI::Checkbox("Height Fog", &m_heightFogEnabled) && lm)
-        lm->SetHeightFogEnabled(m_heightFogEnabled);
-
-    if (UI::DragFloat("Height Top", &m_heightFogTop, 0.5f, -64.0f, 256.0f) &&
-        lm)
-        lm->SetHeightFogTop(m_heightFogTop);
-    if (UI::DragFloat("Height Density", &m_heightFogDensity, 0.005f, 0.0f,
-                      1.0f) &&
-        lm)
-        lm->SetHeightFogDensity(m_heightFogDensity);
-    if (UI::DragFloat("Height Falloff", &m_heightFogFalloff, 0.001f, 0.0f,
-                      1.0f) &&
-        lm)
-        lm->SetHeightFogFalloff(m_heightFogFalloff);
 }
 
 void SettingsPanel::RenderSSAOSection() {

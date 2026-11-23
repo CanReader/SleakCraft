@@ -11,6 +11,7 @@ layout(location = 0) out vec4 outColor;
 #include "sleak/shadow_light.glsl"
 #include "sleak/frame.glsl"
 #include "sleak/frame_output.glsl"
+#include "sleak/atmosphere.glsl"
 
 layout(set = 3, binding = 0) uniform sampler2DShadow shadowMap;
 
@@ -50,8 +51,10 @@ float DepthToNdc(float depth) { return depth; }
 vec3 SceneToLinear(vec3 c) {
     return SleakSceneToLegacy(c, SleakFrameOutput());
 }
+// The atmosphere's sky probe is scene-linear, like the snapshot
 vec3 SkyRadiance(vec3 dir, float lod) {
-    return textureLod(skyCube, dir, lod).rgb;
+    vec3 sky = textureLod(skyCube, dir, lod).rgb;
+    return SleakAtmosphereEnabled() ? SceneToLinear(sky) : sky;
 }
 
 // ============================================================

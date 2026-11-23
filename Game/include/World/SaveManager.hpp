@@ -48,9 +48,11 @@ private:
     /// self-heal the world.dat region index.
     std::vector<std::pair<int, int>> ScanRegionDir() const;
     /// Merges the region index with existing/on-disk regions and atomically
-    /// writes world.dat.
+    /// writes world.dat in the current version.
     bool WriteWorldDat(const WorldMeta& meta,
                        const std::vector<ChunkSaveData>& dirtyChunks) const;
+    /// Reads world.dat from MIN_VERSION on; fields a version lacks get
+    /// their legacy defaults.
     bool ReadWorldDat(WorldMeta& meta) const;
 
     /// Packs a chunk/region coordinate into one key; must stay identical to

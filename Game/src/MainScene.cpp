@@ -19,7 +19,9 @@
 #include <Runtime/Skybox.hpp>
 #include <Runtime/Texture.hpp>
 #include <UI/UI.hpp>
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 #include "Game.hpp"
@@ -35,6 +37,15 @@ constexpr float LEGACY_SUN_COLOR[3] = {1.00f, 0.96f, 0.88f};
 constexpr float LEGACY_SUN_INTENSITY = 0.69f;
 constexpr float LEGACY_AMBIENT_COLOR[3] = {0.45f, 0.62f, 1.00f};
 constexpr float LEGACY_AMBIENT_INTENSITY = 0.725f;
+// LightManager fog of the deferred-off forward path
+constexpr float LEGACY_FOG_HORIZON[3] = {0.62f, 0.78f, 1.00f};
+constexpr float LEGACY_HEIGHT_FOG_TOP = 64.0f;
+constexpr float LEGACY_HEIGHT_FOG_DENSITY = 0.25f;
+constexpr float LEGACY_HEIGHT_FOG_FALLOFF = 0.05f;
+// Fog's outdoor factor follows the eye with this half-life
+constexpr float OUTDOOR_HALF_LIFE_SECONDS = 2.0f;
+// Cover this far above the eye still counts as open sky (trees, overhangs)
+constexpr int OUTDOOR_COVER_MARGIN_BLOCKS = 8;
 // Output look (BSL v10 defaults)
 constexpr float LOOK_EXPOSURE = 4.0f;
 constexpr float LOOK_GAMMA = 2.2f;
@@ -129,6 +140,7 @@ bool MainScene::Initialize() {
     } else {
         LoadGame();
     }
+    ApplyClockOverrides();
 
     if (auto* lm = GetLightManager()) {
         float fogDist = m_chunkManager.GetDrawDistance();
@@ -296,6 +308,7 @@ void MainScene::OnKeyReleased(const Events::Input::KeyReleasedEvent& e) {
 void MainScene::Update(float deltaTime) {
     if (deltaTime > 0.05f) deltaTime = 0.05f;
     m_gameTime += deltaTime;
+    UpdateSky(deltaTime);
 
     // Where this frame's movement starts, swept for collision below
     auto* cam = GetActiveCamera();
@@ -346,14 +359,81 @@ void MainScene::Update(float deltaTime) {
     }
 }
 
+void MainScene::ApplyClockOverrides() {
+#ifndef DEBUG
+    if (!Sleak::CommandLine::HasFlag("--bench")) return;
+#endif
+    const std::string time = Sleak::CommandLine::GetValue("-time");
+    char* end = nullptr;
+    const double hours = std::strtod(time.c_str(), &end);
+    if (end != time.c_str() && *end == '\0' && hours >= 0.0 &&
+        hours <= HOURS_PER_DAY)
+        m_worldClock.SetDayFraction(WorldClock::HoursToDayFraction(hours));
+    else if (!time.empty())
+        SLEAK_WARN("-time {}: expected an hour from 0 to 24", time);
+    m_worldClock.SetFrozenForSession(
+        Sleak::CommandLine::HasFlag("--freeze-time"));
+}
+
+void MainScene::UpdateSky(float deltaTime) {
+    auto* app = Sleak::Application::GetInstance();
+    if (!app) return;
+    m_worldClock.Advance(deltaTime);
+    UpdateOutdoorFactor(deltaTime);
+
+    const SkyState sky = m_worldClock.ComputeSky();
+    const TimeOfDayFrame frame =
+        EvaluateTimeOfDay(sky, m_skyOptions, app->GetGraphicsConfig().minLight,
+                          m_chunkManager.GetDrawDistance(), m_outdoor);
+    m_voxelLighting.SetPalette(frame.palette);
+    app->SetAtmosphere(frame.atmosphere);
+
+    // Engine light: legacy noon values scaled like the palette
+    m_sun->SetDirection(Vector3D() - sky.lightDirection);
+    m_sun->SetColor(LEGACY_SUN_COLOR[0] * frame.sunRatio.GetX(),
+                    LEGACY_SUN_COLOR[1] * frame.sunRatio.GetY(),
+                    LEGACY_SUN_COLOR[2] * frame.sunRatio.GetZ());
+    if (auto* lm = GetLightManager()) {
+        lm->SetAmbientColor(
+            LEGACY_AMBIENT_COLOR[0] * frame.ambientRatio.GetX(),
+            LEGACY_AMBIENT_COLOR[1] * frame.ambientRatio.GetY(),
+            LEGACY_AMBIENT_COLOR[2] * frame.ambientRatio.GetZ());
+        // One fog: LightManager fog only where the atmosphere does not draw
+        lm->SetFogEnabled(m_skyOptions.fogEnabled &&
+                          !app->IsAtmosphereActive());
+    }
+}
+
+void MainScene::UpdateOutdoorFactor(float deltaTime) {
+    auto* cam = GetActiveCamera();
+    if (!cam) return;
+    const Vector3D eye = cam->GetPosition();
+    const float bottom = WorldGenerator::MIN_CHUNK_Y * Chunk::SIZE;
+    const float top = (WorldGenerator::MAX_CHUNK_Y + 1) * Chunk::SIZE;
+    const int x = static_cast<int>(std::floor(eye.GetX()));
+    const int z = static_cast<int>(std::floor(eye.GetZ()));
+    // shortcut: opaque cover stands in for sky light, use phase 8's query
+    int y = static_cast<int>(std::floor(std::clamp(eye.GetY(), bottom, top))) +
+            OUTDOOR_COVER_MARGIN_BLOCKS + 1;
+    while (y < top && !IsBlockOpaque(m_chunkManager.GetBlockAt(x, y, z))) ++y;
+    const float target = y < top ? 0.0f : 1.0f;
+
+    if (!m_outdoorPrimed) m_outdoor = target;
+    m_outdoorPrimed = true;
+    m_outdoor += (target - m_outdoor) *
+                 (1.0f - std::exp2(-deltaTime / OUTDOOR_HALF_LIFE_SECONDS));
+}
+
 void MainScene::RenderUI() {
     m_hudPanel.Render();
     m_settingsPanel.Render();
 }
 
 void MainScene::OnWindowClose(const Sleak::Events::WindowCloseEvent&) {
-    // Renderer is still alive here — last safe point to persist the world
-    if (!m_chunkManager.GetDirtyChunks().empty()) SaveGame();
+    // Renderer still alive: save, except in bench and capture runs
+    if (!Sleak::CommandLine::HasFlag("--bench") &&
+        Sleak::CommandLine::GetValue("-capture").empty())
+        SaveGame();
 }
 
 void MainScene::SaveGame() { m_worldPersistence.SaveGame(); }
@@ -407,13 +487,10 @@ void MainScene::SetupSkybox() {
 }
 
 void MainScene::SetupLighting() {
+    // UpdateSky aims and colors the light every frame
     m_sun = new DirectionalLight("Sun");
-    m_sun->SetDirection(m_settingsPanel.ComputeSunDirection());
-    m_sun->SetColor(LEGACY_SUN_COLOR[0], LEGACY_SUN_COLOR[1],
-                    LEGACY_SUN_COLOR[2]);
     m_sun->SetIntensity(LEGACY_SUN_INTENSITY);
     m_sun->SetLightSize(4.0f);
-    m_settingsPanel.AttachSun(m_sun);
 
     // Voxel-tuned graphics config: shadows and SSAO on, no SSR/IBL.
     Sleak::GraphicsConfig cfg =
@@ -477,23 +554,15 @@ void MainScene::SetupLighting() {
 
     auto* lm = GetLightManager();
     if (lm) {
-        lm->SetAmbientColor(LEGACY_AMBIENT_COLOR[0], LEGACY_AMBIENT_COLOR[1],
-                            LEGACY_AMBIENT_COLOR[2]);
         lm->SetAmbientIntensity(LEGACY_AMBIENT_INTENSITY);
 
-        float horizonR, horizonG, horizonB;
-        m_settingsPanel.GetFogHorizonColor(horizonR, horizonG, horizonB);
-        lm->SetFogColor(horizonR, horizonG, horizonB);
-        float zenithR, zenithG, zenithB;
-        m_settingsPanel.GetFogZenithColor(zenithR, zenithG, zenithB);
-        lm->SetFogZenithColor(zenithR, zenithG, zenithB);
+        // Forward-path fog; UpdateSky turns it off while the atmosphere draws
+        lm->SetFogColor(LEGACY_FOG_HORIZON[0], LEGACY_FOG_HORIZON[1],
+                        LEGACY_FOG_HORIZON[2]);
         float fogDist = m_chunkManager.GetDrawDistance();
         lm->SetFogDistances(fogDist * 0.9f, fogDist);
-        lm->SetFogEnabled(m_settingsPanel.IsFogEnabled());
-
-        lm->SetHeightFogEnabled(m_settingsPanel.IsHeightFogEnabled());
-        lm->SetHeightFogTop(m_settingsPanel.GetHeightFogTop());
-        lm->SetHeightFogDensity(m_settingsPanel.GetHeightFogDensity());
-        lm->SetHeightFogFalloff(m_settingsPanel.GetHeightFogFalloff());
+        lm->SetHeightFogTop(LEGACY_HEIGHT_FOG_TOP);
+        lm->SetHeightFogDensity(LEGACY_HEIGHT_FOG_DENSITY);
+        lm->SetHeightFogFalloff(LEGACY_HEIGHT_FOG_FALLOFF);
     }
 }

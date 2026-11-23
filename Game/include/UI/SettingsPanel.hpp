@@ -1,22 +1,23 @@
 #ifndef _SETTINGS_PANEL_HPP_
 #define _SETTINGS_PANEL_HPP_
 
-#include <Math/Vector.hpp>
 #include <Runtime/Texture.hpp>
 
 #include "World/VoxelLighting.hpp"
 
 class ChunkManager;
 class MainScene;
-namespace Sleak { class DirectionalLight; class Application; }
+namespace Sleak {
+class Application;
+}
 
 // TAA recovers sub-pixel texture detail, so the atlas can sample one mip sharper
 #define TAA_TEXTURE_LOD_BIAS (-1.0f)
 
-/// General/culling/lighting/SSAO/IBL/texture settings sections. Owns the
-/// live-edit sun/ambient/fog/texture state (crosshair/vsync/MT-loading/
-/// culling toggles stay on MainScene since MainScene::SetupLighting also
-/// reads them at Initialize time; they're read/written here through it).
+/// General/culling/sky/lighting/SSAO/IBL/texture settings sections. Owns the
+/// live-edit palette multiplier and texture state; the world clock, the sky
+/// options and the crosshair/vsync/MT-loading/culling toggles live on
+/// MainScene and are read/written here through it.
 /// @ingroup ui
 class SettingsPanel {
 public:
@@ -25,29 +26,7 @@ public:
     /// Draws every settings section in sequence.
     void Render();
 
-    /// Hands the panel the live sun light so its edits apply immediately;
-    /// called once from MainScene::SetupLighting right after the light is
-    /// created.
-    void AttachSun(Sleak::DirectionalLight* sun) { m_sun = sun; }
-
-    // Initial-value accessors for MainScene::SetupMaterial/SetupLighting.
-    /// Converts the elevation/azimuth sliders into a light direction vector.
-    Sleak::Math::Vector3D ComputeSunDirection() const;
-    void GetFogHorizonColor(float& r, float& g, float& b) const {
-        r = m_fogHorizonR;
-        g = m_fogHorizonG;
-        b = m_fogHorizonB;
-    }
-    void GetFogZenithColor(float& r, float& g, float& b) const {
-        r = m_fogZenithR;
-        g = m_fogZenithG;
-        b = m_fogZenithB;
-    }
-    bool IsFogEnabled() const { return m_fogEnabled; }
-    bool IsHeightFogEnabled() const { return m_heightFogEnabled; }
-    float GetHeightFogTop() const { return m_heightFogTop; }
-    float GetHeightFogDensity() const { return m_heightFogDensity; }
-    float GetHeightFogFalloff() const { return m_heightFogFalloff; }
+    // Initial-value accessor for MainScene::SetupMaterial.
     Sleak::TextureFilter GetTextureFilter() const { return m_texFilter; }
 
     /// Applies the user LOD bias to the block atlas, plus the TAA bias while TAA is on.
@@ -62,7 +41,9 @@ private:
     void RenderMSAASection();
     /// Render distance slider; also re-derives fog distances on change.
     void RenderRenderDistanceSection();
-    /// Sun direction, voxel sun and ambient multipliers, and fog sliders.
+    /// Time of day, pause and day length, then the fog and star options.
+    void RenderSkySection();
+    /// Voxel sun and ambient multipliers.
     void RenderLightingSection();
     /// SSAO toggle and radius/bias/power sliders.
     void RenderSSAOSection();
@@ -75,15 +56,8 @@ private:
     Sleak::Application* m_app;
     MainScene& m_scene;
 
-    // Non-owning; the light itself is owned/created by MainScene.
-    Sleak::DirectionalLight* m_sun = nullptr;
-
     bool isDeferredEnabled = false;
     bool isTAAEnabled = false;
-
-    // Sun direction (live-editable); 50 degrees is BSL's noon height
-    float m_sunElevation = 50.0f;    // degrees above the horizon
-    float m_sunAzimuth    = 255.0f;  // degrees clockwise from north
 
     // Multipliers on the voxel palette's sun and sky ambient (1 = palette)
     LightMultiplier m_sunMultiplier;
@@ -92,22 +66,6 @@ private:
     // Texture quality state
     Sleak::TextureFilter m_texFilter = Sleak::TextureFilter::Nearest;
     float m_texLodBias = 0.0f;
-
-    // Fog state (live-editable). Defaults align with LightManager defaults so
-    // toggling the fog UI without touching sliders matches the engine's idle
-    // state. Horizon RGB is overridden by SetupLighting() to a slightly
-    // bluer tint that matches the skybox.
-    bool  m_fogEnabled        = true;
-    float m_fogHorizonR       = 0.62f;
-    float m_fogHorizonG       = 0.78f;
-    float m_fogHorizonB       = 1.00f;
-    float m_fogZenithR        = 0.42f;
-    float m_fogZenithG        = 0.58f;
-    float m_fogZenithB        = 0.86f;
-    bool  m_heightFogEnabled  = true;
-    float m_heightFogTop      = 64.0f;
-    float m_heightFogDensity  = 0.25f;
-    float m_heightFogFalloff  = 0.05f;
 };
 
 #endif

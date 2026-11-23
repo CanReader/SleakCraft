@@ -81,6 +81,8 @@ class VoxelLighting {
    public:
     /// BSL-style noon: blue-white sun, blue sky ambient, open sky.
     static LightingPalette NoonPalette();
+    /// Linear grey of the cave floor light for a minimum-light setting.
+    static float MinLightLinear(float minLight);
 
     /// Palette used from the next Upload on.
     void SetPalette(const LightingPalette& palette) { m_palette = palette; }

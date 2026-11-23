@@ -233,6 +233,7 @@ and `Game/assets/shaders`. The engine's own `CompileShaders` CMake target only w
 one before them:
 
 ```
+MainScene::UpdateSky                     // world clock -> palette, light, atmosphere
 BlockEffects::Update                    // move break/place effect objects
 BlockInteraction::DrainCompletedPlacements   // finished placements become real blocks
 Sleak::Scene::Update                     // engine objects (effects too), lights, physics
@@ -246,6 +247,12 @@ BlockInteraction::RenderOutline
 auto-save check, message timers
 HudPanel::RenderCrosshair, HudPanel::Render, SettingsPanel::Render, Hotbar::Render
 ```
+
+The sky goes first: `UpdateSky` advances the `WorldClock`, evaluates the
+time of day (`EvaluateTimeOfDay`) and hands the voxel palette, the engine
+light and `Application::SetAtmosphere` this moment's values, so the engine
+update builds this frame's light and shadow matrices from them and knows
+whether the atmosphere replaces the skybox.
 
 Placements drain before the engine update so a block finishing its animation
 this frame is solid by the time collision runs. The voxel palette is sent
