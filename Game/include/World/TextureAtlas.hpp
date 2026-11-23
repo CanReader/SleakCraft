@@ -37,6 +37,26 @@ public:
         };
     }
 
+    /// Cell layout in texels plus the inverse atlas size.
+    struct Grid {
+        uint32_t tilesPerRow;
+        uint32_t cellTexels;
+        uint32_t padTexels;
+        uint32_t tileTexels;
+        float invWidth;
+        float invHeight;
+    };
+
+    /// Layout of the built atlas; the voxel shaders rebuild tile UVs from it.
+    static Grid GetGrid() {
+        return {TILES_PER_ROW,
+                static_cast<uint32_t>(s_cell),
+                static_cast<uint32_t>(s_pad),
+                static_cast<uint32_t>(s_tile),
+                s_invW,
+                s_invH};
+    }
+
     static int GetRows() { return s_rows; }
 
 private:

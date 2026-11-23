@@ -15,6 +15,8 @@ SLEAK_FRAME_USER_BLOCK CraftFrameUBO {
     vec4 Sky;              // sun visibility, rain, shadow fade, night vision
     vec4 Look;             // desaturation, emission gain, albedo balance,
                            // SSAO exponent
+    uvec4 AtlasGrid;       // tiles per row, cell, pad and tile texels
+    vec4 AtlasInvSize;     // xy 1 / atlas width and height, zw unused
 } uCraft;
 
 #endif

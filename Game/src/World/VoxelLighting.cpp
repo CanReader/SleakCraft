@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "World/TextureAtlas.hpp"
+
 namespace {
 
 // Authoring channels run 0-255
@@ -100,6 +102,15 @@ void VoxelLighting::Upload(const Sleak::GraphicsConfig& config) const {
     d.Look[1] = EMISSION_GAIN;
     d.Look[2] = ALBEDO_BALANCE;
     d.Look[3] = SSAO_EXPONENT;
+
+    // Voxel vertices carry atlas tiles; the shaders turn them into UVs
+    const TextureAtlas::Grid grid = TextureAtlas::GetGrid();
+    d.AtlasGrid[0] = grid.tilesPerRow;
+    d.AtlasGrid[1] = grid.cellTexels;
+    d.AtlasGrid[2] = grid.padTexels;
+    d.AtlasGrid[3] = grid.tileTexels;
+    d.AtlasInvSize[0] = grid.invWidth;
+    d.AtlasInvSize[1] = grid.invHeight;
 
     auto* app = Sleak::Application::GetInstance();
     if (app && !app->SetFrameUserData(&d, sizeof(d)))
