@@ -38,7 +38,7 @@ constexpr FaceInfo CUBE_FACES[CUBE_FACE_COUNT] = {
     {{{0, 0, 1}, {0, 1, 1}, {0, 1, 0}, {0, 0, 0}}, -1, 0, 0, BlockFace::West},
 };
 // Front faces of a quad
-constexpr uint32_t QUAD_FRONT[QUAD_INDICES] = {0, 2, 1, 0, 3, 2};
+constexpr uint32_t QUAD_FRONT[QUAD_INDICES] = {3, 2, 0, 0, 2, 1};
 constexpr float HALF = 0.5f;
 // Unit quad facing -z, the side LookAt turns to the camera (south-face order)
 constexpr float PARTICLE_CORNERS[QUAD_CORNERS][2] = {

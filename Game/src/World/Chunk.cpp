@@ -280,8 +280,8 @@ void Chunk::GenerateMeshData() {
         }
 
         if (ao[0] + ao[2] > ao[1] + ao[3]) {
+            indices.add(base + 3); indices.add(base + 2); indices.add(base);
             indices.add(base); indices.add(base + 2); indices.add(base + 1);
-            indices.add(base); indices.add(base + 3); indices.add(base + 2);
         } else {
             indices.add(base); indices.add(base + 3); indices.add(base + 1);
             indices.add(base + 1); indices.add(base + 3); indices.add(base + 2);
@@ -367,8 +367,8 @@ void Chunk::GenerateMeshData() {
             waterVertices.AddVertex(v[i]);
         }
 
+        waterIndices.add(base + 3); waterIndices.add(base + 2); waterIndices.add(base);
         waterIndices.add(base); waterIndices.add(base + 2); waterIndices.add(base + 1);
-        waterIndices.add(base); waterIndices.add(base + 3); waterIndices.add(base + 2);
     };
 
     for (int y = 0; y < SIZE; ++y) {
