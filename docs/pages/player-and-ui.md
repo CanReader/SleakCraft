@@ -11,7 +11,7 @@ together by `MainScene`.
 | `HudPanel` | Performance and world readouts plus the crosshair. |
 | `SettingsPanel` | Render distance, graphics toggles, and the attached sun light. |
 | `Hotbar` | The block selection strip, driven entirely by `BlockInteraction`. |
-| `TextureAtlas` | Static tile UV lookup used for the block icons the panels draw. |
+| `TextureAtlas` | Static builder of the block atlas, whose filter and LOD bias the settings panel set. |
 
 ---
 
