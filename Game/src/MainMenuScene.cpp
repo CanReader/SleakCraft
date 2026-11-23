@@ -19,15 +19,19 @@ using namespace Sleak::UI;
 
 namespace {
 
-// Menu sky: a fixed afternoon seen from above the sea, the sun to one side
+// Menu sky: a fixed afternoon seen from ground height, the sun to one side
 constexpr double MENU_SKY_HOURS = 16.5;
-constexpr float MENU_EYE_HEIGHT = 100.0f;
+// Eye over a spot where the cloud tile keeps the sky behind the logo open
+// for the first minutes of drift
+constexpr float MENU_EYE_X = 975.0f;
+constexpr float MENU_EYE_HEIGHT = 70.0f;
+constexpr float MENU_EYE_Z = -2925.0f;
 constexpr float MENU_FOV_DEGREES = 60.0f;
 constexpr float MENU_NEAR = 0.1f;
 constexpr float MENU_FAR = 1000.0f;
 constexpr float RADIANS_PER_DEGREE = std::numbers::pi_v<float> / 180.0f;
 constexpr float MENU_SUN_ASIDE = 35.0f * RADIANS_PER_DEGREE;
-constexpr float MENU_PITCH = 25.0f * RADIANS_PER_DEGREE;
+constexpr float MENU_PITCH = 5.0f * RADIANS_PER_DEGREE;
 // No terrain: open sky at the eye and no world edge to fade
 constexpr float MENU_OUTDOOR = 1.0f;
 constexpr float MENU_DRAW_DISTANCE = 0.0f;
@@ -51,10 +55,11 @@ MainMenuScene::~MainMenuScene() {
 bool MainMenuScene::Initialize() {
     Scene::Initialize();
 
-    // Camera turned aside from the menu sun and tilted up over the haze
+    // Camera turned aside from the menu sun, a little above the horizon
     const Math::Vector3D sun = MenuSky().sunDirection;
     const float yaw = std::atan2(sun.GetX(), sun.GetZ()) + MENU_SUN_ASIDE;
-    auto* camera = new Camera("MenuCamera", {0.0f, MENU_EYE_HEIGHT, 0.0f},
+    auto* camera = new Camera("MenuCamera",
+                              {MENU_EYE_X, MENU_EYE_HEIGHT, MENU_EYE_Z},
                               MENU_FOV_DEGREES, MENU_NEAR, MENU_FAR);
     camera->SetDirection({std::cos(MENU_PITCH) * std::sin(yaw),
                           std::sin(MENU_PITCH),
