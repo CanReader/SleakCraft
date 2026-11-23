@@ -24,6 +24,7 @@ constexpr float TIME_STEP_HOURS = 0.05f;
 constexpr float DAY_LENGTH_STEP_SECONDS = 15.0f;
 constexpr float FOG_DENSITY_STEP = 0.01f;
 constexpr float FOG_DENSITY_MAX = 4.0f;
+constexpr float CLOUD_COVERAGE_STEP = 0.01f;
 
 /// Intensity and RGB sliders of one multiplier; true when any changed.
 bool DragMultiplier(const char* intensity, const char* r, const char* g,
@@ -193,6 +194,8 @@ void SettingsPanel::RenderSkySection() {
                   FOG_DENSITY_MAX);
     UI::Checkbox("Height fog", &sky.heightFogEnabled);
     UI::Checkbox("Stars", &sky.starsEnabled);
+    UI::DragFloat("Clouds", &sky.cloudCoverage, CLOUD_COVERAGE_STEP, 0.0f,
+                  1.0f);
 }
 
 void SettingsPanel::RenderLightingSection() {
