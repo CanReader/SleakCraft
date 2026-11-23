@@ -72,9 +72,6 @@ constexpr float CLOUD_WIND_Z = 0.0f;
 // Cloud brightness 0.5 by day, 0.25 at night, times the day exposure
 constexpr float CLOUD_BRIGHTNESS_DAY = 0.5f;
 constexpr float CLOUD_BRIGHTNESS_NIGHT_DROP = 0.25f;
-// Sky light on the clouds: ambient x (0.3 v + 0.5)
-constexpr float CLOUD_AMBIENT_SKY = 0.3f;
-constexpr float CLOUD_AMBIENT_BASE = 0.5f;
 
 /// Authoring color scaled by a factor.
 SqrtColor Scaled(const SqrtColor& c, float factor) {
@@ -196,7 +193,7 @@ TimeOfDayFrame EvaluateTimeOfDay(const SkyState& sky, const SkyOptions& options,
     a.border.start = BORDER_START_FRACTION * drawDistance;
     a.border.end = drawDistance;
 
-    // Clouds: light and ambient through BSL's cloud brightness
+    // Clouds: direct light only (sky light lifts the bases above BSL's grey)
     const float cloudScale =
         (CLOUD_BRIGHTNESS_DAY - CLOUD_BRIGHTNESS_NIGHT_DROP * (1.0f - sv)) *
         exposure;
@@ -204,9 +201,6 @@ TimeOfDayFrame EvaluateTimeOfDay(const SkyState& sky, const SkyOptions& options,
     a.clouds.baseHeight = CLOUD_BASE_HEIGHT;
     a.clouds.wind = Sleak::Math::Vector2D(CLOUD_WIND_X, CLOUD_WIND_Z);
     a.clouds.lightColor = Power(light, LINEAR_POWER) * cloudScale;
-    a.clouds.ambientColor =
-        Power(ambient, LINEAR_POWER) *
-        ((CLOUD_AMBIENT_SKY * sv + CLOUD_AMBIENT_BASE) * cloudScale);
     a.clouds.lightFade = sky.shadowFade;
     return f;
 }
