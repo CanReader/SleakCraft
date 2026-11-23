@@ -16,6 +16,16 @@
 #define CRAFT_FULL_FACING 1.0
 // Upper HDR clamp that keeps NaNs out of the bloom chain
 #define CRAFT_MAX_HDR 1000.0
+// shortcut: sea depth stands in for sky light under water, phase 8 replaces it
+// Top of the highest water block (WorldGenerator::SEA_LEVEL + 1), light levels
+#define CRAFT_SEA_TOP_Y 65.0
+#define CRAFT_SKY_LIGHT_LEVELS 15.0
+
+/// Sky light left at world height y under open sea water, 1 above it.
+float CraftSeaSkyLight(float y) {
+    return clamp(1.0 - (CRAFT_SEA_TOP_Y - y) / CRAFT_SKY_LIGHT_LEVELS, 0.0,
+                 1.0);
+}
 
 /// Voxel surface of one GBuffer texel.
 CraftSurface CraftDecodeSurface(ivec2 px, vec4 rt3) {
@@ -47,6 +57,7 @@ vec3 CraftShadeVoxel(ivec2 px, vec2 uv, float depth, vec4 rt3,
                      out vec3 worldPos) {
     worldPos = SleakReconstructWorldPos(uv, depth);
     CraftSurface s = CraftDecodeSurface(px, rt3);
+    s.sky = min(s.sky, CraftSeaSkyLight(worldPos.y));
 
     CraftLightSample l;
     l.toLight = normalize(uFrame.LightDir.xyz);
