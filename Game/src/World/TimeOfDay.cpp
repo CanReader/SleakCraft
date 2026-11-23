@@ -74,6 +74,16 @@ constexpr float CLOUD_WIND_Z = 0.0f;
 // Cloud brightness 0.5 by day, 0.25 at night, times the day exposure
 constexpr float CLOUD_BRIGHTNESS_DAY = 0.5f;
 constexpr float CLOUD_BRIGHTNESS_NIGHT_DROP = 0.25f;
+// Underwater fog (BSL): water albedo x 1.44 x (0.9 light + 0.1), 35 % at
+// zero distance and 1 - exp(-2 d / 64), blended in square-root space
+constexpr AuthoredKey WATER_KEY{64.0f, 160.0f, 255.0f, 0.35f};
+constexpr float WATER_FOG_GAIN = 1.44f;
+constexpr float WATER_FOG_LIGHT = 0.9f;
+constexpr float WATER_FOG_FLOOR = 0.1f;
+constexpr float WATER_FOG_OPACITY = 0.35f;
+constexpr float WATER_FOG_DENSITY = 2.0f / 64.0f;
+// A bright scene keeps (1 - o)^2 of itself under a square-root blend
+constexpr float SQRT_BLEND_POWER = 2.0f;
 
 /// Authoring color scaled by a factor.
 SqrtColor Scaled(const SqrtColor& c, float factor) {
@@ -124,7 +134,7 @@ TimeOfDayFrame EvaluateTimeOfDay(const SkyState& sky, const SkyOptions& options,
     f.palette.ambient = ambient;
     f.palette.sunVisibility = sky.sunVisibility;
     f.palette.shadowFade = sky.shadowFade;
-    // Engine light (water, engine materials): noon-relative, fades at the flip
+    // Engine light (engine materials): noon-relative, fades at the flip
     f.sunRatio = NoonRatio(light, lightNoon) * sky.shadowFade;
     f.ambientRatio = NoonRatio(ambient, ambientNoon);
 
@@ -206,4 +216,20 @@ TimeOfDayFrame EvaluateTimeOfDay(const SkyState& sky, const SkyOptions& options,
     a.clouds.lightColor = Power(light, LINEAR_POWER) * cloudScale;
     a.clouds.lightFade = sky.shadowFade;
     return f;
+}
+
+Sleak::AtmosphereSettings::MediumParams EvaluateWaterMedium(
+    const LightingPalette& palette, float outdoor) {
+    // Albedo (tint x gain^2)^2 of craft/water.glsl; the key holds one gain
+    const Vector3D water =
+        Power(Scaled(ToSqrtColor(WATER_KEY), WATER_KEY.intensity),
+              LINEAR_POWER) *
+        WATER_FOG_GAIN;
+    const float lit = WATER_FOG_LIGHT * outdoor * palette.shadowFade;
+    const Vector3D unlit(WATER_FOG_FLOOR, WATER_FOG_FLOOR, WATER_FOG_FLOOR);
+    Sleak::AtmosphereSettings::MediumParams m;
+    m.color = water * (Power(palette.sun, LINEAR_POWER) * lit + unlit);
+    m.veil = 1.0f - std::pow(1.0f - WATER_FOG_OPACITY, SQRT_BLEND_POWER);
+    m.densityPerMeter = WATER_FOG_DENSITY * SQRT_BLEND_POWER;
+    return m;
 }

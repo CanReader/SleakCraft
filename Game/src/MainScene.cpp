@@ -31,7 +31,7 @@
 
 namespace {
 
-// Engine sun and ambient as before the voxel palette (water, forward path)
+// Engine sun and ambient as before the voxel palette (materials, forward path)
 constexpr float LEGACY_SUN_COLOR[3] = {1.00f, 0.96f, 0.88f};
 constexpr float LEGACY_SUN_INTENSITY = 0.69f;
 constexpr float LEGACY_AMBIENT_COLOR[3] = {0.45f, 0.62f, 1.00f};
@@ -380,9 +380,11 @@ void MainScene::UpdateSky(float deltaTime) {
     UpdateOutdoorFactor(deltaTime);
 
     const SkyState sky = m_worldClock.ComputeSky();
-    const TimeOfDayFrame frame =
+    TimeOfDayFrame frame =
         EvaluateTimeOfDay(sky, m_skyOptions, app->GetGraphicsConfig().minLight,
                           m_chunkManager.GetDrawDistance(), m_outdoor);
+    if (EyeInWater())
+        frame.atmosphere.medium = EvaluateWaterMedium(frame.palette, m_outdoor);
     m_voxelLighting.SetPalette(frame.palette);
     app->SetAtmosphere(frame.atmosphere);
 
@@ -420,6 +422,18 @@ void MainScene::UpdateOutdoorFactor(float deltaTime) {
     m_outdoorPrimed = true;
     m_outdoor += (target - m_outdoor) *
                  (1.0f - std::exp2(-deltaTime / OUTDOOR_HALF_LIFE_SECONDS));
+}
+
+bool MainScene::EyeInWater() const {
+    auto* cam = GetActiveCamera();
+    if (!cam) return false;
+    const Vector3D eye = cam->GetPosition();
+    const int x = static_cast<int>(std::floor(eye.GetX()));
+    const int y = static_cast<int>(std::floor(eye.GetY()));
+    const int z = static_cast<int>(std::floor(eye.GetZ()));
+    if (!IsBlockWater(m_chunkManager.GetBlockAt(x, y, z))) return false;
+    return eye.GetY() - static_cast<float>(y) < WATER_SURFACE_HEIGHT ||
+           IsBlockWater(m_chunkManager.GetBlockAt(x, y + 1, z));
 }
 
 void MainScene::RenderUI() {
