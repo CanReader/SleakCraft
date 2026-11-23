@@ -254,15 +254,19 @@ time of day (`EvaluateTimeOfDay`) and hands the voxel palette, the engine
 light and `Application::SetAtmosphere` this moment's values, so the engine
 update builds this frame's light and shadow matrices from them. There is no
 skybox texture: the atmosphere draws the sky on the deferred and forward
-paths.
+paths. While the eye is under water (`MainScene::EyeInWater`), the
+atmosphere also gets BSL's underwater fog as its camera medium
+(`EvaluateWaterMedium`), which replaces fog, sky and clouds.
 
 Placements drain before the engine update so a block finishing its animation
 this frame is solid by the time collision runs. The voxel palette is sent
 every frame because activating a scene clears the game frame block; the
 lighting stem reads it in the same frame. The player moves before
 `ChunkManager::Update` so streaming centers on the position the player
-actually reached. Water submits after the solid columns; its shader animates
-the surface from the engine clock in `FrameData`.
+actually reached. Water submits after the solid columns; its shader
+(`craft/water.glsl`) lays BSL's dark veil over the bed it reads from the
+scene snapshot, reflects the screen trace over the sky probe and animates
+the waves from the engine clock in `FrameData`.
 
 ---
 

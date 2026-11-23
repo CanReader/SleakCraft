@@ -123,6 +123,11 @@ corner cell and looked up in a four-step table:
 static constexpr float AO_TABLE[] = {0.40f, 0.68f, 0.88f, 1.0f};
 ```
 
+Water goes into separate buffers, with faces only toward non-water, non-opaque
+neighbors and no AO. Its surface sits `WATER_SURFACE_HEIGHT` (0.875) above the
+block's base (`Game/include/World/Block.hpp`); `MainScene` uses the same height
+to tell when the eye is under water.
+
 The same pass extracts **occluder runs** for the culling system: per 8x8 quadrant of the
 chunk's footprint, every vertical run of four or more fully-opaque layers is recorded
 (not just the longest run), which preserves the solid shell that blocks sightlines from
