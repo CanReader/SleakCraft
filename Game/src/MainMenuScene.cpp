@@ -58,9 +58,9 @@ bool MainMenuScene::Initialize() {
     // Camera turned aside from the menu sun, a little above the horizon
     const Math::Vector3D sun = MenuSky().sunDirection;
     const float yaw = std::atan2(sun.GetX(), sun.GetZ()) + MENU_SUN_ASIDE;
-    auto* camera = new Camera("MenuCamera",
-                              {MENU_EYE_X, MENU_EYE_HEIGHT, MENU_EYE_Z},
-                              MENU_FOV_DEGREES, MENU_NEAR, MENU_FAR);
+    auto* camera =
+        new Camera("MenuCamera", {MENU_EYE_X, MENU_EYE_HEIGHT, MENU_EYE_Z},
+                   MENU_FOV_DEGREES, MENU_NEAR, MENU_FAR);
     camera->SetDirection({std::cos(MENU_PITCH) * std::sin(yaw),
                           std::sin(MENU_PITCH),
                           std::cos(MENU_PITCH) * std::cos(yaw)});
