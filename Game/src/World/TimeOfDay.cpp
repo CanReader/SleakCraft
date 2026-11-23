@@ -9,10 +9,11 @@ namespace {
 
 using Sleak::Math::Vector3D;
 
-// Horizon (sunrise and sunset), night and sky keys, BSL v10 defaults
-constexpr AuthoredKey LIGHT_HORIZON_KEY{255.0f, 160.0f, 80.0f, 1.20f};
+// Horizon (sunrise and sunset), night and sky keys, BSL v10 defaults with
+// the horizon intensities matched to the BSL sunset shots
+constexpr AuthoredKey LIGHT_HORIZON_KEY{255.0f, 160.0f, 80.0f, 1.02f};
 constexpr AuthoredKey LIGHT_NIGHT_KEY{96.0f, 192.0f, 255.0f, 1.00f};
-constexpr AuthoredKey AMBIENT_HORIZON_KEY{255.0f, 204.0f, 144.0f, 0.35f};
+constexpr AuthoredKey AMBIENT_HORIZON_KEY{255.0f, 204.0f, 144.0f, 0.56f};
 constexpr AuthoredKey AMBIENT_NIGHT_KEY{96.0f, 192.0f, 255.0f, 0.60f};
 constexpr AuthoredKey SKY_KEY{96.0f, 160.0f, 255.0f, 1.00f};
 // Night keys x 0.3, less an eighth per moon phase away from full
@@ -26,11 +27,12 @@ constexpr float LINEAR_POWER = 2.0f;
 constexpr float DAY_EXPOSURE_GAIN = 0.75f;
 constexpr float DAY_EXPOSURE_OFFSET = -0.75f;
 constexpr float NIGHT_SKY_EXPOSURE_LOG2 = -3.5f;
-// Sun-side tint: light^(4 - v), share (1 - 0.6 b)^3, exponent 2 - v
+// Sun-side tint: light^(4 - v), share (1 - 0.6 b)^3, exponent 1 + 24 (1 - v)
 constexpr float TINT_POWER_BASE = 4.0f;
 constexpr float TINT_DIM = 0.6f;
 constexpr float TINT_DIM_POWER = 3.0f;
-constexpr float TINT_EXPONENT_BASE = 2.0f;
+constexpr float TINT_EXPONENT_NOON = 1.0f;
+constexpr float TINT_EXPONENT_TWILIGHT_GAIN = 24.0f;
 // Ground darkening: 0.1 (4 - 3 v) max(fog density, 0.125)
 constexpr float GROUND_BASE = 0.1f;
 constexpr float GROUND_SKY_BASE = 4.0f;
@@ -133,7 +135,8 @@ TimeOfDayFrame EvaluateTimeOfDay(const SkyState& sky, const SkyOptions& options,
     a.sky.dayScale = exposure * sv;
     a.sky.tintColor = Power(lightSun, TINT_POWER_BASE - sv);
     a.sky.tintStrength = std::pow(1.0f - TINT_DIM * tb, TINT_DIM_POWER);
-    a.sky.tintExponent = TINT_EXPONENT_BASE - sv;
+    a.sky.tintExponent =
+        TINT_EXPONENT_NOON + TINT_EXPONENT_TWILIGHT_GAIN * (1.0f - sv);
     a.sky.nightColor =
         Power(lightNight, LINEAR_POWER) * std::exp2(NIGHT_SKY_EXPOSURE_LOG2);
     const float daySky = std::max(sky.sunVisibility, sv);
