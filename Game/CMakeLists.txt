@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.31)
 
 project(SleakGame)
 
-file(GLOB_RECURSE GAME_SOURCES "src/*.cpp")
+file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 
 add_library(SleakGame SHARED ${GAME_SOURCES})
 
