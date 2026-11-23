@@ -95,7 +95,8 @@ bool Chunk::IsBlockOpaqueAt(int x, int y, int z) const {
     if (y < 0) {
         auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::Bottom)];
         if (nb) return IsBlockOpaque(nb->GetBlock(x, y + SIZE, z));
-        return false;
+        // Under the world floor: the bottom layer needs no faces
+        return m_cy <= WorldGenerator::MIN_CHUNK_Y;
     }
     if (z >= SIZE) {
         auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::North)];

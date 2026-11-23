@@ -117,7 +117,7 @@ private:
     /// out of range; treats missing neighbors at the world ceiling/floor as air.
     bool IsBlockSolidAt(int x, int y, int z) const;
     /// Opacity at a local coordinate, with the same neighbor-crossing rules
-    /// as IsBlockSolidAt.
+    /// as IsBlockSolidAt, except that below the world floor reads opaque.
     bool IsBlockOpaqueAt(int x, int y, int z) const;
 
     uint8_t m_blocks[VOLUME];
