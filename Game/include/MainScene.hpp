@@ -36,7 +36,7 @@ public:
               const std::string& worldName, uint32_t seed, bool isNewWorld);
     ~MainScene() override;
 
-    /// Sets up the camera, material/skybox/lighting, loads or generates the
+    /// Sets up the camera, material and lighting, loads or generates the
     /// world, registers benchmark metrics, and subscribes input handlers.
     bool Initialize() override;
     /// Advances world time, ticks the chunk/player/effects collaborators,
@@ -100,7 +100,6 @@ private:
     /// Builds the block/water materials, including the runtime texture
     /// atlas, and applies the settings panel's texture filter.
     void SetupMaterial();
-    void SetupSkybox();
     /// Creates the sun light and applies the voxel-tuned GraphicsConfig
     /// (BSL output, shadows, SSAO, blend bloom) plus fog and culling settings.
     void SetupLighting();

@@ -16,7 +16,6 @@
 #include <Physics/Colliders.hpp>
 #include <Physics/RigidbodyComponent.hpp>
 #include <Runtime/Material.hpp>
-#include <Runtime/Skybox.hpp>
 #include <Runtime/Texture.hpp>
 #include <UI/UI.hpp>
 #include <algorithm>
@@ -79,7 +78,6 @@ MainScene::MainScene(const std::string& name, const std::string& savePath,
 
 bool MainScene::Initialize() {
     SetupMaterial();
-    SetupSkybox();
 
     Scene::Initialize();
 
@@ -479,11 +477,6 @@ void MainScene::SetupMaterial() {
     waterMat->Initialize();
     m_waterMaterial = RefPtr<Material>(waterMat);
     m_chunkManager.SetWaterMaterial(m_waterMaterial);
-}
-
-void MainScene::SetupSkybox() {
-    auto* skybox = new Skybox();
-    SetSkybox(skybox);
 }
 
 void MainScene::SetupLighting() {
