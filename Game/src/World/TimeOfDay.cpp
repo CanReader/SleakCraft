@@ -82,8 +82,10 @@ constexpr float WATER_FOG_LIGHT = 0.9f;
 constexpr float WATER_FOG_FLOOR = 0.1f;
 constexpr float WATER_FOG_OPACITY = 0.35f;
 constexpr float WATER_FOG_DENSITY = 2.0f / 64.0f;
-// A bright scene keeps (1 - o)^2 of itself under a square-root blend
-constexpr float SQRT_BLEND_POWER = 2.0f;
+// Square-root blend: (1 - o)^2 of a bright scene, (1 - o) of a fog-bright one
+constexpr float SQRT_BLEND_POWER = 1.5f;
+// shortcut: stands in for BSL's underwater light shafts until phase 15
+constexpr float WATER_FOG_SHAFT_GAIN = 1.25f;
 
 /// Authoring color scaled by a factor.
 SqrtColor Scaled(const SqrtColor& c, float factor) {
@@ -224,7 +226,7 @@ Sleak::AtmosphereSettings::MediumParams EvaluateWaterMedium(
     const Vector3D water =
         Power(Scaled(ToSqrtColor(WATER_KEY), WATER_KEY.intensity),
               LINEAR_POWER) *
-        WATER_FOG_GAIN;
+        (WATER_FOG_GAIN * WATER_FOG_SHAFT_GAIN);
     const float lit = WATER_FOG_LIGHT * outdoor * palette.shadowFade;
     const Vector3D unlit(WATER_FOG_FLOOR, WATER_FOG_FLOOR, WATER_FOG_FLOOR);
     Sleak::AtmosphereSettings::MediumParams m;
