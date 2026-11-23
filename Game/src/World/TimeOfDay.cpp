@@ -65,6 +65,16 @@ constexpr int FOG_BASE_BELOW_SEA_LEVEL = 2;
 constexpr float FOG_INDOOR_LIGHT = 0.5f;
 // The edge fade covers the last fifth of the draw distance
 constexpr float BORDER_START_FRACTION = 0.8f;
+// Clouds: vanilla cloud height, BSL's drift of about 4 m/s toward -x
+constexpr float CLOUD_BASE_HEIGHT = 192.0f;
+constexpr float CLOUD_WIND_X = -4.0f;
+constexpr float CLOUD_WIND_Z = 0.0f;
+// Cloud brightness 0.5 by day, 0.25 at night, times the day exposure
+constexpr float CLOUD_BRIGHTNESS_DAY = 0.5f;
+constexpr float CLOUD_BRIGHTNESS_NIGHT_DROP = 0.25f;
+// Sky light on the clouds: ambient x (0.3 v + 0.5)
+constexpr float CLOUD_AMBIENT_SKY = 0.3f;
+constexpr float CLOUD_AMBIENT_BASE = 0.5f;
 
 /// Authoring color scaled by a factor.
 SqrtColor Scaled(const SqrtColor& c, float factor) {
@@ -121,8 +131,9 @@ TimeOfDayFrame EvaluateTimeOfDay(const SkyState& sky, const SkyOptions& options,
 
     Sleak::AtmosphereSettings& a = f.atmosphere;
     a.sky.color = Power(ToSqrtColor(SKY_KEY), LINEAR_POWER);
-    a.sky.dayScale =
-        std::exp2(DAY_EXPOSURE_GAIN * tb + DAY_EXPOSURE_OFFSET) * sv;
+    const float exposure =
+        std::exp2(DAY_EXPOSURE_GAIN * tb + DAY_EXPOSURE_OFFSET);
+    a.sky.dayScale = exposure * sv;
     a.sky.tintColor = Power(lightSun, TINT_POWER_BASE - sv);
     a.sky.tintStrength = std::pow(1.0f - TINT_DIM * tb, TINT_DIM_POWER);
     a.sky.tintExponent = TINT_EXPONENT_BASE - sv;
@@ -184,5 +195,18 @@ TimeOfDayFrame EvaluateTimeOfDay(const SkyState& sky, const SkyOptions& options,
 
     a.border.start = BORDER_START_FRACTION * drawDistance;
     a.border.end = drawDistance;
+
+    // Clouds: light and ambient through BSL's cloud brightness
+    const float cloudScale =
+        (CLOUD_BRIGHTNESS_DAY - CLOUD_BRIGHTNESS_NIGHT_DROP * (1.0f - sv)) *
+        exposure;
+    a.clouds.coverage = options.cloudCoverage;
+    a.clouds.baseHeight = CLOUD_BASE_HEIGHT;
+    a.clouds.wind = Sleak::Math::Vector2D(CLOUD_WIND_X, CLOUD_WIND_Z);
+    a.clouds.lightColor = Power(light, LINEAR_POWER) * cloudScale;
+    a.clouds.ambientColor =
+        Power(ambient, LINEAR_POWER) *
+        ((CLOUD_AMBIENT_SKY * sv + CLOUD_AMBIENT_BASE) * cloudScale);
+    a.clouds.lightFade = sky.shadowFade;
     return f;
 }
