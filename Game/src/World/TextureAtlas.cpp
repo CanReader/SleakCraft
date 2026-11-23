@@ -158,6 +158,31 @@ void GradeTile(unsigned char* pixels, int texels, const TileGrade& grade) {
     }
 }
 
+/// Gives every alpha-0 texel the tile's alpha-weighted mean color in linear
+/// light, so no mip or bilinear tap pulls in black.
+void FillHoles(unsigned char* pixels, int texels) {
+    double sum[RGB] = {};
+    double weight = 0.0;
+    for (int i = 0; i < texels; ++i) {
+        const unsigned char* px = pixels + i * RGBA;
+        weight += px[ALPHA];
+        for (int c = 0; c < RGB; ++c)
+            sum[c] += px[ALPHA] * SrgbToLinear(px[c] / CHANNEL_MAX);
+    }
+    if (weight == 0.0) return;
+
+    unsigned char fill[RGB];
+    for (int c = 0; c < RGB; ++c) {
+        const float mean = static_cast<float>(sum[c] / weight);
+        fill[c] = static_cast<unsigned char>(LinearToSrgb(mean) * CHANNEL_MAX +
+                                             ROUND_HALF);
+    }
+    for (int i = 0; i < texels; ++i) {
+        unsigned char* px = pixels + i * RGBA;
+        if (px[ALPHA] == 0) memcpy(px, fill, RGB);
+    }
+}
+
 }  // namespace
 
 /// Resamples src (srcW x srcH) into dst (dstW x dstH) using nearest neighbor.
@@ -232,12 +257,16 @@ Sleak::RefPtr<Sleak::Texture> TextureAtlas::BuildAtlas() {
         if (!tiles[i].pixels) continue;
 
         // Resample to tileSize x tileSize if needed
-        const unsigned char* src = tiles[i].pixels;
+        unsigned char* src = tiles[i].pixels;
         if (tiles[i].w != tileSize || tiles[i].h != tileSize) {
             ResampleNearest(tiles[i].pixels, tiles[i].w, tiles[i].h,
                            resampled.data(), tileSize, tileSize);
             src = resampled.data();
         }
+
+        // Cutout tiles: no black under the holes for the GPU-built mips
+        if (TILE_SOURCES[i].alpha == TileAlpha::Cutout)
+            FillHoles(src, tileSize * tileSize);
 
         // Fill the whole cell with the tile wrapped (content + gutters)
         for (int y = 0; y < cell; ++y) {
