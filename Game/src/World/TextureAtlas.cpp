@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iterator>
+#include <string>
 
 #include "World/Block.hpp"
 
@@ -18,31 +20,54 @@ int TextureAtlas::s_cell = 32;
 float TextureAtlas::s_invW = 1.0f / 128.0f;
 float TextureAtlas::s_invH = 1.0f / 160.0f;
 
-// Tile source files in BlockTile enum order
-static const char* s_tilePaths[] = {
-    "assets/textures/blocks/grass_block_top.png",  // TILE_GRASS_TOP
-    "assets/textures/blocks/grass_block_side.png",  // TILE_GRASS_SIDE
-    "assets/textures/blocks/dirt.png",              // TILE_DIRT
-    "assets/textures/blocks/stone.png",             // TILE_STONE
-    "assets/textures/blocks/cobblestone.png",       // TILE_COBBLESTONE
-    "assets/textures/blocks/oak_log.png",           // TILE_OAK_LOG
-    "assets/textures/blocks/oak_log_top.png",       // TILE_OAK_LOG_TOP
-    "assets/textures/blocks/dark_oak_log.png",      // TILE_DARK_OAK_LOG
-    "assets/textures/blocks/dark_oak_top.png",      // TILE_DARK_OAK_TOP
-    "assets/textures/blocks/spruce_log.png",        // TILE_SPRUCE_LOG
-    "assets/textures/blocks/spruce_log_top.png",    // TILE_SPRUCE_LOG_TOP
-    "assets/textures/blocks/oak_planks.png",        // TILE_OAK_PLANKS
-    "assets/textures/blocks/brick.png",             // TILE_BRICKS
-    "assets/textures/blocks/sand.png",              // TILE_SAND
-    "assets/textures/blocks/gravel.png",            // TILE_GRAVEL
-    "assets/textures/blocks/oak_leaves.png",        // TILE_OAK_LEAVES
-    "assets/textures/blocks/water.png",              // TILE_WATER
+namespace {
+
+/// How a tile's alpha behaves in the atlas mips.
+enum class TileAlpha {
+    Plain,   // opaque or blended, uploaded as loaded
+    Cutout,  // alpha tested
 };
 
-static_assert(sizeof(s_tilePaths) / sizeof(s_tilePaths[0]) == TILE_COUNT,
-              "Tile path count must match TILE_COUNT");
+/// One atlas tile: the BlockTile it serves, its PNG and its alpha behavior.
+struct TileSource {
+    BlockTile tile;
+    const char* file;  // in BLOCK_TEXTURE_DIR
+    TileAlpha alpha;
+};
 
-namespace {
+constexpr const char* BLOCK_TEXTURE_DIR = "assets/textures/blocks/";
+
+// Atlas tiles in BlockTile order; the asserts below enforce it
+constexpr TileSource TILE_SOURCES[] = {
+    {TILE_GRASS_TOP, "grass_block_top.png", TileAlpha::Plain},
+    {TILE_GRASS_SIDE, "grass_block_side.png", TileAlpha::Plain},
+    {TILE_DIRT, "dirt.png", TileAlpha::Plain},
+    {TILE_STONE, "stone.png", TileAlpha::Plain},
+    {TILE_COBBLESTONE, "cobblestone.png", TileAlpha::Plain},
+    {TILE_OAK_LOG, "oak_log.png", TileAlpha::Plain},
+    {TILE_OAK_LOG_TOP, "oak_log_top.png", TileAlpha::Plain},
+    {TILE_DARK_OAK_LOG, "dark_oak_log.png", TileAlpha::Plain},
+    {TILE_DARK_OAK_TOP, "dark_oak_top.png", TileAlpha::Plain},
+    {TILE_SPRUCE_LOG, "spruce_log.png", TileAlpha::Plain},
+    {TILE_SPRUCE_LOG_TOP, "spruce_log_top.png", TileAlpha::Plain},
+    {TILE_OAK_PLANKS, "oak_planks.png", TileAlpha::Plain},
+    {TILE_BRICKS, "brick.png", TileAlpha::Plain},
+    {TILE_SAND, "sand.png", TileAlpha::Plain},
+    {TILE_GRAVEL, "gravel.png", TileAlpha::Plain},
+    {TILE_OAK_LEAVES, "oak_leaves.png", TileAlpha::Cutout},
+    {TILE_WATER, "water.png", TileAlpha::Plain},
+};
+
+/// True when every source sits at the index of its own BlockTile.
+constexpr bool TileSourcesInOrder() {
+    for (size_t i = 0; i < std::size(TILE_SOURCES); ++i)
+        if (static_cast<size_t>(TILE_SOURCES[i].tile) != i) return false;
+    return true;
+}
+
+static_assert(std::size(TILE_SOURCES) == TILE_COUNT,
+              "One atlas source per BlockTile");
+static_assert(TileSourcesInOrder(), "Atlas sources must follow BlockTile");
 
 /// Per-channel linear-light grade that moves a tile's mean to a target.
 struct TileGrade {
@@ -161,7 +186,10 @@ Sleak::RefPtr<Sleak::Texture> TextureAtlas::BuildAtlas() {
 
     int tileSize = 0;
     for (int i = 0; i < tileCount; ++i) {
-        tiles[i].pixels = LoadImagePixels(s_tilePaths[i], &tiles[i].w, &tiles[i].h);
+        const std::string path =
+            std::string(BLOCK_TEXTURE_DIR) + TILE_SOURCES[i].file;
+        tiles[i].pixels =
+            LoadImagePixels(path.c_str(), &tiles[i].w, &tiles[i].h);
         if (tiles[i].pixels) {
             tileSize = std::max(tileSize, std::max(tiles[i].w, tiles[i].h));
         }
