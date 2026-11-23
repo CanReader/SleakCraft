@@ -37,9 +37,10 @@
 #define CRAFT_WATER_TIR_COS \
     sqrt(1.0 - pow(CRAFT_AIR_IOR / CRAFT_WATER_IOR, 2.0))
 #define CRAFT_WATER_TIR_SOFTEN 0.04
-// Glint roughness and cap
-#define CRAFT_WATER_ROUGHNESS 0.035
-#define CRAFT_WATER_SPEC_MAX 30.0
+// Glint: BSL's near-mirror (smoothness 0.9) on a light disc, soft-clamped
+#define CRAFT_WATER_ROUGHNESS 0.01
+#define CRAFT_WATER_LIGHT_TAN_RADIUS 0.02
+#define CRAFT_WATER_SPEC_SOFT_MAX 128.0
 // Probe blur per unit of filtered wave slope
 #define CRAFT_WATER_SKY_LOD_PER_SLOPE 10.0
 #define CRAFT_WATER_TOP_FACE_MIN_Y 0.5
@@ -122,7 +123,7 @@ vec2 CraftWaterPitGradient(vec2 p) {
 }
 
 /// Wave normal at world xz: xyz the normal, w the slope variance the
-/// footprint filter and the far calm removed (it widens glint and sky blur).
+/// footprint filter and the far calm removed (it blurs the sky probe).
 vec4 CraftWaveNormal(vec2 xz, float t, float footprint, float viewDist,
                      float facing) {
     float calm = mix(1.0, CRAFT_WAVE_FAR_SLOPE_SCALE,
@@ -254,21 +255,31 @@ vec3 CraftWaterBody(vec3 faceN, vec3 V, vec3 L, float sky, float sunVis) {
     return CraftShadeSurface(s, l);
 }
 
-/// Sun or moon glint (GGX), widened by the slope the filter removed.
-float CraftWaterGlint(vec3 N, vec3 V, vec3 L, float lostSlope) {
+/// Sun or moon glint: BSL's near-mirror GGX on the light disc.
+float CraftWaterGlint(vec3 N, vec3 V, vec3 L) {
+    // Representative point: the disc direction closest to the mirror ray
+    vec3 R = reflect(-V, N);
+    vec3 toRay = dot(L, R) * R - L;
+    L = normalize(L + toRay * min(CRAFT_WATER_LIGHT_TAN_RADIUS /
+                                      max(length(toRay), CRAFT_WATER_EPSILON),
+                                  1.0));
     float NdotL = dot(N, L);
     if (NdotL <= 0.0) return 0.0;
     float NdotV = max(dot(N, V), CRAFT_WATER_EPSILON);
-    float a2 = CRAFT_WATER_ROUGHNESS * CRAFT_WATER_ROUGHNESS + lostSlope;
+    float a2 = CRAFT_WATER_ROUGHNESS * CRAFT_WATER_ROUGHNESS;
+    // The disc's energy spread over the lobe (Karis)
+    float disc = CRAFT_WATER_HALF * CRAFT_WATER_LIGHT_TAN_RADIUS;
+    float spread = CRAFT_WATER_ROUGHNESS / (CRAFT_WATER_ROUGHNESS + disc);
     vec3 H = normalize(V + L);
     float NdotH = max(dot(N, H), 0.0);
     float dd = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    float D = a2 / (CRAFT_WATER_PI * dd * dd);
+    float D = a2 / (CRAFT_WATER_PI * dd * dd) * (spread * spread);
     float smithV = NdotL * sqrt(NdotV * NdotV * (1.0 - a2) + a2);
     float smithL = NdotV * sqrt(NdotL * NdotL * (1.0 - a2) + a2);
     float vis = CRAFT_WATER_HALF / max(smithV + smithL, CRAFT_WATER_EPSILON);
     float F = CraftWaterFresnel(max(dot(V, H), 0.0));
-    return min(D * vis * F * NdotL, CRAFT_WATER_SPEC_MAX);
+    float s = D * vis * F * NdotL;
+    return s / (1.0 + s / CRAFT_WATER_SPEC_SOFT_MAX);
 }
 
 /// Water at surface point P with face normal faceN and the sky light at the
@@ -347,7 +358,7 @@ CraftWaterResult CraftShadeWater(vec3 P, vec3 faceN, float sky) {
     // Glint, kept off reflected geometry
     vec3 glint = uCraft.SunColor.rgb *
                  (uCraft.Sky.z * sunVis * sky * (1.0 - hitMask) *
-                  CraftWaterGlint(N, V, L, wave.w));
+                  CraftWaterGlint(N, V, L));
 
     // Veil over the bed in square-root space (BSL), glint on top
     vec3 surface = max(mix(W, refl, F), vec3(0.0));
