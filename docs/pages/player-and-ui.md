@@ -105,8 +105,9 @@ ENGINE_API void Text(const char* fmt, ...);
 - **`SettingsPanel`** (`Game/src/UI/SettingsPanel.cpp`) renders general, culling, MSAA,
   render-distance, sky, lighting, SSAO, IBL, and texture-filter sections, and pushes
   live edits straight to the world clock, sky options and block material. Its sky
-  section sets the time of day, pauses the clock, changes the day length and toggles
-  fog, fog density, height fog and stars; its sun and ambient intensity and RGB
+  section sets the time of day, pauses the clock, changes the day length, toggles
+  fog, fog density, height fog and stars, and sets the cloud coverage with the
+  Clouds slider (0 turns the clouds off); its sun and ambient intensity and RGB
   sliders are multipliers (1 = unchanged) on the voxel palette
   (`VoxelLighting::SetMultipliers`), so they change the voxel lighting while the engine
   sun and ambient that water reads follow the time of day only. It owns the multiplier
