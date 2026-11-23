@@ -103,7 +103,7 @@ ENGINE_API void Text(const char* fmt, ...);
   system metrics and refreshes them on a 0.5s timer, independent of whether the HUD is
   currently visible.
 - **`SettingsPanel`** (`Game/src/UI/SettingsPanel.cpp`) renders general, culling, MSAA,
-  render-distance, sky, lighting, SSAO, IBL, and texture-filter sections, and pushes
+  render-distance, sky, lighting, SSAO, and texture-filter sections, and pushes
   live edits straight to the world clock, sky options and block material. Its sky
   section sets the time of day, pauses the clock, changes the day length, toggles
   fog, fog density, height fog and stars, and sets the cloud coverage with the

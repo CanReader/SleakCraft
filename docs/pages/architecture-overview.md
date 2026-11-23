@@ -6,7 +6,7 @@ keep the two decoupled.
 | Type | Role |
 | :--- | :--- |
 | `Game` | The `Sleak::GameBase` subclass; owns both scenes and every transition between them. |
-| `MainMenuScene` | World list, world creation, and deletion; starts a world one frame later. |
+| `MainMenuScene` | World list, world creation, and deletion over the procedural sky at a fixed afternoon; starts a world one frame later. |
 | `MainScene` | The playing scene; owns every world, player, and UI collaborator by value. |
 | `ChunkManager` | The world: chunk grid, streaming, edits, and the query forwarders. |
 | `WorldPersistence` | Save and load orchestration across the chunk grid and disk. |
@@ -69,7 +69,8 @@ to `Sleak::Application::Run`.
 `Game` (`Game/src/Game.cpp`) drives three transitions:
 
 - `Game::Initialize()` registers the voxel vertex format
-  (`GetVoxelVertexFormat()`, see below) before any chunk mesh can be built, then creates
+  (`GetVoxelVertexFormat()`, see below) before any chunk mesh can be built, applies
+  `MainScene::BaseGraphicsConfig()` so the menu's sky has the game's look, then creates
   and activates `MainMenuScene`.
 - `Game::Begin()` is compiled only in Debug builds. If `-world <name>` was passed, it
   reads `-seed` for a new world (or opens the existing save) and calls
@@ -251,8 +252,9 @@ HudPanel::RenderCrosshair, HudPanel::Render, SettingsPanel::Render, Hotbar::Rend
 The sky goes first: `UpdateSky` advances the `WorldClock`, evaluates the
 time of day (`EvaluateTimeOfDay`) and hands the voxel palette, the engine
 light and `Application::SetAtmosphere` this moment's values, so the engine
-update builds this frame's light and shadow matrices from them and knows
-whether the atmosphere replaces the skybox.
+update builds this frame's light and shadow matrices from them. There is no
+skybox texture: the atmosphere draws the sky on the deferred and forward
+paths.
 
 Placements drain before the engine update so a block finishing its animation
 this frame is solid by the time collision runs. The voxel palette is sent
