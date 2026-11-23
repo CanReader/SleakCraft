@@ -72,13 +72,13 @@
 
 // ---- Screen-space reflection ----
 #define CRAFT_WATER_SSR_MIN_FRESNEL 0.04
-#define CRAFT_WATER_SSR_STEPS 16
+#define CRAFT_WATER_SSR_STEPS 12
 #define CRAFT_WATER_SSR_BATCH 4             // depth fetches issued together
 #define CRAFT_WATER_SSR_REFINE_STEPS 4
-#define CRAFT_WATER_SSR_START 0.5           // m
-#define CRAFT_WATER_SSR_GROWTH 1.38
+#define CRAFT_WATER_SSR_START 1.0           // m
+#define CRAFT_WATER_SSR_GROWTH 2.0
 #define CRAFT_WATER_SSR_STEP_ADD 0.1        // m
-#define CRAFT_WATER_SSR_MAX_DIST 90.0       // m
+#define CRAFT_WATER_SSR_MAX_DIST 256.0      // m
 #define CRAFT_WATER_SSR_MIN_THICKNESS 0.75  // m
 #define CRAFT_WATER_SSR_THICKNESS_STEPS 2.0
 #define CRAFT_WATER_SSR_EDGE_FADE 0.07      // uv
