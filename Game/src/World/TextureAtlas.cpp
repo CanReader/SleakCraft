@@ -1,12 +1,16 @@
 #include "World/TextureAtlas.hpp"
 
+#include <Core/Logger.hpp>
 #include <Runtime/Texture.hpp>
 #include <UI/UI.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <iterator>
+#include <limits>
+#include <ranges>
 #include <string>
+#include <vector>
 
 #include "World/Block.hpp"
 
@@ -25,7 +29,7 @@ namespace {
 /// How a tile's alpha behaves in the atlas mips.
 enum class TileAlpha {
     Plain,   // opaque or blended, uploaded as loaded
-    Cutout,  // alpha tested
+    Cutout,  // alpha tested; its mips keep level 0's coverage
 };
 
 /// One atlas tile: the BlockTile it serves, its PNG and its alpha behavior.
@@ -86,8 +90,6 @@ constexpr TileGrade TILE_GRADES[] = {
 
 // Grass fringe texels: green above red and blue by this ratio
 constexpr float FRINGE_GREEN_RATIO = 1.15f;
-// Texels below this alpha are cut out and stay out of the mean
-constexpr unsigned char GRADE_MIN_ALPHA = 128;
 // Gain range that keeps a bad target from wiping out a channel
 constexpr float GRADE_GAIN_MIN = 0.05f;
 constexpr float GRADE_GAIN_MAX = 8.0f;
@@ -103,6 +105,20 @@ constexpr float ROUND_HALF = 0.5f;
 constexpr int RGBA = 4;
 constexpr int RGB = 3;
 constexpr int ALPHA = 3;
+constexpr int ALPHA_OPAQUE = std::numeric_limits<unsigned char>::max();
+// Voxel shader alpha test (CRAFT_ALPHA_CUTOFF, matAlphaCutoff)
+constexpr float ALPHA_CUTOFF = 0.5f;
+// Alpha bytes below this are cut out
+constexpr int CUTOUT_ALPHA = 128;
+static_assert(CUTOUT_ALPHA >= ALPHA_CUTOFF * CHANNEL_MAX &&
+                  CUTOUT_ALPHA - 1 < ALPHA_CUTOFF * CHANNEL_MAX,
+              "CUTOUT_ALPHA must be the first alpha byte at the cutoff");
+// GPU box mips average 2x2 texels
+constexpr int BOX_TEXELS = 4;
+// Coverage sub-samples per texel edge; their weights are whole multiples of
+// 1 / WEIGHT_STEPS
+constexpr int SUBSAMPLES = 4;
+constexpr int WEIGHT_STEPS = 2 * SUBSAMPLES;
 
 /// Linear light of an sRGB channel in [0, 1].
 float SrgbToLinear(float c) {
@@ -131,7 +147,7 @@ void GradeTile(unsigned char* pixels, int texels, const TileGrade& grade) {
     int counted = 0;
     for (int i = 0; i < texels; ++i) {
         const unsigned char* px = pixels + i * RGBA;
-        if (px[ALPHA] < GRADE_MIN_ALPHA) continue;
+        if (px[ALPHA] < CUTOUT_ALPHA) continue;
         if (grade.fringeOnly && !IsGrassFringe(px)) continue;
         for (int c = 0; c < RGB; ++c)
             sum[c] += SrgbToLinear(px[c] / CHANNEL_MAX);
@@ -181,6 +197,133 @@ void FillHoles(unsigned char* pixels, int texels) {
         unsigned char* px = pixels + i * RGBA;
         if (px[ALPHA] == 0) memcpy(px, fill, RGB);
     }
+}
+
+/// Index i in [-n, 2n) wrapped into [0, n).
+int Wrap(int i, int n) { return i < 0 ? i + n : (i < n ? i : i - n); }
+
+/// A tile's alpha with visible alpha scaled to visible / 255, never below
+/// CUTOUT_ALPHA, so level 0 keeps its alpha-test mask.
+std::vector<int> ScaledAlpha(const unsigned char* pixels, int texels,
+                             int visible) {
+    std::vector<int> alpha(texels);
+    for (int i = 0; i < texels; ++i) {
+        const int a = pixels[i * RGBA + ALPHA];
+        alpha[i] =
+            a < CUTOUT_ALPHA
+                ? a
+                : std::max(CUTOUT_ALPHA,
+                           (a * visible + ALPHA_OPAQUE / 2) / ALPHA_OPAQUE);
+    }
+    return alpha;
+}
+
+/// Alpha of the next GPU mip: the 2x2 box, rounded to nearest.
+std::vector<int> HalveAlpha(const std::vector<int>& alpha, int size) {
+    const int half = size / 2;
+    std::vector<int> out(half * half);
+    for (int y = 0; y < half; ++y) {
+        for (int x = 0; x < half; ++x) {
+            const int* a = &alpha[2 * (y * size + x)];
+            out[y * half + x] =
+                (a[0] + a[1] + a[size] + a[size + 1] + BOX_TEXELS / 2) /
+                BOX_TEXELS;
+        }
+    }
+    return out;
+}
+
+/// Fraction of a wrapped alpha grid where bilinear filtering passes the alpha
+/// test, from SUBSAMPLES x SUBSAMPLES points per texel.
+double BilinearCoverage(const std::vector<int>& alpha, int size) {
+    int first[SUBSAMPLES];
+    int weight[SUBSAMPLES];
+    for (int s = 0; s < SUBSAMPLES; ++s) {
+        // Offset from the texel center, in 1 / WEIGHT_STEPS texel
+        const int offset = 2 * s + 1 - SUBSAMPLES;
+        first[s] = offset < 0 ? -1 : 0;
+        weight[s] = offset - first[s] * WEIGHT_STEPS;
+    }
+    const auto at = [&](int x, int y) {
+        return alpha[Wrap(y, size) * size + Wrap(x, size)];
+    };
+    const float passSum =
+        ALPHA_CUTOFF * CHANNEL_MAX * WEIGHT_STEPS * WEIGHT_STEPS;
+    int passed = 0;
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            for (int sy = 0; sy < SUBSAMPLES; ++sy) {
+                for (int sx = 0; sx < SUBSAMPLES; ++sx) {
+                    const int x0 = x + first[sx];
+                    const int y0 = y + first[sy];
+                    const int wx = weight[sx];
+                    const int wy = weight[sy];
+                    const int top =
+                        (WEIGHT_STEPS - wx) * at(x0, y0) + wx * at(x0 + 1, y0);
+                    const int bottom = (WEIGHT_STEPS - wx) * at(x0, y0 + 1) +
+                                       wx * at(x0 + 1, y0 + 1);
+                    if ((WEIGHT_STEPS - wy) * top + wy * bottom >= passSum)
+                        ++passed;
+                }
+            }
+        }
+    }
+    return static_cast<double>(passed) /
+           (size * size * SUBSAMPLES * SUBSAMPLES);
+}
+
+/// Worst over- and under-coverage of a tile's mips against a target.
+struct CoverageError {
+    double over;
+    double under;
+};
+
+/// Coverage error of the GPU box mips once visible alpha is scaled to
+/// visible / 255.
+CoverageError MipCoverageError(const unsigned char* pixels, int size,
+                               uint32_t levels, int visible, double target) {
+    std::vector<int> alpha = ScaledAlpha(pixels, size * size, visible);
+    double lowest = BilinearCoverage(alpha, size);
+    double highest = lowest;
+    for (uint32_t level = 1; level < levels; ++level) {
+        alpha = HalveAlpha(alpha, size);
+        size /= 2;
+        const double coverage = BilinearCoverage(alpha, size);
+        lowest = std::min(lowest, coverage);
+        highest = std::max(highest, coverage);
+    }
+    return {highest - target, target - lowest};
+}
+
+/// Scales a cutout tile's visible alpha so the worst of its GPU box mips stays
+/// closest to level 0's alpha-test coverage; returns the visible alpha.
+int KeepCutoutCoverage(unsigned char* pixels, int size, uint32_t levels) {
+    const int texels = size * size;
+    const double target =
+        BilinearCoverage(ScaledAlpha(pixels, texels, ALPHA_OPAQUE), size);
+    const auto error = [&](int a) {
+        return MipCoverageError(pixels, size, levels, a, target);
+    };
+
+    // Scaling only thins, so mips that never over-cover stay as they are
+    int visible = ALPHA_OPAQUE;
+    const CoverageError unscaled = error(ALPHA_OPAQUE);
+    if (unscaled.over > unscaled.under) {
+        // First alpha whose over-coverage catches up with its under-coverage
+        const auto alphas = std::views::iota(CUTOUT_ALPHA, ALPHA_OPAQUE + 1);
+        visible = *std::ranges::partition_point(alphas, [&](int a) {
+            const CoverageError e = error(a);
+            return e.over < e.under;
+        });
+        if (visible > CUTOUT_ALPHA &&
+            error(visible - 1).under < error(visible).over)
+            --visible;
+    }
+
+    const std::vector<int> alpha = ScaledAlpha(pixels, texels, visible);
+    for (int i = 0; i < texels; ++i)
+        pixels[i * RGBA + ALPHA] = static_cast<unsigned char>(alpha[i]);
+    return visible;
 }
 
 }  // namespace
@@ -242,6 +385,10 @@ Sleak::RefPtr<Sleak::Texture> TextureAtlas::BuildAtlas() {
     s_invW = 1.0f / static_cast<float>(atlasW);
     s_invH = 1.0f / static_cast<float>(atlasH);
 
+    // Cap mips so the gutter stays >=1px at the deepest level
+    uint32_t maxMips = 1;
+    for (int p = pad; p > 1; p >>= 1) ++maxMips;
+
     // Allocate atlas pixel buffer (RGBA)
     std::vector<unsigned char> atlas(atlasW * atlasH * 4, 0);
 
@@ -264,9 +411,13 @@ Sleak::RefPtr<Sleak::Texture> TextureAtlas::BuildAtlas() {
             src = resampled.data();
         }
 
-        // Cutout tiles: no black under the holes for the GPU-built mips
-        if (TILE_SOURCES[i].alpha == TileAlpha::Cutout)
+        // Cutout tiles: level 0 shaped for the GPU-built mips
+        if (TILE_SOURCES[i].alpha == TileAlpha::Cutout) {
             FillHoles(src, tileSize * tileSize);
+            const int visible = KeepCutoutCoverage(src, tileSize, maxMips);
+            SLEAK_INFO("Atlas tile {} keeps its mip coverage at alpha {}", i,
+                       visible);
+        }
 
         // Fill the whole cell with the tile wrapped (content + gutters)
         for (int y = 0; y < cell; ++y) {
@@ -280,10 +431,6 @@ Sleak::RefPtr<Sleak::Texture> TextureAtlas::BuildAtlas() {
 
         FreeImagePixels(tiles[i].pixels);
     }
-
-    // Cap mips so the gutter stays >=1px at the deepest level
-    uint32_t maxMips = 1;
-    for (int p = pad; p > 1; p >>= 1) ++maxMips;
 
     Sleak::TextureDesc desc;
     desc.width = static_cast<uint32_t>(atlasW);
