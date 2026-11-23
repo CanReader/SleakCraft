@@ -19,7 +19,7 @@
 // Veil opacity at normal incidence; Fresnel takes it to 1
 #define CRAFT_WATER_ALPHA 0.70
 // Bed light lost per metre of view ray inside the water
-#define CRAFT_WATER_EXTINCTION 0.10
+#define CRAFT_WATER_EXTINCTION 0.20
 // Lit like foliage: wrap and forward scattering
 #define CRAFT_WATER_SSS 1.0
 #define CRAFT_WATER_NO_LIGHT 0.0
