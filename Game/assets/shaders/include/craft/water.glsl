@@ -27,7 +27,6 @@
 
 // ---- Optics ----
 #define CRAFT_WATER_PI 3.14159265
-#define CRAFT_WATER_TWO_PI (2.0 * CRAFT_WATER_PI)
 #define CRAFT_WATER_IOR 1.333
 #define CRAFT_AIR_IOR 1.0
 #define CRAFT_WATER_F0                                     \
@@ -47,33 +46,25 @@
 #define CRAFT_WATER_EPSILON 1e-4
 #define CRAFT_WATER_HALF 0.5
 
-// ---- Waves: isotropic plane-wave octaves ----
-#define CRAFT_WAVE_COUNT 8
-#define CRAFT_WAVE_BASE_LENGTH 13.0         // m, longest octave
-#define CRAFT_WAVE_LENGTH_RATIO 0.70710678  // 1 / sqrt 2
-#define CRAFT_WAVE_LENGTH_JITTER 0.12
-#define CRAFT_WAVE_BASE_STEEPNESS 0.045     // slope of the longest octave
-#define CRAFT_WAVE_STEEPNESS_DECAY 0.8946
-#define CRAFT_WAVE_DIR_SEED 17.0
-#define CRAFT_WAVE_PHASE_SEED 31.0
-#define CRAFT_WAVE_LENGTH_SEED 47.0
-#define CRAFT_WAVE_GRAVITY 9.81             // m/s^2
-#define CRAFT_WAVE_SPEED_SCALE 0.55         // of the deep-water phase speed
-#define CRAFT_WAVE_FADE_START 0.08          // pixel footprint / wavelength
+// ---- Waves: BSL's cellular ripples, Worley fBm in two drifting layers ----
+#define CRAFT_WAVE_BROAD_CELL 7.5           // m, Worley cell of the broad layer
+#define CRAFT_WAVE_DETAIL_CELL 1.4          // m, cell of the detail layer
+#define CRAFT_WAVE_DETAIL 0.25              // detail layer share (WATER_DETAIL)
+#define CRAFT_WAVE_OCTAVES 2                // fBm octaves per layer
+#define CRAFT_WAVE_LACUNARITY 2.0
+#define CRAFT_WAVE_GAIN 0.5
+// Surface slope per unit of height gradient
+#define CRAFT_WAVE_SLOPE_GAIN 0.5
+// Soft minimum over the feature distances: larger creases harder
+#define CRAFT_WAVE_PIT_SHARPNESS 8.0
+#define CRAFT_WAVE_MIN_WEIGHT 1e-20
+#define CRAFT_WAVE_WIND 0.5                 // m/s on both axes, layers opposed
+#define CRAFT_WAVE_OCTAVE_SHIFT vec2(37.2, 17.9)
+#define CRAFT_WAVE_FADE_START 0.08          // pixel footprint / cell
 #define CRAFT_WAVE_FADE_END 0.25
 // Bump kept toward grazing views: 1 - (1 - |N.V|)^power
 #define CRAFT_WAVE_GRAZING_POWER 8.0
-// Domain warp, swell and gust patches, far calm
-#define CRAFT_WAVE_WARP_SCALE (1.0 / 55.0)
-#define CRAFT_WAVE_WARP_AMPLITUDE 2.5
-#define CRAFT_WAVE_WARP_SPEED 0.03
-#define CRAFT_WAVE_WARP_CHANNEL_OFFSET vec2(19.3, 7.7)
-#define CRAFT_WAVE_SWELL_SCALE (1.0 / 90.0)
-#define CRAFT_WAVE_SWELL_RANGE vec2(0.65, 1.15)
-#define CRAFT_WAVE_SWELL_DRIFT vec2(0.011, 0.007)
-#define CRAFT_WAVE_GUST_SCALE (1.0 / 24.0)
-#define CRAFT_WAVE_GUST_RANGE vec2(0.35, 1.3)
-#define CRAFT_WAVE_GUST_DRIFT vec2(-0.03, 0.02)
+// Far calm
 #define CRAFT_WAVE_CALM_START 30.0
 #define CRAFT_WAVE_CALM_END 100.0
 #define CRAFT_WAVE_FAR_SLOPE_SCALE 0.35
@@ -95,7 +86,7 @@
 #define CRAFT_WATER_SSR_MIN_DIR_Y 0.015
 
 // ---- Hash without sine (Dave Hoskins) ----
-#define CRAFT_WATER_HASH_SCALE 0.1031
+#define CRAFT_WATER_HASH_SCALE vec3(0.1031, 0.1030, 0.0973)
 #define CRAFT_WATER_HASH_OFFSET 33.33
 
 /// One water fragment: linear scene color before fog, and its alpha.
@@ -104,82 +95,67 @@ struct CraftWaterResult {
     float alpha;  // 1 once the scene was read, else the veil to blend
 };
 
-/// Hash of a 2D point to [0, 1).
-float CraftWaterHash12(vec2 p) {
+/// Hash of a 2D point to [0, 1)^2.
+vec2 CraftWaterHash22(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * CRAFT_WATER_HASH_SCALE);
     p3 += dot(p3, p3.yzx + CRAFT_WATER_HASH_OFFSET);
-    return fract((p3.x + p3.y) * p3.z);
+    return fract((p3.xx + p3.yz) * p3.zy);
 }
 
-/// Smooth value noise in [0, 1].
-float CraftWaterNoise(vec2 p) {
-    vec2 i = floor(p), f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(CraftWaterHash12(i), CraftWaterHash12(i + vec2(1.0, 0.0)),
-                   u.x),
-               mix(CraftWaterHash12(i + vec2(0.0, 1.0)),
-                   CraftWaterHash12(i + vec2(1.0, 1.0)), u.x),
-               u.y);
-}
-
-/// Value noise in [-1, 1].
-float CraftWaterSignedNoise(vec2 p) {
-    return CraftWaterNoise(p) * 2.0 - 1.0;
+/// Gradient at p (cell units) of a soft minimum of the squared distances to
+/// the feature points of a Worley grid: round pits with soft creases.
+vec2 CraftWaterPitGradient(vec2 p) {
+    vec2 cell = floor(p);
+    vec2 f = p - cell;
+    float sum = 0.0;
+    vec2 grad = vec2(0.0);
+    for (int j = -1; j <= 1; ++j) {
+        for (int i = -1; i <= 1; ++i) {
+            vec2 o = vec2(float(i), float(j));
+            vec2 d = f - o - CraftWaterHash22(cell + o);
+            float w = exp(-CRAFT_WAVE_PIT_SHARPNESS * dot(d, d));
+            sum += w;
+            grad += w * d;
+        }
+    }
+    return 2.0 * grad / max(sum, CRAFT_WAVE_MIN_WEIGHT);
 }
 
 /// Wave normal at world xz: xyz the normal, w the slope variance the
 /// footprint filter and the far calm removed (it widens glint and sky blur).
 vec4 CraftWaveNormal(vec2 xz, float t, float footprint, float viewDist,
                      float facing) {
-    // Slow domain warp keeps crests from lining up
-    vec2 wp = xz * CRAFT_WAVE_WARP_SCALE + t * CRAFT_WAVE_WARP_SPEED;
-    vec2 p = xz + vec2(CraftWaterSignedNoise(wp),
-                       CraftWaterSignedNoise(
-                           wp + CRAFT_WAVE_WARP_CHANNEL_OFFSET)) *
-                      CRAFT_WAVE_WARP_AMPLITUDE;
-    // Swell patches for the long octaves, gusts for the short ones
-    float swell = mix(CRAFT_WAVE_SWELL_RANGE.x, CRAFT_WAVE_SWELL_RANGE.y,
-                      CraftWaterNoise(xz * CRAFT_WAVE_SWELL_SCALE +
-                                      t * CRAFT_WAVE_SWELL_DRIFT));
-    float gust = mix(CRAFT_WAVE_GUST_RANGE.x, CRAFT_WAVE_GUST_RANGE.y,
-                     CraftWaterNoise(xz * CRAFT_WAVE_GUST_SCALE +
-                                     t * CRAFT_WAVE_GUST_DRIFT));
     float calm = mix(1.0, CRAFT_WAVE_FAR_SLOPE_SCALE,
                      smoothstep(CRAFT_WAVE_CALM_START, CRAFT_WAVE_CALM_END,
                                 viewDist));
-
+    vec2 wind = vec2(t * CRAFT_WAVE_WIND);
+    // fBm weights sum to one; each octave keeps its layer's slope
+    float norm = (1.0 - CRAFT_WAVE_GAIN) /
+                 (1.0 - pow(CRAFT_WAVE_GAIN, float(CRAFT_WAVE_OCTAVES)));
     vec2 g = vec2(0.0);
     float lost = 0.0;
-    float wavelength = CRAFT_WAVE_BASE_LENGTH;
-    float steepness = CRAFT_WAVE_BASE_STEEPNESS;
-    for (int i = 0; i < CRAFT_WAVE_COUNT; ++i) {
-        float octave = float(i) / float(CRAFT_WAVE_COUNT - 1);
-        float s = steepness * mix(swell, gust, octave);
-        float fade = (1.0 - smoothstep(CRAFT_WAVE_FADE_START,
-                                       CRAFT_WAVE_FADE_END,
-                                       footprint / wavelength)) *
-                     calm;
-        lost += s * s * (1.0 - fade * fade);
-        if (fade > 0.0) {
-            float angle = CRAFT_WATER_TWO_PI *
-                          CraftWaterHash12(vec2(i, CRAFT_WAVE_DIR_SEED));
-            vec2 dir = vec2(cos(angle), sin(angle));
-            float k = CRAFT_WATER_TWO_PI / wavelength;
-            float omega = sqrt(CRAFT_WAVE_GRAVITY * k) * CRAFT_WAVE_SPEED_SCALE;
-            float phase = CraftWaterHash12(vec2(i, CRAFT_WAVE_PHASE_SEED)) *
-                          CRAFT_WATER_TWO_PI;
-            g += dir * (s * fade * cos(dot(dir, p) * k - omega * t + phase));
+    for (int layer = 0; layer < 2; ++layer) {
+        bool broad = layer == 0;
+        float freq =
+            1.0 / (broad ? CRAFT_WAVE_BROAD_CELL : CRAFT_WAVE_DETAIL_CELL);
+        float share = broad ? 1.0 - CRAFT_WAVE_DETAIL : CRAFT_WAVE_DETAIL;
+        float slope = CRAFT_WAVE_SLOPE_GAIN * share * norm * freq;
+        vec2 p = (xz + (broad ? -wind : wind)) * freq;
+        for (int o = 0; o < CRAFT_WAVE_OCTAVES; ++o) {
+            float fade = (1.0 - smoothstep(CRAFT_WAVE_FADE_START,
+                                           CRAFT_WAVE_FADE_END,
+                                           footprint * freq)) *
+                         calm;
+            lost += slope * slope * (1.0 - fade * fade);
+            if (fade > 0.0) g += CraftWaterPitGradient(p) * (slope * fade);
+            p = p * CRAFT_WAVE_LACUNARITY + CRAFT_WAVE_OCTAVE_SHIFT;
+            freq *= CRAFT_WAVE_LACUNARITY;
+            slope *= CRAFT_WAVE_GAIN * CRAFT_WAVE_LACUNARITY;
         }
-        float jitter =
-            2.0 * CraftWaterHash12(vec2(i, CRAFT_WAVE_LENGTH_SEED)) - 1.0;
-        wavelength *= CRAFT_WAVE_LENGTH_RATIO *
-                      (1.0 + CRAFT_WAVE_LENGTH_JITTER * jitter);
-        steepness *= CRAFT_WAVE_STEEPNESS_DECAY;
     }
     // BSL flattens the bump toward grazing views
     g *= 1.0 - pow(1.0 - clamp(facing, 0.0, 1.0), CRAFT_WAVE_GRAZING_POWER);
-    // Mean of cos^2 is one half
-    return vec4(normalize(vec3(-g.x, 1.0, -g.y)), CRAFT_WATER_HALF * lost);
+    return vec4(normalize(vec3(-g.x, 1.0, -g.y)), lost);
 }
 
 /// Schlick Fresnel of water at the cosine c.
