@@ -1,10 +1,7 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec4 inColor;
-layout(location = 3) in vec2 inUV;
+#include "craft/voxel_vertex.glsl"
 
 layout(push_constant) uniform TransformPC {
     mat4 WVP;
@@ -28,6 +25,10 @@ layout(location = 3) out vec4  fragShadowCoord;
 layout(location = 4) out float fragSky;  // sky light (inColor.g, phase 8)
 
 void main() {
+    vec3 inPosition = CraftVoxelPosition();
+    vec3 inNormal = CraftVoxelNormal();
+    vec4 inColor = CraftVoxelColor();
+
     // Waves are fragment normals only; the surface stays flat
     gl_Position   = WVP * vec4(inPosition, 1.0);
     gl_Position.y = -gl_Position.y;   // Vulkan NDC y-flip

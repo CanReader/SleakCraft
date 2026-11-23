@@ -80,8 +80,9 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
         if (vertexCount > 0) {
             const ::VoxelVertex* vdata = md.vertices.GetData();
             for (size_t i = 0; i < vertexCount; ++i) {
-                if (vdata[i].py < meshMinY) meshMinY = vdata[i].py;
-                if (vdata[i].py > meshMaxY) meshMaxY = vdata[i].py;
+                const float y = VoxelVertexY(vdata[i]);
+                if (y < meshMinY) meshMinY = y;
+                if (y > meshMaxY) meshMaxY = y;
             }
             verts.Append(vdata, vertexCount);
         }

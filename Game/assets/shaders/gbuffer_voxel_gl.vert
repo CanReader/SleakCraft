@@ -1,10 +1,7 @@
 #version 450 core
 #extension GL_GOOGLE_include_directive : require
 
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec4 inColor;
-layout(location = 3) in vec2 inUV;
+#include "craft/voxel_vertex.glsl"
 
 layout(std140, binding = 0) uniform TransformUBO {
     mat4 WVP;
@@ -23,6 +20,11 @@ out vec2 fragUV;
 out vec4 fragShadowCoord;
 
 void main() {
+    vec3 inPosition = CraftVoxelPosition();
+    vec3 inNormal = CraftVoxelNormal();
+    vec4 inColor = CraftVoxelColor();
+    vec2 inUV = CraftVoxelUV();
+
     gl_Position = SleakFrameGuardClip(WVP * vec4(inPosition, 1.0));
 
     vec4 worldPos  = World * vec4(inPosition, 1.0);
