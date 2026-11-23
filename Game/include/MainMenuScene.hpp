@@ -7,17 +7,20 @@
 #include <vector>
 #include <cstdint>
 
-/// Title screen: world create/load/delete flows and the deferred handoff
-/// into Game::StartWorld once a loading screen has had a frame to render.
+/// Title screen over the procedural sky: world create/load/delete flows and
+/// the deferred handoff into Game::StartWorld once a loading screen has had
+/// a frame to render.
 /// @ingroup app
 class MainMenuScene : public Sleak::Scene {
 public:
     explicit MainMenuScene(const std::string& name);
     ~MainMenuScene() override;
 
+    /// Adds the camera the menu's sky is seen from and lists the saves.
     bool Initialize() override;
     /// Advances a pending world start, otherwise renders the current panel.
     void Update(float deltaTime) override;
+    /// Shows the cursor, sets the menu's sky and listens for Escape.
     void OnActivate() override;
     void OnDeactivate() override;
 
@@ -30,8 +33,6 @@ private:
         Loading
     };
 
-    /// Draws the fullscreen background image behind every menu panel.
-    void RenderBackground();
     /// Draws the title panel with Create/Load/Quit buttons.
     void RenderMainMenu();
     /// Draws the new-world form (name, seed) and validates it on submit.

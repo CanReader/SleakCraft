@@ -13,6 +13,7 @@ struct SkyOptions {
     float fogDensity = 1.0f;  // multiplier on BSL's fog density
     bool heightFogEnabled = true;
     bool starsEnabled = true;
+    float cloudCoverage = 0.75f;  // matches BSL's cloud share of the sky, 0 off
 };
 
 /// What one moment drives: voxel palette, atmosphere and engine light.

@@ -1,6 +1,7 @@
 #ifndef _MAIN_SCENE_HPP_
 #define _MAIN_SCENE_HPP_
 
+#include <Core/GraphicsConfig.hpp>
 #include <Core/Scene.hpp>
 #include <Events/ApplicationEvent.hpp>
 #include <Events/KeyboardEvent.hpp>
@@ -36,7 +37,12 @@ public:
               const std::string& worldName, uint32_t seed, bool isNewWorld);
     ~MainScene() override;
 
-    /// Sets up the camera, material/skybox/lighting, loads or generates the
+    /// SleakCraft's graphics settings: BSL's output look and voxel-tuned
+    /// passes. The game applies them at startup, each world again with its
+    /// culling choices.
+    static Sleak::GraphicsConfig BaseGraphicsConfig();
+
+    /// Sets up the camera, material and lighting, loads or generates the
     /// world, registers benchmark metrics, and subscribes input handlers.
     bool Initialize() override;
     /// Advances world time, ticks the chunk/player/effects collaborators,
@@ -100,7 +106,6 @@ private:
     /// Builds the block/water materials, including the runtime texture
     /// atlas, and applies the settings panel's texture filter.
     void SetupMaterial();
-    void SetupSkybox();
     /// Creates the sun light and applies the voxel-tuned GraphicsConfig
     /// (BSL output, shadows, SSAO, blend bloom) plus fog and culling settings.
     void SetupLighting();

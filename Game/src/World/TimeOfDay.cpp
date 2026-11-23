@@ -9,10 +9,11 @@ namespace {
 
 using Sleak::Math::Vector3D;
 
-// Horizon (sunrise and sunset), night and sky keys, BSL v10 defaults
-constexpr AuthoredKey LIGHT_HORIZON_KEY{255.0f, 160.0f, 80.0f, 1.20f};
+// Horizon (sunrise and sunset), night and sky keys, BSL v10 defaults with
+// the horizon intensities matched to the BSL sunset shots
+constexpr AuthoredKey LIGHT_HORIZON_KEY{255.0f, 160.0f, 80.0f, 1.02f};
 constexpr AuthoredKey LIGHT_NIGHT_KEY{96.0f, 192.0f, 255.0f, 1.00f};
-constexpr AuthoredKey AMBIENT_HORIZON_KEY{255.0f, 204.0f, 144.0f, 0.35f};
+constexpr AuthoredKey AMBIENT_HORIZON_KEY{255.0f, 204.0f, 144.0f, 0.56f};
 constexpr AuthoredKey AMBIENT_NIGHT_KEY{96.0f, 192.0f, 255.0f, 0.60f};
 constexpr AuthoredKey SKY_KEY{96.0f, 160.0f, 255.0f, 1.00f};
 // Night keys x 0.3, less an eighth per moon phase away from full
@@ -26,11 +27,12 @@ constexpr float LINEAR_POWER = 2.0f;
 constexpr float DAY_EXPOSURE_GAIN = 0.75f;
 constexpr float DAY_EXPOSURE_OFFSET = -0.75f;
 constexpr float NIGHT_SKY_EXPOSURE_LOG2 = -3.5f;
-// Sun-side tint: light^(4 - v), share (1 - 0.6 b)^3, exponent 2 - v
+// Sun-side tint: light^(4 - v), share (1 - 0.6 b)^3, exponent 1 + 24 (1 - v)
 constexpr float TINT_POWER_BASE = 4.0f;
 constexpr float TINT_DIM = 0.6f;
 constexpr float TINT_DIM_POWER = 3.0f;
-constexpr float TINT_EXPONENT_BASE = 2.0f;
+constexpr float TINT_EXPONENT_NOON = 1.0f;
+constexpr float TINT_EXPONENT_TWILIGHT_GAIN = 24.0f;
 // Ground darkening: 0.1 (4 - 3 v) max(fog density, 0.125)
 constexpr float GROUND_BASE = 0.1f;
 constexpr float GROUND_SKY_BASE = 4.0f;
@@ -65,6 +67,13 @@ constexpr int FOG_BASE_BELOW_SEA_LEVEL = 2;
 constexpr float FOG_INDOOR_LIGHT = 0.5f;
 // The edge fade covers the last fifth of the draw distance
 constexpr float BORDER_START_FRACTION = 0.8f;
+// Clouds: vanilla cloud height, BSL's drift of about 4 m/s toward -x
+constexpr float CLOUD_BASE_HEIGHT = 192.0f;
+constexpr float CLOUD_WIND_X = -4.0f;
+constexpr float CLOUD_WIND_Z = 0.0f;
+// Cloud brightness 0.5 by day, 0.25 at night, times the day exposure
+constexpr float CLOUD_BRIGHTNESS_DAY = 0.5f;
+constexpr float CLOUD_BRIGHTNESS_NIGHT_DROP = 0.25f;
 
 /// Authoring color scaled by a factor.
 SqrtColor Scaled(const SqrtColor& c, float factor) {
@@ -121,11 +130,13 @@ TimeOfDayFrame EvaluateTimeOfDay(const SkyState& sky, const SkyOptions& options,
 
     Sleak::AtmosphereSettings& a = f.atmosphere;
     a.sky.color = Power(ToSqrtColor(SKY_KEY), LINEAR_POWER);
-    a.sky.dayScale =
-        std::exp2(DAY_EXPOSURE_GAIN * tb + DAY_EXPOSURE_OFFSET) * sv;
+    const float exposure =
+        std::exp2(DAY_EXPOSURE_GAIN * tb + DAY_EXPOSURE_OFFSET);
+    a.sky.dayScale = exposure * sv;
     a.sky.tintColor = Power(lightSun, TINT_POWER_BASE - sv);
     a.sky.tintStrength = std::pow(1.0f - TINT_DIM * tb, TINT_DIM_POWER);
-    a.sky.tintExponent = TINT_EXPONENT_BASE - sv;
+    a.sky.tintExponent =
+        TINT_EXPONENT_NOON + TINT_EXPONENT_TWILIGHT_GAIN * (1.0f - sv);
     a.sky.nightColor =
         Power(lightNight, LINEAR_POWER) * std::exp2(NIGHT_SKY_EXPOSURE_LOG2);
     const float daySky = std::max(sky.sunVisibility, sv);
@@ -184,5 +195,15 @@ TimeOfDayFrame EvaluateTimeOfDay(const SkyState& sky, const SkyOptions& options,
 
     a.border.start = BORDER_START_FRACTION * drawDistance;
     a.border.end = drawDistance;
+
+    // Clouds: direct light only (sky light lifts the bases above BSL's grey)
+    const float cloudScale =
+        (CLOUD_BRIGHTNESS_DAY - CLOUD_BRIGHTNESS_NIGHT_DROP * (1.0f - sv)) *
+        exposure;
+    a.clouds.coverage = options.cloudCoverage;
+    a.clouds.baseHeight = CLOUD_BASE_HEIGHT;
+    a.clouds.wind = Sleak::Math::Vector2D(CLOUD_WIND_X, CLOUD_WIND_Z);
+    a.clouds.lightColor = Power(light, LINEAR_POWER) * cloudScale;
+    a.clouds.lightFade = sky.shadowFade;
     return f;
 }
