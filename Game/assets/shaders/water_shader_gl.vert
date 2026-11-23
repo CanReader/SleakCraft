@@ -1,5 +1,4 @@
 #version 450 core
-#extension GL_GOOGLE_include_directive : require
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -22,8 +21,6 @@ layout(std140, binding = 1) uniform MaterialUBO {
     float MatOpacity; float MatAlphaCutoff; float _matPad1, _matPad2;
 };
 
-#include "sleak/frame.glsl"
-
 layout(std140, binding = 5) uniform ShadowUBO {
     mat4  ShadowLightVP;
     float ShadowBias;
@@ -39,15 +36,13 @@ out vec3  fragWorldPos;
 out vec3  fragNormal;
 out vec4  fragColor;
 out vec4  fragShadowCoord;
-out float fragTime;
 
 void main() {
-    // No vertex displacement — waves are purely fragment-shader normal maps.
+    // Waves are fragment normals only; the surface stays flat
     gl_Position  = WVP * vec4(inPosition, 1.0);
 
     fragWorldPos  = inPosition;
     fragNormal    = inNormal;
-    fragColor     = inColor;
-    fragTime      = uFrame.Time;
+    fragColor     = inColor;  // g: sky light (phase 8)
     fragShadowCoord = ShadowLightVP * vec4(inPosition, 1.0);
 }

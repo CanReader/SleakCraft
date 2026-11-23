@@ -117,6 +117,9 @@ inline bool IsBlockWater(BlockType type) {
     return type == BlockType::Water;
 }
 
+/// Height of a water block's surface above its base (tops sit lower).
+inline constexpr float WATER_SURFACE_HEIGHT = 0.875f;
+
 /// Display name shown in the HUD.
 inline const char* GetBlockName(BlockType type) {
     switch (type) {

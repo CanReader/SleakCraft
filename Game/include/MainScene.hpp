@@ -113,6 +113,8 @@ private:
     void UpdateSky(float deltaTime);
     /// Smooths whether the eye is under open sky into the fog's outdoor factor.
     void UpdateOutdoorFactor(float deltaTime);
+    /// True while the camera's eye is under a water surface.
+    bool EyeInWater() const;
     /// Applies -time and --freeze-time after the world is loaded.
     void ApplyClockOverrides();
     void RenderUI();

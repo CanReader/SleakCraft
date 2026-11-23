@@ -109,8 +109,8 @@ ENGINE_API void Text(const char* fmt, ...);
   fog, fog density, height fog and stars, and sets the cloud coverage with the
   Clouds slider (0 turns the clouds off); its sun and ambient intensity and RGB
   sliders are multipliers (1 = unchanged) on the voxel palette
-  (`VoxelLighting::SetMultipliers`), so they change the voxel lighting while the engine
-  sun and ambient that water reads follow the time of day only. It owns the multiplier
+  (`VoxelLighting::SetMultipliers`), so they change the voxel lighting and the water
+  surface, while the engine sun and ambient follow the time of day only. It owns the multiplier
   and texture state itself; the clock, the sky options and the crosshair, vsync, and
   multithreaded-loading toggles are read and written through `MainScene`.
 - **`Hotbar`** (`Game/src/UI/Hotbar.cpp`) lazily loads the nine slot icon textures on

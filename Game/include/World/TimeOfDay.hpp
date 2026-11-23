@@ -31,4 +31,9 @@ TimeOfDayFrame EvaluateTimeOfDay(const SkyState& sky, const SkyOptions& options,
                                  float minLight, float drawDistance,
                                  float outdoor);
 
+/// BSL's underwater fog for a palette and the outdoor factor at the eye,
+/// in the engine medium's linear blend.
+Sleak::AtmosphereSettings::MediumParams EvaluateWaterMedium(
+    const LightingPalette& palette, float outdoor);
+
 #endif  // _TIME_OF_DAY_HPP_

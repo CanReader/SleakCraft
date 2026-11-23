@@ -12,7 +12,6 @@ layout(push_constant) uniform TransformPC {
 };
 
 #include "sleak/shadow_light.glsl"
-#include "sleak/frame.glsl"
 
 // Scene read block (VertexLayoutDesc::transparentReadsScene)
 layout(set = 3, binding = 5) uniform SceneReadUBO {
@@ -26,11 +25,10 @@ layout(set = 3, binding = 5) uniform SceneReadUBO {
 layout(location = 0) out vec3  fragWorldPos;
 layout(location = 1) out vec3  fragNormal;
 layout(location = 3) out vec4  fragShadowCoord;
-layout(location = 4) out float fragTime;
+layout(location = 4) out float fragSky;  // sky light (inColor.g, phase 8)
 
 void main() {
-    // No vertex displacement — wave motion is done entirely in the fragment shader
-    // via procedural normal mapping (BSL approach).
+    // Waves are fragment normals only; the surface stays flat
     gl_Position   = WVP * vec4(inPosition, 1.0);
     gl_Position.y = -gl_Position.y;   // Vulkan NDC y-flip
     // Same sub-pixel jitter as the opaque GBuffer geometry
@@ -38,7 +36,7 @@ void main() {
 
     fragWorldPos   = inPosition;
     fragNormal     = inNormal;
-    fragTime       = uFrame.Time;
+    fragSky        = inColor.g;
 
     float normalBias = uLightDir.w;
     fragShadowCoord  = uLightVP * (vec4(inPosition, 1.0) + vec4(inNormal * normalBias, 0.0));

@@ -318,9 +318,8 @@ void Chunk::GenerateMeshData() {
         float by = static_cast<float>(y + m_cy * SIZE);
         float bz = static_cast<float>(z + m_cz * SIZE);
 
-        // Water surface is slightly lowered (0.875 of a block)
-        float topY = (face == BlockFace::Top || face == BlockFace::Bottom)
-                     ? by + 0.875f : by + 1.0f;
+        // Water surface is slightly lowered
+        float topY = by + WATER_SURFACE_HEIGHT;
 
         ::VoxelVertex v[4];
         switch (face) {
@@ -338,31 +337,31 @@ void Chunk::GenerateMeshData() {
                 break;
             case BlockFace::North:
                 v[0] = ::VoxelVertex(bx + 1, by,         bz + 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx + 1, by + 0.875f, bz + 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx,     by + 0.875f, bz + 1, 0, 0, 1, uv.u1, uv.v0);
+                v[1] = ::VoxelVertex(bx + 1, topY,       bz + 1, 0, 0, 1, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx,     topY,       bz + 1, 0, 0, 1, uv.u1, uv.v0);
                 v[3] = ::VoxelVertex(bx,     by,         bz + 1, 0, 0, 1, uv.u1, uv.v1);
                 break;
             case BlockFace::South:
                 v[0] = ::VoxelVertex(bx,     by,         bz, 0, 0, -1, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx,     by + 0.875f, bz, 0, 0, -1, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx + 1, by + 0.875f, bz, 0, 0, -1, uv.u1, uv.v0);
+                v[1] = ::VoxelVertex(bx,     topY,       bz, 0, 0, -1, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx + 1, topY,       bz, 0, 0, -1, uv.u1, uv.v0);
                 v[3] = ::VoxelVertex(bx + 1, by,         bz, 0, 0, -1, uv.u1, uv.v1);
                 break;
             case BlockFace::East:
                 v[0] = ::VoxelVertex(bx + 1, by,         bz,     1, 0, 0, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx + 1, by + 0.875f, bz,     1, 0, 0, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx + 1, by + 0.875f, bz + 1, 1, 0, 0, uv.u1, uv.v0);
+                v[1] = ::VoxelVertex(bx + 1, topY,       bz,     1, 0, 0, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx + 1, topY,       bz + 1, 1, 0, 0, uv.u1, uv.v0);
                 v[3] = ::VoxelVertex(bx + 1, by,         bz + 1, 1, 0, 0, uv.u1, uv.v1);
                 break;
             case BlockFace::West:
                 v[0] = ::VoxelVertex(bx, by,         bz + 1, -1, 0, 0, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx, by + 0.875f, bz + 1, -1, 0, 0, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx, by + 0.875f, bz,     -1, 0, 0, uv.u1, uv.v0);
+                v[1] = ::VoxelVertex(bx, topY,       bz + 1, -1, 0, 0, uv.u0, uv.v0);
+                v[2] = ::VoxelVertex(bx, topY,       bz,     -1, 0, 0, uv.u1, uv.v0);
                 v[3] = ::VoxelVertex(bx, by,         bz,     -1, 0, 0, uv.u1, uv.v1);
                 break;
         }
 
-        // Store world position in vertex color for water shader (use full white = no AO)
+        // Color g is the water shader's sky light (open sky until phase 8)
         for (int i = 0; i < 4; ++i) {
             v[i].SetColor(1.0f, 1.0f, 1.0f, 1.0f);
             waterVertices.AddVertex(v[i]);
