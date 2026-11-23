@@ -52,6 +52,8 @@
 #define CRAFT_WAVE_DETAIL_CELL 1.4          // m, cell of the detail layer
 #define CRAFT_WAVE_DETAIL 0.25              // detail layer share (WATER_DETAIL)
 #define CRAFT_WAVE_OCTAVES 2                // fBm octaves per layer
+#define CRAFT_WAVE_LAYERS 2
+#define CRAFT_WAVE_LAYERS_BELOW 1           // seen from below: broad only
 #define CRAFT_WAVE_LACUNARITY 2.0
 #define CRAFT_WAVE_GAIN 0.5
 // Surface slope per unit of height gradient
@@ -59,6 +61,9 @@
 // Soft minimum over the feature distances: larger creases harder
 #define CRAFT_WAVE_PIT_SHARPNESS 8.0
 #define CRAFT_WAVE_MIN_WEIGHT 1e-20
+// Worley search: the cell holding p and its eight neighbours
+#define CRAFT_WAVE_SEARCH_WIDTH 3
+#define CRAFT_WAVE_SEARCH_OFFSET 1
 #define CRAFT_WAVE_WIND 0.5                 // m/s on both axes, layers opposed
 #define CRAFT_WAVE_OCTAVE_SHIFT vec2(37.2, 17.9)
 #define CRAFT_WAVE_FADE_START 0.08          // pixel footprint / cell
@@ -86,9 +91,14 @@
 #define CRAFT_WATER_SSR_ORIGIN_OFFSET 0.02  // m along the normal
 #define CRAFT_WATER_SSR_MIN_DIR_Y 0.015
 
-// ---- Hash without sine (Dave Hoskins) ----
-#define CRAFT_WATER_HASH_SCALE vec3(0.1031, 0.1030, 0.0973)
-#define CRAFT_WATER_HASH_OFFSET 33.33
+// ---- Integer lattice hash: per axis, then mixed per cell ----
+#define CRAFT_WATER_HASH_AXIS_X 0x8da6b343u
+#define CRAFT_WATER_HASH_AXIS_Y 0xd8163841u
+#define CRAFT_WATER_HASH_MIX 0x5bd1e995u
+#define CRAFT_WATER_HASH_SHIFT 15u
+#define CRAFT_WATER_HASH_HALF_BITS 16u
+#define CRAFT_WATER_HASH_LOW_MASK 0xffffu
+#define CRAFT_WATER_HASH_UNIT (1.0 / 65536.0)
 
 /// One water fragment: linear scene color before fog, and its alpha.
 struct CraftWaterResult {
@@ -96,11 +106,19 @@ struct CraftWaterResult {
     float alpha;  // 1 once the scene was read, else the veil to blend
 };
 
-/// Hash of a 2D point to [0, 1)^2.
-vec2 CraftWaterHash22(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * CRAFT_WATER_HASH_SCALE);
-    p3 += dot(p3, p3.yzx + CRAFT_WATER_HASH_OFFSET);
-    return fract((p3.xx + p3.yz) * p3.zy);
+/// Lattice hash of one axis coordinate.
+uint CraftWaterAxisHash(float v, uint axis) {
+    uint h = uint(int(v)) * axis;
+    return h ^ (h >> CRAFT_WATER_HASH_SHIFT);
+}
+
+/// Two values in [0, 1) from the hashes of a cell's axes.
+vec2 CraftWaterCellHash(uint hx, uint hy) {
+    uint h = (hx ^ hy) * CRAFT_WATER_HASH_MIX;
+    h ^= h >> CRAFT_WATER_HASH_SHIFT;
+    return vec2(uvec2(h & CRAFT_WATER_HASH_LOW_MASK,
+                      h >> CRAFT_WATER_HASH_HALF_BITS)) *
+           CRAFT_WATER_HASH_UNIT;
 }
 
 /// Gradient at p (cell units) of a soft minimum of the squared distances to
@@ -108,12 +126,19 @@ vec2 CraftWaterHash22(vec2 p) {
 vec2 CraftWaterPitGradient(vec2 p) {
     vec2 cell = floor(p);
     vec2 f = p - cell;
+    uint hx[CRAFT_WAVE_SEARCH_WIDTH], hy[CRAFT_WAVE_SEARCH_WIDTH];
+    for (int i = 0; i < CRAFT_WAVE_SEARCH_WIDTH; ++i) {
+        float o = float(i - CRAFT_WAVE_SEARCH_OFFSET);
+        hx[i] = CraftWaterAxisHash(cell.x + o, CRAFT_WATER_HASH_AXIS_X);
+        hy[i] = CraftWaterAxisHash(cell.y + o, CRAFT_WATER_HASH_AXIS_Y);
+    }
     float sum = 0.0;
     vec2 grad = vec2(0.0);
-    for (int j = -1; j <= 1; ++j) {
-        for (int i = -1; i <= 1; ++i) {
-            vec2 o = vec2(float(i), float(j));
-            vec2 d = f - o - CraftWaterHash22(cell + o);
+    for (int j = 0; j < CRAFT_WAVE_SEARCH_WIDTH; ++j) {
+        for (int i = 0; i < CRAFT_WAVE_SEARCH_WIDTH; ++i) {
+            vec2 o = vec2(float(i - CRAFT_WAVE_SEARCH_OFFSET),
+                          float(j - CRAFT_WAVE_SEARCH_OFFSET));
+            vec2 d = f - o - CraftWaterCellHash(hx[i], hy[j]);
             float w = exp(-CRAFT_WAVE_PIT_SHARPNESS * dot(d, d));
             sum += w;
             grad += w * d;
@@ -124,8 +149,9 @@ vec2 CraftWaterPitGradient(vec2 p) {
 
 /// Wave normal at world xz: xyz the normal, w the slope variance the
 /// footprint filter and the far calm removed (it blurs the sky probe).
+/// Seen from below, the broad layer only.
 vec4 CraftWaveNormal(vec2 xz, float t, float footprint, float viewDist,
-                     float facing) {
+                     float facing, bool below) {
     float calm = mix(1.0, CRAFT_WAVE_FAR_SLOPE_SCALE,
                      smoothstep(CRAFT_WAVE_CALM_START, CRAFT_WAVE_CALM_END,
                                 viewDist));
@@ -135,7 +161,8 @@ vec4 CraftWaveNormal(vec2 xz, float t, float footprint, float viewDist,
                  (1.0 - pow(CRAFT_WAVE_GAIN, float(CRAFT_WAVE_OCTAVES)));
     vec2 g = vec2(0.0);
     float lost = 0.0;
-    for (int layer = 0; layer < 2; ++layer) {
+    int layers = below ? CRAFT_WAVE_LAYERS_BELOW : CRAFT_WAVE_LAYERS;
+    for (int layer = 0; layer < layers; ++layer) {
         bool broad = layer == 0;
         float freq =
             1.0 / (broad ? CRAFT_WAVE_BROAD_CELL : CRAFT_WAVE_DETAIL_CELL);
@@ -293,7 +320,7 @@ CraftWaterResult CraftShadeWater(vec3 P, vec3 faceN, float sky) {
     bool top = faceN.y > CRAFT_WATER_TOP_FACE_MIN_Y;
     float footprint = max(length(dFdx(P.xz)), length(dFdy(P.xz)));
     vec4 wave = top ? CraftWaveNormal(P.xz, uFrame.Time, footprint, dist,
-                                      abs(facing))
+                                      abs(facing), below)
                     : vec4(faceN, 0.0);
     vec3 N = below ? -wave.xyz : wave.xyz;
     float NdotV = clamp(dot(N, V), 0.0, 1.0);
