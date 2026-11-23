@@ -479,12 +479,7 @@ void MainScene::SetupMaterial() {
     m_chunkManager.SetWaterMaterial(m_waterMaterial);
 }
 
-void MainScene::SetupLighting() {
-    // UpdateSky aims and colors the light every frame
-    m_sun = new DirectionalLight("Sun");
-    m_sun->SetIntensity(LEGACY_SUN_INTENSITY);
-    m_sun->SetLightSize(4.0f);
-
+Sleak::GraphicsConfig MainScene::BaseGraphicsConfig() {
     // Voxel-tuned graphics config: shadows and SSAO on, no SSR/IBL.
     Sleak::GraphicsConfig cfg =
         Sleak::GraphicsConfig::Preset(Sleak::GraphicsQuality::Medium);
@@ -515,8 +510,6 @@ void MainScene::SetupLighting() {
     cfg.shadowCasterDistance = 256.0f;
     cfg.shadowDistance =
         400.0f;  // pull-back > frustum, else near-clip eats shadows
-    cfg.frustumCullingEnabled = m_frustumCulling;
-    cfg.occlusionCullingEnabled = m_occlusionCulling;
     if (Sleak::CommandLine::HasFlag("--bench-postfx")) {
         cfg.ssaoEnabled = true;
         cfg.ssrEnabled = true;
@@ -525,6 +518,18 @@ void MainScene::SetupLighting() {
     cfg.occlusionBufferWidth = 256;
     cfg.occlusionBufferHeight = 144;
     cfg.maxOccluders = 192;
+    return cfg;
+}
+
+void MainScene::SetupLighting() {
+    // UpdateSky aims and colors the light every frame
+    m_sun = new DirectionalLight("Sun");
+    m_sun->SetIntensity(LEGACY_SUN_INTENSITY);
+    m_sun->SetLightSize(4.0f);
+
+    Sleak::GraphicsConfig cfg = BaseGraphicsConfig();
+    cfg.frustumCullingEnabled = m_frustumCulling;
+    cfg.occlusionCullingEnabled = m_occlusionCulling;
 
     auto* app = Sleak::Application::GetInstance();
     if (app) app->ApplyGraphicsConfig(cfg); 

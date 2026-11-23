@@ -1,15 +1,45 @@
 #include "MainMenuScene.hpp"
-#include "Game.hpp"
+
+#include <Camera/Camera.hpp>
 #include <Core/Application.hpp>
 #include <Events/KeyboardEvent.hpp>
 #include <UI/UI.hpp>
-#include "World/SaveManager.hpp"
-#include <ctime>
-#include <cstdlib>
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <ctime>
+#include <numbers>
+
+#include "Game.hpp"
+#include "World/SaveManager.hpp"
+#include "World/TimeOfDay.hpp"
 
 using namespace Sleak;
 using namespace Sleak::UI;
+
+namespace {
+
+// Menu sky: a fixed afternoon seen from above the sea, the sun to one side
+constexpr double MENU_SKY_HOURS = 16.5;
+constexpr float MENU_EYE_HEIGHT = 100.0f;
+constexpr float MENU_FOV_DEGREES = 60.0f;
+constexpr float MENU_NEAR = 0.1f;
+constexpr float MENU_FAR = 1000.0f;
+constexpr float RADIANS_PER_DEGREE = std::numbers::pi_v<float> / 180.0f;
+constexpr float MENU_SUN_ASIDE = 35.0f * RADIANS_PER_DEGREE;
+constexpr float MENU_PITCH = 25.0f * RADIANS_PER_DEGREE;
+// No terrain: open sky at the eye and no world edge to fade
+constexpr float MENU_OUTDOOR = 1.0f;
+constexpr float MENU_DRAW_DISTANCE = 0.0f;
+
+/// Sun, moon and time scalars of the menu's moment.
+SkyState MenuSky() {
+    WorldClock clock;
+    clock.SetDayFraction(WorldClock::HoursToDayFraction(MENU_SKY_HOURS));
+    return clock.ComputeSky();
+}
+
+}  // namespace
 
 MainMenuScene::MainMenuScene(const std::string& name)
     : Scene(name) {}
@@ -20,6 +50,18 @@ MainMenuScene::~MainMenuScene() {
 
 bool MainMenuScene::Initialize() {
     Scene::Initialize();
+
+    // Camera turned aside from the menu sun and tilted up over the haze
+    const Math::Vector3D sun = MenuSky().sunDirection;
+    const float yaw = std::atan2(sun.GetX(), sun.GetZ()) + MENU_SUN_ASIDE;
+    auto* camera = new Camera("MenuCamera", {0.0f, MENU_EYE_HEIGHT, 0.0f},
+                              MENU_FOV_DEGREES, MENU_NEAR, MENU_FAR);
+    camera->SetDirection({std::cos(MENU_PITCH) * std::sin(yaw),
+                          std::sin(MENU_PITCH),
+                          std::cos(MENU_PITCH) * std::cos(yaw)});
+    AddObject(camera);
+    camera->Initialize();
+    SetActiveCamera(camera);
 
     ScanSaveDirectory();
     return true;
@@ -39,6 +81,11 @@ void MainMenuScene::OnActivate() {
     if (app) {
         app->SetMouseRelativeMode(false);
         app->SetCursorVisible(true);
+        // The world's time-of-day atmosphere at the menu's moment
+        app->SetAtmosphere(EvaluateTimeOfDay(MenuSky(), SkyOptions{},
+                                             app->GetGraphicsConfig().minLight,
+                                             MENU_DRAW_DISTANCE, MENU_OUTDOOR)
+                               .atmosphere);
     }
 
     // Register key handler only while menu is active
@@ -116,35 +163,12 @@ void MainMenuScene::Update(float deltaTime) {
         }
     }
 
-    RenderBackground();
-
     switch (m_menuState) {
         case MenuState::Main:       RenderMainMenu(); break;
         case MenuState::CreateWorld: RenderCreateWorld(); break;
         case MenuState::LoadWorld:   RenderLoadWorld(); break;
         case MenuState::Loading:     RenderLoading(); break;
     }
-}
-
-void MainMenuScene::RenderBackground() {
-    float vw = GetViewportWidth();
-    float vh = GetViewportHeight();
-
-    uint64_t bgTex = LoadTextureForUI("assets/textures/Background.png");
-    if (bgTex == 0) return;
-
-    SetNextWindowPos(0, 0, true);
-    SetNextWindowSize(vw, vh, true);
-    PushStyleVarVec(StyleVar_WindowPadding, 0.0f, 0.0f);
-    BeginPanel("##MenuBackground", 0, 0, 0.0f,
-               PanelFlags_NoTitleBar | PanelFlags_NoMove | PanelFlags_NoInput);
-    PopStyleVar(1);
-
-    SetCursorPosX(0.0f);
-    SetCursorPosY(0.0f);
-    Image(bgTex, vw, vh);
-
-    EndPanel();
 }
 
 void MainMenuScene::RenderMainMenu() {

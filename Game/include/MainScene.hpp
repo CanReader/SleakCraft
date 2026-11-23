@@ -1,6 +1,7 @@
 #ifndef _MAIN_SCENE_HPP_
 #define _MAIN_SCENE_HPP_
 
+#include <Core/GraphicsConfig.hpp>
 #include <Core/Scene.hpp>
 #include <Events/ApplicationEvent.hpp>
 #include <Events/KeyboardEvent.hpp>
@@ -35,6 +36,11 @@ public:
     MainScene(const std::string& name, const std::string& savePath,
               const std::string& worldName, uint32_t seed, bool isNewWorld);
     ~MainScene() override;
+
+    /// SleakCraft's graphics settings: BSL's output look and voxel-tuned
+    /// passes. The game applies them at startup, each world again with its
+    /// culling choices.
+    static Sleak::GraphicsConfig BaseGraphicsConfig();
 
     /// Sets up the camera, material and lighting, loads or generates the
     /// world, registers benchmark metrics, and subscribes input handlers.

@@ -68,7 +68,6 @@ void SettingsPanel::Render() {
     RenderSkySection();
     RenderLightingSection();
     RenderSSAOSection();
-    RenderIBLSection();
     RenderTextureSection();
 
     UI::EndPanel();
@@ -234,20 +233,6 @@ void SettingsPanel::RenderSSAOSection() {
                 m_app->SetSSAOPower(ssaoPower);
         }
     }
-}
-
-void SettingsPanel::RenderIBLSection() {
-    UI::Separator();
-    UI::Text("-- IBL --");
-        bool iblEnabled = m_app->IsIBLEnabled();
-        float iblIntensity = m_app->GetIBLIntensity();
-        if (UI::Checkbox("IBL Enabled", &iblEnabled))
-            m_app->SetIBLEnabled(iblEnabled);
-        if (iblEnabled) {
-            if (UI::DragFloat("IBL Intensity", &iblIntensity, 0.05f, 0.0f,
-                              5.0f))
-                m_app->SetIBLIntensity(iblIntensity);
-        }
 }
 
 void SettingsPanel::RenderTextureSection() {

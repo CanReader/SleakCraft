@@ -27,6 +27,9 @@ bool Game::Initialize() {
     // Register the voxel vertex layout before any chunk mesh is created
     GetVoxelVertexFormat();
     Sleak::Application::GetInstance()->SetLightingShader(VOXEL_LIGHTING_STEM);
+    // The menu's sky shows through the game's look
+    Sleak::Application::GetInstance()->ApplyGraphicsConfig(
+        MainScene::BaseGraphicsConfig());
     Sleak::Debug::ShaderHotReload::AddSourceDirectory(SLEAKCRAFT_SHADER_DIR);
 
     m_menuScene = new MainMenuScene("MainMenuScene");
