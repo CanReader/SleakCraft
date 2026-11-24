@@ -61,6 +61,7 @@ private:
     std::vector<ColumnMesh*> m_waterScratch;
     std::vector<Sleak::MeshRange> m_cameraRanges;
     std::vector<Sleak::MeshRange> m_shadowRanges;
+    std::vector<int> m_surfaces;
 };
 
 #endif

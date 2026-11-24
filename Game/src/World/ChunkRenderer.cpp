@@ -6,6 +6,7 @@
 #include <Runtime/MeshBatch.hpp>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace {
 
@@ -108,6 +109,32 @@ void ChunkRenderer::UpdateGraph() {
     for (ColumnMesh* col : m_mgr.GetLiveColumns())
         col->reachableChunks = m_graph.Reached(col->key.x, col->key.z);
 
+    // Buried casters, under the lowest surface of the column and its eight
+    // neighbors; an unknown neighbor buries nothing
+    const int radius = m_mgr.GetRenderDistance();
+    const int width = 2 * radius + 1;
+    m_surfaces.assign(static_cast<size_t>(width) * width, Chunk::NO_SURFACE);
+    auto surfaceAt = [&](int cx, int cz) -> int* {
+        const int lx = cx - chunk[0] + radius;
+        const int lz = cz - chunk[2] + radius;
+        if (lx < 0 || lx >= width || lz < 0 || lz >= width) return nullptr;
+        return &m_surfaces[lx + lz * width];
+    };
+    for (const ColumnMesh* col : m_mgr.GetLiveColumns())
+        if (int* surface = surfaceAt(col->key.x, col->key.z))
+            *surface = col->minSurface;
+    for (ColumnMesh* col : m_mgr.GetLiveColumns()) {
+        int lowest = std::numeric_limits<int>::max();
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dx = -1; dx <= 1; ++dx) {
+                const int* surface =
+                    surfaceAt(col->key.x + dx, col->key.z + dz);
+                lowest =
+                    std::min(lowest, surface ? *surface : Chunk::NO_SURFACE);
+            }
+        col->buriedChunks = BuriedChunks(lowest);
+    }
+
     m_graphChunk = chunk;
     m_graphWater = water;
     m_graphFrame = m_frame;
@@ -209,6 +236,14 @@ void ChunkRenderer::SetCullingEnabled(bool frustum, bool occlusion) {
 
 void ChunkRenderer::RenderColumns() {
     const auto& camPos = Sleak::Camera::GetMainCameraPosition();
+    // Buried casters drop only while the eye is above ground; one band spans
+    // the world
+    const auto camColumn = m_mgr.GetColumns().find(
+        {ChunkOf(camPos.GetX()), 0, ChunkOf(camPos.GetZ())});
+    const bool aboveGround =
+        camColumn != m_mgr.GetColumns().end() &&
+        camColumn->second.minSurface != Chunk::NO_SURFACE &&
+        camPos.GetY() >= camColumn->second.minSurface + BURIED_MARGIN;
     // Front-to-back draw order for better early-z / less overdraw.
     m_renderScratch.clear();
     for (ColumnMesh* col : m_mgr.GetLiveColumns())
@@ -245,11 +280,17 @@ void ChunkRenderer::RenderColumns() {
                 m_cameraRanges);
         }
 
-        // Shadows: every chunk, every direction
+        // Shadows: every direction of the unburied chunks
         m_shadowRanges.clear();
-        if (col->castsShadow)
+        if (col->castsShadow) {
+            const int buried = aboveGround ? col->buriedChunks : 0;
             AppendStreamRanges(
-                opaque, [](int, int) { return true; }, m_shadowRanges);
+                opaque,
+                [buried](int group, int slot) {
+                    return SlotChunk(group, slot) >= buried;
+                },
+                m_shadowRanges);
+        }
 
         SubmitRanges(col->mesh, m_cameraRanges, m_shadowRanges);
     }

@@ -157,6 +157,10 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
     for (int s = 0; s < VOXEL_STREAM_COUNT; ++s) col.ranges[s] = ranges[s];
     for (int k = 0; k < COLUMN_CHUNKS; ++k) col.chunks[k] = vis[k];
     col.reachableChunks = ALL_COLUMN_CHUNKS;
+    // Every generated chunk of a column holds the same noise surface
+    for (Chunk* chunk : ready)
+        if (chunk && chunk->GetMinSurface() != Chunk::NO_SURFACE)
+            col.minSurface = chunk->GetMinSurface();
 
     // Column world AABB (16x16 XZ footprint, exact mesh Y extent).
     float minX = static_cast<float>(cx * Chunk::SIZE);

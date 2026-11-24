@@ -7,6 +7,7 @@
 #include <bitset>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <Memory/RefPtr.hpp>
 
 namespace Sleak {
@@ -45,6 +46,8 @@ class Chunk {
 public:
     static constexpr int SIZE = 16;
     static constexpr int VOLUME = SIZE * SIZE * SIZE;
+    /// GetMinSurface of a chunk WorldGenerator never filled.
+    static constexpr int NO_SURFACE = std::numeric_limits<int>::min();
     /// One bit per (x, z) column of the chunk, at x + z * SIZE.
     using Columns = std::bitset<SIZE * SIZE>;
 
@@ -126,6 +129,12 @@ public:
         m_needsGeneration.store(v, std::memory_order_release);
     }
 
+    /// Lowest noise surface height over the chunk's columns, set by
+    /// WorldGenerator::Generate; NO_SURFACE for restored or edit-made chunks.
+    int GetMinSurface() const { return m_minSurface; }
+    /// Records the lowest noise surface height of the chunk's columns.
+    void SetMinSurface(int height) { m_minSurface = height; }
+
     int GetActiveIndex() const { return m_activeIndex; }
     void SetActiveIndex(int idx) { m_activeIndex = idx; }
 
@@ -175,6 +184,7 @@ private:
     bool m_needsRebuild = false;
     std::atomic<bool> m_needsGeneration{true};
     int m_activeIndex = -1;
+    int m_minSurface = NO_SURFACE;
     int8_t m_occRunMinY[4][OCC_MAX_RUNS] = {
         {-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}};
     int8_t m_occRunMaxY[4][OCC_MAX_RUNS] = {

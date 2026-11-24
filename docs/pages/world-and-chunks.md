@@ -174,8 +174,13 @@ and `RenderWater` submit them with `Sleak::MeshBatch::DrawRanges`. The camera dr
 the chunks whose exact box is in the frustum and, per chunk, the directions with a face
 that can face it (`FacingGroups`, which never drops a front face: the GPU would cull the
 rest anyway). Shadow casters, the visible columns inside the light box plus every column
-within 48 m, get their own shadow-only command with every chunk and direction, or one
-command for both passes when the two match. The renderer walks the dense list
+within 48 m, get their own shadow-only command with every direction of their chunks, or
+one command for both passes when the two match. While the eye is two blocks or more above
+the lowest noise surface of its column, casters skip their buried chunks
+(`ColumnMesh::buriedChunks`): those whose top lies two blocks or more under the lowest
+noise surface of the column and its eight neighbors, which `WorldGenerator::Generate`
+records per chunk. A cave floor lit through a cave mouth can lose a few pixels of shadow
+from that rock; underground, every chunk casts. The renderer walks the dense list
 `ChunkManager::GetLiveColumns` instead of the column map; `AddColumn` and `EraseColumn`
 keep the two in step.
 

@@ -83,6 +83,21 @@ constexpr uint8_t FacingGroups(float cx, float cy, float cz, float x0, float y0,
     return groups;
 }
 
+/// Blocks of terrain over the top of a buried chunk, and between the eye
+/// and its column's surface for buried chunks to skip casting.
+inline constexpr int BURIED_MARGIN = 2;
+
+/// Bottom chunks of a column whose tops lie BURIED_MARGIN or more under a
+/// noise surface height; Chunk::NO_SURFACE buries nothing.
+constexpr uint8_t BuriedChunks(int surface) {
+    if (surface == Chunk::NO_SURFACE || surface < BURIED_MARGIN) return 0;
+    const int chunks = (surface - BURIED_MARGIN) / Chunk::SIZE;
+    return static_cast<uint8_t>(chunks < COLUMN_CHUNKS ? chunks
+                                                       : COLUMN_CHUNKS);
+}
+// A surface at the top of the fourth chunk buries the three below it
+static_assert(BuriedChunks(4 * Chunk::SIZE) == 3);
+
 /// Culling data of one chunk of a column; unmeshed chunks read as air.
 struct ChunkVis {
     /// Lowest quad corner in blocks.
@@ -137,6 +152,11 @@ struct ColumnMesh {
     /// Band chunks the last visibility graph run reached; all of them
     /// until a run follows the rebuild.
     uint8_t reachableChunks = ALL_COLUMN_CHUNKS;
+    /// Lowest noise surface height of the column, or Chunk::NO_SURFACE.
+    int minSurface = Chunk::NO_SURFACE;
+    /// Bottom chunks buried under the surfaces of the columns around it,
+    /// skipped as shadow casters while the eye is above ground.
+    uint8_t buriedChunks = 0;
     Sleak::Math::AABB bounds;
     std::vector<Sleak::Math::AABB> occluders;
     float distSq = 0.0f;
