@@ -70,6 +70,8 @@ public:
     void SetRenderDistance(int chunks);
 
     int GetRenderDistance() const { return m_renderDistance; }
+    /// Largest render distance the CLI, saves and settings accept.
+    static constexpr int MAX_RENDER_DISTANCE = 32;
 
     /// Starts or stops the worker thread pool for background generation/meshing.
     void SetMultithreaded(bool enabled);
@@ -147,6 +149,12 @@ public:
     ColumnMesh& AddColumn(const ColumnKey& key);
     /// Removes the column mesh of a key, if any.
     void EraseColumn(const ColumnKey& key);
+    /// Releases a column's GPU mesh, keeping the column.
+    void ReleaseColumnMesh(ColumnMesh& col);
+    /// Counts a column's new GPU mesh toward the mesh VRAM total.
+    void CountColumnMesh(const ColumnMesh& col) {
+        m_meshBytes += ColumnMeshBytes(col);
+    }
     /// Columns changed: urgent re-runs the visibility graph next frame,
     /// otherwise it re-runs within a few frames.
     void MarkGraphDirty(bool urgent) { m_renderer.MarkGraphDirty(urgent); }
@@ -187,11 +195,12 @@ private:
 
     // Column mesh management — merges all Y chunks per XZ column into one mesh
     void RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer = true);
-    // Max number of column meshes before we consider VRAM exhausted.
-    // At ~1.1 MB per column (96 bytes/vertex * ~12000 vertices), 800
-    // columns ≈ 880 MB mesh VRAM — conservative for a 6 GB GPU with
-    // other allocations (textures, framebuffers, etc.).
-    static constexpr int MAX_COLUMN_MESHES = 800;
+    // Column mesh VRAM (1.5 GiB) past which unloading speeds up: rd 32
+    // needs about 1 GB, leaving room on a 6 GB GPU for render targets
+    // and the rest.
+    static constexpr size_t MESH_VRAM_BUDGET_BYTES = size_t{1536} << 20;
+    /// Vertex bytes of every column mesh.
+    size_t m_meshBytes = 0;
 
     ColumnMeshMap m_columns;
     std::vector<ColumnMesh*> m_liveColumns;

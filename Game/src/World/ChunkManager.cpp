@@ -36,6 +36,7 @@ void ChunkManager::EraseColumn(const ColumnKey& key) {
 
 ColumnMeshMap::iterator ChunkManager::EraseColumn(ColumnMeshMap::iterator it) {
     MarkGraphDirty(false);
+    m_meshBytes -= ColumnMeshBytes(it->second);
     // Swap-remove from the live list
     ColumnMesh* last = m_liveColumns.back();
     last->liveIndex = it->second.liveIndex;
@@ -48,6 +49,12 @@ void ChunkManager::ClearColumns() {
     MarkGraphDirty(true);
     m_liveColumns.clear();
     m_columns.clear();
+    m_meshBytes = 0;
+}
+
+void ChunkManager::ReleaseColumnMesh(ColumnMesh& col) {
+    m_meshBytes -= ColumnMeshBytes(col);
+    col.mesh = {};
 }
 
 void ChunkManager::SetMultithreaded(bool enabled) {
@@ -561,10 +568,9 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
     // Process pending unloads gradually (rate-limited)
     {
         int unloaded = 0;
-        // Over-cap safety valve: drain the backlog faster than it grows
+        // Over-budget safety valve: drain the backlog faster than it grows
         int unloadBudget = m_chunksPerFrame;
-        if (static_cast<int>(m_columns.size()) > MAX_COLUMN_MESHES)
-            unloadBudget *= 4;
+        if (m_meshBytes > MESH_VRAM_BUDGET_BYTES) unloadBudget *= 4;
         std::unordered_set<ColumnKey, ColumnKeyHash> columnsToCheck;
         std::vector<ChunkCoord> deferredUnloads;
         while (unloaded < unloadBudget && !m_pendingUnload.empty()) {
@@ -618,7 +624,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                 // and queue a rebuild so the next pass allocates a
                 // smaller buffer.
                 auto it = m_columns.find(colKey);
-                if (it != m_columns.end()) it->second.mesh = {};
+                if (it != m_columns.end()) ReleaseColumnMesh(it->second);
                 m_dirtyColumns.insert(colKey);
             }
         }

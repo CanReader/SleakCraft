@@ -81,8 +81,10 @@ things, each under its own per-frame budget:
   chunk and queues any missing chunk up to `GetCachedColumnMaxCy(cx, cz)` (the highest
   chunk-Y with generated content for that column, from the heightmap cache described
   below) into `m_pendingLoad`. Chunks that fall outside the render distance are queued
-  into `m_pendingUnload` and drained gradually, with an over-cap safety valve that
-  unloads faster than the backlog can grow.
+  into `m_pendingUnload` and drained gradually, with a safety valve that unloads faster
+  than the backlog can grow while the column meshes hold more than
+  `MESH_VRAM_BUDGET_BYTES` (1.5 GiB) of vertices. The render distance goes up to
+  `ChunkManager::MAX_RENDER_DISTANCE` (32 chunks) from the CLI, saves and settings.
 - **Generation dispatch**, budgeted by `m_dispatchPerFrame` (default 64 chunks/frame).
 - **Remesh and upload**, budgeted separately by `m_chunksPerFrame` (32, remesh + unload)
   and `m_uploadsPerFrame` (16, column mesh GPU uploads).

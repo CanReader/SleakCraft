@@ -160,7 +160,8 @@ void SettingsPanel::RenderMSAASection() {
 void SettingsPanel::RenderRenderDistanceSection() {
     UI::Separator();
     float rd = static_cast<float>(m_chunkManager.GetRenderDistance());
-    if (UI::DragFloat("Render Distance", &rd, 1.0f, 2.0f, 16.0f)) {
+    if (UI::DragFloat("Render Distance", &rd, 1.0f, 2.0f,
+                      static_cast<float>(ChunkManager::MAX_RENDER_DISTANCE))) {
         m_chunkManager.SetRenderDistance(static_cast<int>(rd));
         float drawDist = m_chunkManager.GetDrawDistance();
         auto* lm = m_scene.GetLightManager();

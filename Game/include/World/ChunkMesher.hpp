@@ -163,6 +163,14 @@ struct ColumnMesh {
     uint32_t liveIndex = 0;  ///< slot in ChunkManager::GetLiveColumns
 };
 
+/// Vertex bytes of a column's GPU mesh, 0 once released.
+inline size_t ColumnMeshBytes(const ColumnMesh& col) {
+    if (!col.mesh.IsValid()) return 0;
+    const StreamRanges& last = col.ranges[VOXEL_STREAM_COUNT - 1];
+    return size_t{last.start[VOXEL_DIR_GROUPS * COLUMN_CHUNKS]} *
+           VOXEL_QUAD_CORNERS * sizeof(VoxelVertex);
+}
+
 using ColumnMeshMap = std::unordered_map<ColumnKey, ColumnMesh, ColumnKeyHash>;
 using ColumnKeySet = std::unordered_set<ColumnKey, ColumnKeyHash>;
 

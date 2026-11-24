@@ -142,7 +142,8 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
 
     // Release old GPU buffers BEFORE allocating new ones to reduce peak VRAM.
     auto existingIt = m_mgr.GetColumns().find(key);
-    if (existingIt != m_mgr.GetColumns().end()) existingIt->second.mesh = {};
+    if (existingIt != m_mgr.GetColumns().end())
+        m_mgr.ReleaseColumnMesh(existingIt->second);
 
     Sleak::MeshHandle mesh = QuadIndexBuffer::CreateMesh(mergedVerts);
     if (!mesh.IsValid()) {
@@ -155,6 +156,7 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
                           : m_mgr.AddColumn(key);
     col.mesh = std::move(mesh);
     for (int s = 0; s < VOXEL_STREAM_COUNT; ++s) col.ranges[s] = ranges[s];
+    m_mgr.CountColumnMesh(col);
     for (int k = 0; k < COLUMN_CHUNKS; ++k) col.chunks[k] = vis[k];
     col.reachableChunks = ALL_COLUMN_CHUNKS;
     // Every generated chunk of a column holds the same noise surface
