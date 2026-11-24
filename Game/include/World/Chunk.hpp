@@ -6,7 +6,6 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
-#include <Runtime/MeshData.hpp>
 #include <Memory/RefPtr.hpp>
 
 namespace Sleak {
@@ -15,10 +14,9 @@ namespace Sleak {
     class SceneBase;
 }
 
-/// Vertex/index buffers produced by GenerateMeshData, staged for GPU upload.
+/// Quads produced by GenerateMeshData, staged for GPU upload.
 struct ChunkMeshData {
     VoxelVertexBuffer vertices;
-    Sleak::IndexGroup indices;
 };
 
 /// One 16x16x16 block of the voxel grid. Owns its block data and produces
@@ -119,7 +117,7 @@ private:
     /// out of range; treats missing neighbors at the world ceiling/floor as air.
     bool IsBlockSolidAt(int x, int y, int z) const;
     /// Opacity at a local coordinate, with the same neighbor-crossing rules
-    /// as IsBlockSolidAt.
+    /// as IsBlockSolidAt, except that below the world floor reads opaque.
     bool IsBlockOpaqueAt(int x, int y, int z) const;
 
     uint8_t m_blocks[VOLUME];

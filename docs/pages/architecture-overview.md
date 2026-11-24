@@ -13,8 +13,8 @@ keep the two decoupled.
 | `PlayerController` / `BlockInteraction` | Movement and collision; block break, place, and hotbar selection. |
 | `HudPanel` / `SettingsPanel` / `Hotbar` | The three UI panels, all built on `Sleak::UI` only. |
 | `BlockEffects` | Break and place animations; the deferred source of confirmed placements. |
-| `TextureAtlas` | All-static atlas builder and tile UV lookup; owned by nobody. |
-| `VoxelVertex` | The 48-byte vertex struct SleakCraft registers with the engine. |
+| `TextureAtlas` | All-static atlas builder and its cell grid; owned by nobody. |
+| `VoxelVertex` | The packed 16-byte vertex struct SleakCraft registers with the engine. |
 
 ---
 
@@ -183,13 +183,16 @@ An empty stem is not a fallback to a default shader; it skips that pass for the 
 entirely, and a stem that fails to compile is logged as an error, not silently
 substituted. `VertexFormatRegistry::Register` returns a `VertexFormatHandle` (a plain
 `uint32_t`; `0` is the engine's built-in default vertex, registered formats start at
-`1`). Shader stems are consumed by the Vulkan backend only: OpenGL binds a registered
-layout's attributes to its own fixed shader programs instead, which is why
-`Game/assets/shaders` has no `_gl` variant of `gbuffer_voxel` or `shadow_depth_voxel`.
+`1`). OpenGL reads a stem only where its `<stem>_gl.vert` variant exists; otherwise
+that pass keeps the engine's own program. SleakCraft ships `_gl` variants of all four
+voxel stems.
 
 SleakCraft is the sole consumer of this API. It owns `VoxelVertex`
-(`Game/include/World/VoxelVertex.hpp`), a 48-byte struct, and registers it once through a
-function-local static:
+(`Game/include/World/VoxelVertex.hpp`), a packed 16-byte struct: X and Z as fixed-point
+`int32` in 1/256 block, then one word holding the signed Y, face id, UV corner and AO
+level, and one holding the atlas tile. `craft/voxel_vertex.glsl` decodes it in every
+voxel vertex shader into the same position, normal, color and atlas UV floats. The game
+registers it once through a function-local static:
 
 ```cpp
 inline Sleak::VertexFormatHandle GetVoxelVertexFormat() {
@@ -197,10 +200,10 @@ inline Sleak::VertexFormatHandle GetVoxelVertexFormat() {
         Sleak::VertexLayoutDesc desc;
         desc.stride = sizeof(VoxelVertex);
         desc.attributes = {
-            {0, Sleak::VertexAttribFormat::Float3, offsetof(VoxelVertex, px)}, // position
-            {1, Sleak::VertexAttribFormat::Float3, offsetof(VoxelVertex, nx)}, // normal
-            {2, Sleak::VertexAttribFormat::Float4, offsetof(VoxelVertex, r)},  // color/AO
-            {3, Sleak::VertexAttribFormat::Float2, offsetof(VoxelVertex, u)},  // texcoord
+            {0, Sleak::VertexAttribFormat::Int1, offsetof(VoxelVertex, x)},
+            {1, Sleak::VertexAttribFormat::Int1, offsetof(VoxelVertex, z)},
+            {2, Sleak::VertexAttribFormat::UInt1, offsetof(VoxelVertex, yFace)},
+            {3, Sleak::VertexAttribFormat::UInt1, offsetof(VoxelVertex, tile)},
         };
         desc.shaderStem            = "flat_shader";
         desc.shadowShaderStem      = "shadow_depth_voxel";
@@ -212,11 +215,14 @@ inline Sleak::VertexFormatHandle GetVoxelVertexFormat() {
 }
 ```
 
-`Sleak::MeshBatch::CreateMesh(VertexFormatHandle, const void* vertexData,
-size_t vertexBytes, const uint32_t* indices, size_t indexCount)` builds the GPU buffers
-for one mesh keyed to that handle; the resulting `Sleak::MeshHandle` carries the handle
-so the renderer binds the right pipeline automatically. `ChunkMesher` is the only caller
-for voxel geometry (@ref world-and-chunks).
+Voxel meshes are quads, so they all share one index buffer: `QuadIndexBuffer`
+(`Game/include/World/QuadIndexBuffer.hpp`) uploads the pattern `4q + {0, 3, 1, 1, 3, 2}`
+once through `Sleak::MeshBatch::CreateSharedIndices`, and its `CreateMesh` uploads a
+mesh's vertices through the `Sleak::MeshBatch::CreateMesh` overload that takes the
+shared handle. The resulting `Sleak::MeshHandle` carries the format handle so the
+renderer binds the right pipeline automatically. A quad whose AO splits it along its
+0-2 diagonal is stored starting at corner 3. `ChunkMesher` and `BlockEffects` are the
+callers (@ref world-and-chunks).
 
 The four backend variants of a shader (`name.vert`/`name.frag` plus compiled `.spv` for
 Vulkan, `name_gl.vert`/`name_gl.frag` for OpenGL, `name.hlsl` for DirectX 11,

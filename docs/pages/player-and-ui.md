@@ -11,7 +11,7 @@ together by `MainScene`.
 | `HudPanel` | Performance and world readouts plus the crosshair. |
 | `SettingsPanel` | Render distance, graphics toggles, and the attached sun light. |
 | `Hotbar` | The block selection strip, driven entirely by `BlockInteraction`. |
-| `TextureAtlas` | Static tile UV lookup used for the block icons the panels draw. |
+| `TextureAtlas` | Static builder of the block atlas, whose filter and LOD bias the settings panel sets. |
 
 ---
 
@@ -61,7 +61,8 @@ public:
 ```
 
 A left click raycasts from the camera through `VoxelQueries::VoxelRaycast` and breaks
-the hit block; a right click places the currently selected hotbar block into the empty
+the hit block, except on the world floor (y 0), which stays closed because nothing
+below it has faces; a right click places the currently selected hotbar block into the empty
 cell just before the hit. Placement does not call `ChunkManager::SetBlockAt` directly:
 it goes through `BlockEffects::SpawnPlaceEffect`, which plays a scale-in animation, and
 the actual voxel edit only lands once `BlockInteraction::DrainCompletedPlacements` pops

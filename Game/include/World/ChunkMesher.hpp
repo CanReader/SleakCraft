@@ -66,8 +66,6 @@ private:
     // Merge scratch, reused across rebuilds
     VoxelVertexBuffer m_mergedVerts;
     VoxelVertexBuffer m_mergedWaterVerts;
-    std::vector<uint32_t> m_mergedIndices;
-    std::vector<uint32_t> m_mergedWaterIndices;
 };
 
 #endif

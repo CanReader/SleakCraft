@@ -3,14 +3,11 @@
 
 // ============================================================
 // GBuffer Geometry Pass - Voxel Vertex Shader
-// Compact VoxelVertex layout: position, normal, color, UV only
+// Packed VoxelVertex: position, normal, color, UV only
 // (no tangent, no bone data)
 // ============================================================
 
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec4 inColor;
-layout(location = 3) in vec2 inUV;
+#include "craft/voxel_vertex.glsl"
 
 // Transform push constant (same as default_shader.vert)
 layout(push_constant) uniform TransformPC {
@@ -30,6 +27,11 @@ layout(location = 5) out vec2 fragUV;
 layout(location = 6) out vec4 fragShadowCoord;
 
 void main() {
+    vec3 inPosition = CraftVoxelPosition();
+    vec3 inNormal = CraftVoxelNormal();
+    vec4 inColor = CraftVoxelColor();
+    vec2 inUV = CraftVoxelUV();
+
     gl_Position = WVP * vec4(inPosition, 1.0);
     gl_Position.y = -gl_Position.y;  // Vulkan Y-axis flip
     gl_Position = SleakFrameGuardClip(gl_Position);

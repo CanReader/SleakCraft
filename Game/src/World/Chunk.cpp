@@ -1,5 +1,5 @@
 #include "World/Chunk.hpp"
-#include "World/TextureAtlas.hpp"
+#include "World/WorldGenerator.hpp"
 #include <Core/GameObject.hpp>
 #include <Core/SceneBase.hpp>
 #include <ECS/Components/TransformComponent.hpp>
@@ -10,6 +10,19 @@
 
 using namespace Sleak;
 using namespace Sleak::Math;
+
+namespace {
+
+// Water surface above the block base in packed position units
+constexpr int32_t WATER_SURFACE_UNITS =
+    static_cast<int32_t>(WATER_SURFACE_HEIGHT * VOXEL_POS_UNITS);
+static_assert(WATER_SURFACE_UNITS == WATER_SURFACE_HEIGHT * VOXEL_POS_UNITS);
+// The packed Y holds the top face of the highest block
+constexpr int32_t WORLD_TOP_UNITS =
+    (WorldGenerator::MAX_CHUNK_Y + 1) * Chunk::SIZE * VOXEL_POS_UNITS;
+static_assert(WORLD_TOP_UNITS < 1 << (VOXEL_Y_BITS - 1));
+
+}  // namespace
 
 Chunk::Chunk(int cx, int cy, int cz) : m_cx(cx), m_cy(cy), m_cz(cz) {
     memset(m_blocks, static_cast<uint8_t>(BlockType::Air), VOLUME);
@@ -82,7 +95,8 @@ bool Chunk::IsBlockOpaqueAt(int x, int y, int z) const {
     if (y < 0) {
         auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::Bottom)];
         if (nb) return IsBlockOpaque(nb->GetBlock(x, y + SIZE, z));
-        return false;
+        // Under the world floor: the bottom layer needs no faces
+        return m_cy <= WorldGenerator::MIN_CHUNK_Y;
     }
     if (z >= SIZE) {
         auto* nb = m_neighbors[static_cast<uint8_t>(BlockFace::North)];
@@ -106,7 +120,6 @@ bool Chunk::IsBlockOpaqueAt(int x, int y, int z) const {
 
 void Chunk::GenerateMeshData() {
     VoxelVertexBuffer vertices;
-    IndexGroup indices;
 
     bool opaque[18][18][18];
     bool solid[18][18][18];
@@ -165,9 +178,7 @@ void Chunk::GenerateMeshData() {
         return 3 - (static_cast<int>(side1) + static_cast<int>(side2) + static_cast<int>(corner));
     };
 
-    auto fastFaceAO = [&](BlockFace face, int x, int y, int z, float ao[4]) {
-        static constexpr float AO_TABLE[] = {0.40f, 0.68f, 0.88f, 1.0f};
-
+    auto fastFaceAO = [&](BlockFace face, int x, int y, int z, uint32_t ao[4]) {
         auto isSolid = [&](int dx, int dy, int dz) {
             return solid[dy+1][dz+1][dx+1];
         };
@@ -175,122 +186,95 @@ void Chunk::GenerateMeshData() {
         switch (face) {
             case BlockFace::Top: {
                 int ay = y + 1;
-                ao[0] = AO_TABLE[fastCalcAO(isSolid(x-1,ay,z),   isSolid(x,ay,z-1),   isSolid(x-1,ay,z-1))];
-                ao[1] = AO_TABLE[fastCalcAO(isSolid(x-1,ay,z),   isSolid(x,ay,z+1),   isSolid(x-1,ay,z+1))];
-                ao[2] = AO_TABLE[fastCalcAO(isSolid(x+1,ay,z),   isSolid(x,ay,z+1),   isSolid(x+1,ay,z+1))];
-                ao[3] = AO_TABLE[fastCalcAO(isSolid(x+1,ay,z),   isSolid(x,ay,z-1),   isSolid(x+1,ay,z-1))];
+                ao[0] = fastCalcAO(isSolid(x - 1, ay, z), isSolid(x, ay, z - 1),
+                                   isSolid(x - 1, ay, z - 1));
+                ao[1] = fastCalcAO(isSolid(x - 1, ay, z), isSolid(x, ay, z + 1),
+                                   isSolid(x - 1, ay, z + 1));
+                ao[2] = fastCalcAO(isSolid(x + 1, ay, z), isSolid(x, ay, z + 1),
+                                   isSolid(x + 1, ay, z + 1));
+                ao[3] = fastCalcAO(isSolid(x + 1, ay, z), isSolid(x, ay, z - 1),
+                                   isSolid(x + 1, ay, z - 1));
                 break;
             }
             case BlockFace::Bottom: {
                 int ay = y - 1;
-                ao[0] = AO_TABLE[fastCalcAO(isSolid(x-1,ay,z),   isSolid(x,ay,z+1),   isSolid(x-1,ay,z+1))];
-                ao[1] = AO_TABLE[fastCalcAO(isSolid(x-1,ay,z),   isSolid(x,ay,z-1),   isSolid(x-1,ay,z-1))];
-                ao[2] = AO_TABLE[fastCalcAO(isSolid(x+1,ay,z),   isSolid(x,ay,z-1),   isSolid(x+1,ay,z-1))];
-                ao[3] = AO_TABLE[fastCalcAO(isSolid(x+1,ay,z),   isSolid(x,ay,z+1),   isSolid(x+1,ay,z+1))];
+                ao[0] = fastCalcAO(isSolid(x - 1, ay, z), isSolid(x, ay, z + 1),
+                                   isSolid(x - 1, ay, z + 1));
+                ao[1] = fastCalcAO(isSolid(x - 1, ay, z), isSolid(x, ay, z - 1),
+                                   isSolid(x - 1, ay, z - 1));
+                ao[2] = fastCalcAO(isSolid(x + 1, ay, z), isSolid(x, ay, z - 1),
+                                   isSolid(x + 1, ay, z - 1));
+                ao[3] = fastCalcAO(isSolid(x + 1, ay, z), isSolid(x, ay, z + 1),
+                                   isSolid(x + 1, ay, z + 1));
                 break;
             }
             case BlockFace::North: {
                 int az = z + 1;
-                ao[0] = AO_TABLE[fastCalcAO(isSolid(x+1,y,az),   isSolid(x,y-1,az),   isSolid(x+1,y-1,az))];
-                ao[1] = AO_TABLE[fastCalcAO(isSolid(x+1,y,az),   isSolid(x,y+1,az),   isSolid(x+1,y+1,az))];
-                ao[2] = AO_TABLE[fastCalcAO(isSolid(x-1,y,az),   isSolid(x,y+1,az),   isSolid(x-1,y+1,az))];
-                ao[3] = AO_TABLE[fastCalcAO(isSolid(x-1,y,az),   isSolid(x,y-1,az),   isSolid(x-1,y-1,az))];
+                ao[0] = fastCalcAO(isSolid(x + 1, y, az), isSolid(x, y - 1, az),
+                                   isSolid(x + 1, y - 1, az));
+                ao[1] = fastCalcAO(isSolid(x + 1, y, az), isSolid(x, y + 1, az),
+                                   isSolid(x + 1, y + 1, az));
+                ao[2] = fastCalcAO(isSolid(x - 1, y, az), isSolid(x, y + 1, az),
+                                   isSolid(x - 1, y + 1, az));
+                ao[3] = fastCalcAO(isSolid(x - 1, y, az), isSolid(x, y - 1, az),
+                                   isSolid(x - 1, y - 1, az));
                 break;
             }
             case BlockFace::South: {
                 int az = z - 1;
-                ao[0] = AO_TABLE[fastCalcAO(isSolid(x-1,y,az),   isSolid(x,y-1,az),   isSolid(x-1,y-1,az))];
-                ao[1] = AO_TABLE[fastCalcAO(isSolid(x-1,y,az),   isSolid(x,y+1,az),   isSolid(x-1,y+1,az))];
-                ao[2] = AO_TABLE[fastCalcAO(isSolid(x+1,y,az),   isSolid(x,y+1,az),   isSolid(x+1,y+1,az))];
-                ao[3] = AO_TABLE[fastCalcAO(isSolid(x+1,y,az),   isSolid(x,y-1,az),   isSolid(x+1,y-1,az))];
+                ao[0] = fastCalcAO(isSolid(x - 1, y, az), isSolid(x, y - 1, az),
+                                   isSolid(x - 1, y - 1, az));
+                ao[1] = fastCalcAO(isSolid(x - 1, y, az), isSolid(x, y + 1, az),
+                                   isSolid(x - 1, y + 1, az));
+                ao[2] = fastCalcAO(isSolid(x + 1, y, az), isSolid(x, y + 1, az),
+                                   isSolid(x + 1, y + 1, az));
+                ao[3] = fastCalcAO(isSolid(x + 1, y, az), isSolid(x, y - 1, az),
+                                   isSolid(x + 1, y - 1, az));
                 break;
             }
             case BlockFace::East: {
                 int ax = x + 1;
-                ao[0] = AO_TABLE[fastCalcAO(isSolid(ax,y,z-1),   isSolid(ax,y-1,z),   isSolid(ax,y-1,z-1))];
-                ao[1] = AO_TABLE[fastCalcAO(isSolid(ax,y,z-1),   isSolid(ax,y+1,z),   isSolid(ax,y+1,z-1))];
-                ao[2] = AO_TABLE[fastCalcAO(isSolid(ax,y,z+1),   isSolid(ax,y+1,z),   isSolid(ax,y+1,z+1))];
-                ao[3] = AO_TABLE[fastCalcAO(isSolid(ax,y,z+1),   isSolid(ax,y-1,z),   isSolid(ax,y-1,z+1))];
+                ao[0] = fastCalcAO(isSolid(ax, y, z - 1), isSolid(ax, y - 1, z),
+                                   isSolid(ax, y - 1, z - 1));
+                ao[1] = fastCalcAO(isSolid(ax, y, z - 1), isSolid(ax, y + 1, z),
+                                   isSolid(ax, y + 1, z - 1));
+                ao[2] = fastCalcAO(isSolid(ax, y, z + 1), isSolid(ax, y + 1, z),
+                                   isSolid(ax, y + 1, z + 1));
+                ao[3] = fastCalcAO(isSolid(ax, y, z + 1), isSolid(ax, y - 1, z),
+                                   isSolid(ax, y - 1, z + 1));
                 break;
             }
             case BlockFace::West: {
                 int ax = x - 1;
-                ao[0] = AO_TABLE[fastCalcAO(isSolid(ax,y,z+1),   isSolid(ax,y-1,z),   isSolid(ax,y-1,z+1))];
-                ao[1] = AO_TABLE[fastCalcAO(isSolid(ax,y,z+1),   isSolid(ax,y+1,z),   isSolid(ax,y+1,z+1))];
-                ao[2] = AO_TABLE[fastCalcAO(isSolid(ax,y,z-1),   isSolid(ax,y+1,z),   isSolid(ax,y+1,z-1))];
-                ao[3] = AO_TABLE[fastCalcAO(isSolid(ax,y,z-1),   isSolid(ax,y-1,z),   isSolid(ax,y-1,z-1))];
+                ao[0] = fastCalcAO(isSolid(ax, y, z + 1), isSolid(ax, y - 1, z),
+                                   isSolid(ax, y - 1, z + 1));
+                ao[1] = fastCalcAO(isSolid(ax, y, z + 1), isSolid(ax, y + 1, z),
+                                   isSolid(ax, y + 1, z + 1));
+                ao[2] = fastCalcAO(isSolid(ax, y, z - 1), isSolid(ax, y + 1, z),
+                                   isSolid(ax, y + 1, z - 1));
+                ao[3] = fastCalcAO(isSolid(ax, y, z - 1), isSolid(ax, y - 1, z),
+                                   isSolid(ax, y - 1, z - 1));
                 break;
             }
         }
     };
 
-    auto fastAddFace = [&](BlockFace face, int x, int y, int z, BlockType type) {
-        AtlasUV uv = TextureAtlas::GetTileUV(GetBlockTextureTile(type, face));
-        uint32_t base = static_cast<uint32_t>(vertices.GetSize());
-        float bx = static_cast<float>(x + m_cx * SIZE);
-        float by = static_cast<float>(y + m_cy * SIZE);
-        float bz = static_cast<float>(z + m_cz * SIZE);
-
-        float ao[4];
+    auto fastAddFace = [&](BlockFace face, int x, int y, int z,
+                           BlockType type) {
+        uint32_t ao[VOXEL_QUAD_CORNERS];
         fastFaceAO(face, x, y, z, ao);
-
-        ::VoxelVertex v[4];
-        switch (face) {
-            case BlockFace::Top:
-                v[0] = ::VoxelVertex(bx,     by + 1, bz,     0, 1, 0, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx,     by + 1, bz + 1, 0, 1, 0, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx + 1, by + 1, bz + 1, 0, 1, 0, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx + 1, by + 1, bz,     0, 1, 0, uv.u1, uv.v1);
-                break;
-            case BlockFace::Bottom:
-                v[0] = ::VoxelVertex(bx,     by, bz + 1, 0, -1, 0, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx,     by, bz,     0, -1, 0, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx + 1, by, bz,     0, -1, 0, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx + 1, by, bz + 1, 0, -1, 0, uv.u1, uv.v1);
-                break;
-            case BlockFace::North:
-                v[0] = ::VoxelVertex(bx + 1, by,     bz + 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx + 1, by + 1, bz + 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx,     by + 1, bz + 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx,     by,     bz + 1, 0, 0, 1, uv.u1, uv.v1);
-                break;
-            case BlockFace::South:
-                v[0] = ::VoxelVertex(bx,     by,     bz, 0, 0, -1, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx,     by + 1, bz, 0, 0, -1, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx + 1, by + 1, bz, 0, 0, -1, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx + 1, by,     bz, 0, 0, -1, uv.u1, uv.v1);
-                break;
-            case BlockFace::East:
-                v[0] = ::VoxelVertex(bx + 1, by,     bz,     1, 0, 0, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx + 1, by + 1, bz,     1, 0, 0, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx + 1, by + 1, bz + 1, 1, 0, 0, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx + 1, by,     bz + 1, 1, 0, 0, uv.u1, uv.v1);
-                break;
-            case BlockFace::West:
-                v[0] = ::VoxelVertex(bx, by,     bz + 1, -1, 0, 0, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx, by + 1, bz + 1, -1, 0, 0, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx, by + 1, bz,     -1, 0, 0, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx, by,     bz,     -1, 0, 0, uv.u1, uv.v1);
-                break;
-        }
-
-        for (int i = 0; i < 4; ++i) {
-            v[i].SetColor(ao[i], ao[i], ao[i], 1.0f);
-            vertices.AddVertex(v[i]);
-        }
-
-        if (ao[0] + ao[2] > ao[1] + ao[3]) {
-            indices.add(base); indices.add(base + 2); indices.add(base + 1);
-            indices.add(base); indices.add(base + 3); indices.add(base + 2);
-        } else {
-            indices.add(base); indices.add(base + 3); indices.add(base + 1);
-            indices.add(base + 1); indices.add(base + 3); indices.add(base + 2);
-        }
+        // Split along the brighter diagonal
+        const bool split02 = VOXEL_AO_LEVELS[ao[0]] + VOXEL_AO_LEVELS[ao[2]] >
+                             VOXEL_AO_LEVELS[ao[1]] + VOXEL_AO_LEVELS[ao[3]];
+        vertices.AddFace(face, (x + m_cx * SIZE) * VOXEL_POS_UNITS,
+                         (y + m_cy * SIZE) * VOXEL_POS_UNITS,
+                         (z + m_cz * SIZE) * VOXEL_POS_UNITS, VOXEL_POS_UNITS,
+                         ao, GetBlockTextureTile(type, face),
+                         split02 ? VOXEL_QUAD_START_02 : 0);
     };
 
     // Water mesh gets separate buffers
     VoxelVertexBuffer waterVertices;
-    IndexGroup waterIndices;
 
     // Helper to check if neighbor is water
     auto isWater = [&](int x, int y, int z) -> bool {
@@ -310,65 +294,15 @@ void Chunk::GenerateMeshData() {
         return false;
     };
 
-    // Water face emitter — lowered top, no AO, blue tint vertex color
+    // Water face emitter: lowered top, unoccluded color (its g is the water
+    // shader's sky light, open sky until phase 8)
     auto addWaterFace = [&](BlockFace face, int x, int y, int z) {
-        AtlasUV uv = TextureAtlas::GetTileUV(GetBlockTextureTile(BlockType::Water, face));
-        uint32_t base = static_cast<uint32_t>(waterVertices.GetSize());
-        float bx = static_cast<float>(x + m_cx * SIZE);
-        float by = static_cast<float>(y + m_cy * SIZE);
-        float bz = static_cast<float>(z + m_cz * SIZE);
-
-        // Water surface is slightly lowered
-        float topY = by + WATER_SURFACE_HEIGHT;
-
-        ::VoxelVertex v[4];
-        switch (face) {
-            case BlockFace::Top:
-                v[0] = ::VoxelVertex(bx,     topY, bz,     0, 1, 0, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx,     topY, bz + 1, 0, 1, 0, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx + 1, topY, bz + 1, 0, 1, 0, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx + 1, topY, bz,     0, 1, 0, uv.u1, uv.v1);
-                break;
-            case BlockFace::Bottom:
-                v[0] = ::VoxelVertex(bx,     by, bz + 1, 0, -1, 0, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx,     by, bz,     0, -1, 0, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx + 1, by, bz,     0, -1, 0, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx + 1, by, bz + 1, 0, -1, 0, uv.u1, uv.v1);
-                break;
-            case BlockFace::North:
-                v[0] = ::VoxelVertex(bx + 1, by,         bz + 1, 0, 0, 1, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx + 1, topY,       bz + 1, 0, 0, 1, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx,     topY,       bz + 1, 0, 0, 1, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx,     by,         bz + 1, 0, 0, 1, uv.u1, uv.v1);
-                break;
-            case BlockFace::South:
-                v[0] = ::VoxelVertex(bx,     by,         bz, 0, 0, -1, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx,     topY,       bz, 0, 0, -1, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx + 1, topY,       bz, 0, 0, -1, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx + 1, by,         bz, 0, 0, -1, uv.u1, uv.v1);
-                break;
-            case BlockFace::East:
-                v[0] = ::VoxelVertex(bx + 1, by,         bz,     1, 0, 0, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx + 1, topY,       bz,     1, 0, 0, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx + 1, topY,       bz + 1, 1, 0, 0, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx + 1, by,         bz + 1, 1, 0, 0, uv.u1, uv.v1);
-                break;
-            case BlockFace::West:
-                v[0] = ::VoxelVertex(bx, by,         bz + 1, -1, 0, 0, uv.u0, uv.v1);
-                v[1] = ::VoxelVertex(bx, topY,       bz + 1, -1, 0, 0, uv.u0, uv.v0);
-                v[2] = ::VoxelVertex(bx, topY,       bz,     -1, 0, 0, uv.u1, uv.v0);
-                v[3] = ::VoxelVertex(bx, by,         bz,     -1, 0, 0, uv.u1, uv.v1);
-                break;
-        }
-
-        // Color g is the water shader's sky light (open sky until phase 8)
-        for (int i = 0; i < 4; ++i) {
-            v[i].SetColor(1.0f, 1.0f, 1.0f, 1.0f);
-            waterVertices.AddVertex(v[i]);
-        }
-
-        waterIndices.add(base); waterIndices.add(base + 2); waterIndices.add(base + 1);
-        waterIndices.add(base); waterIndices.add(base + 3); waterIndices.add(base + 2);
+        waterVertices.AddFace(face, (x + m_cx * SIZE) * VOXEL_POS_UNITS,
+                              (y + m_cy * SIZE) * VOXEL_POS_UNITS,
+                              (z + m_cz * SIZE) * VOXEL_POS_UNITS,
+                              WATER_SURFACE_UNITS, VOXEL_AO_UNOCCLUDED,
+                              GetBlockTextureTile(BlockType::Water, face),
+                              VOXEL_QUAD_START_02);
     };
 
     for (int y = 0; y < SIZE; ++y) {
@@ -405,11 +339,9 @@ void Chunk::GenerateMeshData() {
     }
 
     m_pendingMesh.vertices = std::move(vertices);
-    m_pendingMesh.indices = std::move(indices);
     m_hasPendingMesh = true;
 
     m_pendingWaterMesh.vertices = std::move(waterVertices);
-    m_pendingWaterMesh.indices = std::move(waterIndices);
     m_hasPendingWaterMesh = true;
 
     // Publish occluder runs alongside the mesh data

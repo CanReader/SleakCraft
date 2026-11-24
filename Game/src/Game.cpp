@@ -4,6 +4,7 @@
 #include <Core/Application.hpp>
 #include <Core/CommandLine.hpp>
 #include <Debug/ShaderHotReload.hpp>
+#include "World/QuadIndexBuffer.hpp"
 #include "World/SaveManager.hpp"
 #include "World/VoxelVertex.hpp"
 #include <random>
@@ -20,12 +21,15 @@ Game::Game() {
 }
 
 Game::~Game() {
+  QuadIndexBuffer::Release();
   SLEAK_LOG("The game has been destroyed. Cleaning up resources...");
 }
 
 bool Game::Initialize() {
     // Register the voxel vertex layout before any chunk mesh is created
     GetVoxelVertexFormat();
+    if (!QuadIndexBuffer::Create())
+        SLEAK_ERROR("Voxel quad index buffer upload failed; no terrain draws");
     Sleak::Application::GetInstance()->SetLightingShader(VOXEL_LIGHTING_STEM);
     // The menu's sky shows through the game's look
     Sleak::Application::GetInstance()->ApplyGraphicsConfig(

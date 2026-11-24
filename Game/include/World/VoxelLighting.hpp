@@ -2,6 +2,7 @@
 #define _VOXEL_LIGHTING_HPP_
 
 #include <cstddef>
+#include <cstdint>
 
 namespace Sleak {
 struct GraphicsConfig;
@@ -65,6 +66,8 @@ struct CraftFrameData {
     float WeatherTint[4];
     float Sky[4];
     float Look[4];
+    uint32_t AtlasGrid[4];
+    float AtlasInvSize[4];
 };
 static_assert(offsetof(CraftFrameData, SunColor) == 0);
 static_assert(offsetof(CraftFrameData, AmbientColor) == 16);
@@ -74,7 +77,9 @@ static_assert(offsetof(CraftFrameData, NightTint) == 64);
 static_assert(offsetof(CraftFrameData, WeatherTint) == 80);
 static_assert(offsetof(CraftFrameData, Sky) == 96);
 static_assert(offsetof(CraftFrameData, Look) == 112);
-static_assert(sizeof(CraftFrameData) == 128);
+static_assert(offsetof(CraftFrameData, AtlasGrid) == 128);
+static_assert(offsetof(CraftFrameData, AtlasInvSize) == 144);
+static_assert(sizeof(CraftFrameData) == 160);
 
 /// Owns the voxel lighting palette and sends it as the game frame block.
 class VoxelLighting {

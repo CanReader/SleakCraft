@@ -115,12 +115,14 @@ it.
 **per-block face culling with per-vertex ambient occlusion**, not greedy quad merging:
 the chunk plus a one-block border is cached into an 18x18x18 opacity/solidity scratch
 buffer, and for every solid block, each of the 6 neighbor cells is checked; a face is
-emitted only if its neighbor is non-opaque. Each face's four corners get an independent
-AO weight (`fastFaceAO`), sampled from the two edge-adjacent cells and the diagonal
-corner cell and looked up in a four-step table:
+emitted only if its neighbor is non-opaque, and the world floor counts as opaque, so the
+bottom layer has no faces. Each face's four corners get an independent AO level
+(`fastFaceAO`), sampled from the two edge-adjacent cells and the diagonal corner cell.
+The vertex stores the level; the voxel shaders turn it into brightness with the same
+four-step table (`Game/include/World/VoxelVertex.hpp`):
 
 ```cpp
-static constexpr float AO_TABLE[] = {0.40f, 0.68f, 0.88f, 1.0f};
+inline constexpr float VOXEL_AO_LEVELS[] = {0.40f, 0.68f, 0.88f, 1.0f};
 ```
 
 Water goes into separate buffers, with faces only toward non-water, non-opaque
@@ -154,7 +156,9 @@ columns to skip the shadow pass), an exact-vertex-extent `Sleak::Math::AABB` bou
 the occluder AABBs collected from its chunks. `ColumnMesh::bounds` must stay an exact
 extent: a bounds box that pokes above the real geometry makes every depth test against it
 pass, which defeats occlusion culling while still paying its raster cost. Draw submission
-is `ChunkRenderer::RenderColumns` / `RenderWater`.
+is `ChunkRenderer::RenderColumns` / `RenderWater`. Meshes upload only vertices: every
+voxel mesh, block effects included, draws through the one quad index buffer
+`QuadIndexBuffer` owns (`Game/include/World/QuadIndexBuffer.hpp`).
 
 ---
 

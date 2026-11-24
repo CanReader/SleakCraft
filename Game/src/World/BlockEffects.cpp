@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <cstdlib>
 
-#include "World/TextureAtlas.hpp"
+#include "World/QuadIndexBuffer.hpp"
 #include "World/VoxelVertex.hpp"
 
 using namespace Sleak;
@@ -17,63 +17,15 @@ using namespace Sleak::Math;
 
 namespace {
 
-constexpr int QUAD_CORNERS = 4;
-constexpr int QUAD_INDICES = 6;
-
-/// One cube face: corners in the chunk mesher's order, normal, atlas face.
-struct FaceInfo {
-    float positions[QUAD_CORNERS][3];
-    float nx, ny, nz;
-    BlockFace face;
-};
-
-// Same corner order and winding as Chunk::GenerateMeshData
-constexpr int CUBE_FACE_COUNT = 6;
-constexpr FaceInfo CUBE_FACES[CUBE_FACE_COUNT] = {
-    {{{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}}, 0, 1, 0, BlockFace::Top},
-    {{{0, 0, 1}, {0, 0, 0}, {1, 0, 0}, {1, 0, 1}}, 0, -1, 0, BlockFace::Bottom},
-    {{{1, 0, 1}, {1, 1, 1}, {0, 1, 1}, {0, 0, 1}}, 0, 0, 1, BlockFace::North},
-    {{{0, 0, 0}, {0, 1, 0}, {1, 1, 0}, {1, 0, 0}}, 0, 0, -1, BlockFace::South},
-    {{{1, 0, 0}, {1, 1, 0}, {1, 1, 1}, {1, 0, 1}}, 1, 0, 0, BlockFace::East},
-    {{{0, 0, 1}, {0, 1, 1}, {0, 1, 0}, {0, 0, 0}}, -1, 0, 0, BlockFace::West},
-};
-// Front faces of a quad
-constexpr uint32_t QUAD_FRONT[QUAD_INDICES] = {0, 2, 1, 0, 3, 2};
 constexpr float HALF = 0.5f;
-// Unit quad facing -z, the side LookAt turns to the camera (south-face order)
-constexpr float PARTICLE_CORNERS[QUAD_CORNERS][2] = {
-    {-HALF, -HALF}, {-HALF, HALF}, {HALF, HALF}, {HALF, -HALF}};
-constexpr float PARTICLE_NORMAL_Z = -1.0f;
+// Particle quad: the south face (facing -z, the side LookAt turns to the
+// camera) centered on the origin, in packed units
+constexpr int32_t PARTICLE_ORIGIN = -VOXEL_POS_UNITS / 2;
 
 /// Uniform random float in [lo, hi).
 float RandFloat(float lo, float hi) {
     float t = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
     return lo + t * (hi - lo);
-}
-
-/// Atlas UVs of a quad's corners in the chunk mesher's order.
-void QuadUVs(const AtlasUV& uv, float out[QUAD_CORNERS][2]) {
-    out[0][0] = uv.u0;
-    out[0][1] = uv.v1;
-    out[1][0] = uv.u0;
-    out[1][1] = uv.v0;
-    out[2][0] = uv.u1;
-    out[2][1] = uv.v0;
-    out[3][0] = uv.u1;
-    out[3][1] = uv.v1;
-}
-
-/// Appends a quad's six indices, offset to its first vertex.
-void AppendIndices(std::vector<uint32_t>& indices, uint32_t base) {
-    for (uint32_t i : QUAD_FRONT) indices.push_back(base + i);
-}
-
-/// GPU mesh of voxel vertices and indices.
-MeshHandle UploadVoxelMesh(const VoxelVertexBuffer& vertices,
-                           const std::vector<uint32_t>& indices) {
-    return MeshBatch::CreateMesh(GetVoxelVertexFormat(), vertices.GetData(),
-                                 vertices.GetSizeInBytes(), indices.data(),
-                                 indices.size());
 }
 
 }  // namespace
@@ -89,20 +41,12 @@ const MeshHandle& BlockEffects::CubeMesh(BlockType type) {
     if (it != m_cubeMeshes.end()) return it->second;
 
     VoxelVertexBuffer vertices;
-    std::vector<uint32_t> indices;
-    for (const FaceInfo& f : CUBE_FACES) {
-        float uvs[QUAD_CORNERS][2];
-        QuadUVs(TextureAtlas::GetTileUV(GetBlockTextureTile(type, f.face)),
-                uvs);
-        const uint32_t base = static_cast<uint32_t>(vertices.GetSize());
-        for (int i = 0; i < QUAD_CORNERS; i++) {
-            vertices.AddVertex(VoxelVertex(f.positions[i][0], f.positions[i][1],
-                                           f.positions[i][2], f.nx, f.ny, f.nz,
-                                           uvs[i][0], uvs[i][1]));
-        }
-        AppendIndices(indices, base);
+    for (int f = 0; f < BLOCK_FACE_COUNT; ++f) {
+        const BlockFace face = static_cast<BlockFace>(f);
+        vertices.AddFace(face, 0, 0, 0, VOXEL_POS_UNITS, VOXEL_AO_UNOCCLUDED,
+                         GetBlockTextureTile(type, face), VOXEL_QUAD_START_02);
     }
-    return m_cubeMeshes.emplace(type, UploadVoxelMesh(vertices, indices))
+    return m_cubeMeshes.emplace(type, QuadIndexBuffer::CreateMesh(vertices))
         .first->second;
 }
 
@@ -110,17 +54,11 @@ const MeshHandle& BlockEffects::QuadMesh(uint8_t tile) {
     auto it = m_quadMeshes.find(tile);
     if (it != m_quadMeshes.end()) return it->second;
 
-    float uvs[QUAD_CORNERS][2];
-    QuadUVs(TextureAtlas::GetTileUV(tile), uvs);
     VoxelVertexBuffer vertices;
-    std::vector<uint32_t> indices;
-    for (int i = 0; i < QUAD_CORNERS; i++) {
-        vertices.AddVertex(
-            VoxelVertex(PARTICLE_CORNERS[i][0], PARTICLE_CORNERS[i][1], 0.0f,
-                        0.0f, 0.0f, PARTICLE_NORMAL_Z, uvs[i][0], uvs[i][1]));
-    }
-    AppendIndices(indices, 0);
-    return m_quadMeshes.emplace(tile, UploadVoxelMesh(vertices, indices))
+    vertices.AddFace(BlockFace::South, PARTICLE_ORIGIN, PARTICLE_ORIGIN, 0,
+                     VOXEL_POS_UNITS, VOXEL_AO_UNOCCLUDED, tile,
+                     VOXEL_QUAD_START_02);
+    return m_quadMeshes.emplace(tile, QuadIndexBuffer::CreateMesh(vertices))
         .first->second;
 }
 

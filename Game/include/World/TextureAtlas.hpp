@@ -7,12 +7,6 @@
 #include <string>
 #include <vector>
 
-/// UV rectangle for one atlas tile's content, inside its gutter-padded cell.
-struct AtlasUV {
-    float u0, v0; // bottom-left
-    float u1, v1; // top-right
-};
-
 /// Builds a runtime texture atlas from the individual block PNGs, with each
 /// tile wrapped into a gutter-padded cell so linear/aniso filtering never
 /// bleeds into a neighboring tile.
@@ -25,16 +19,24 @@ public:
     /// atlas and uploads it with its mip chain; null if the upload fails.
     static Sleak::RefPtr<Sleak::Texture> BuildAtlas();
 
-    /// UVs address the tile content inside its gutter-padded cell.
-    static AtlasUV GetTileUV(uint8_t tileIndex) {
-        int col = tileIndex % TILES_PER_ROW;
-        int row = tileIndex / TILES_PER_ROW;
-        float x0 = static_cast<float>(col * s_cell + s_pad);
-        float y0 = static_cast<float>(row * s_cell + s_pad);
-        return {
-            x0 * s_invW,            y0 * s_invH,
-            (x0 + s_tile) * s_invW, (y0 + s_tile) * s_invH
-        };
+    /// Cell layout in texels plus the inverse atlas size.
+    struct Grid {
+        uint32_t tilesPerRow;
+        uint32_t cellTexels;
+        uint32_t padTexels;
+        uint32_t tileTexels;
+        float invWidth;
+        float invHeight;
+    };
+
+    /// Layout of the built atlas; the voxel shaders rebuild tile UVs from it.
+    static Grid GetGrid() {
+        return {TILES_PER_ROW,
+                static_cast<uint32_t>(s_cell),
+                static_cast<uint32_t>(s_pad),
+                static_cast<uint32_t>(s_tile),
+                s_invW,
+                s_invH};
     }
 
     static int GetRows() { return s_rows; }
