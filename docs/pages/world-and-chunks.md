@@ -170,9 +170,14 @@ under it; the kept group runs bottom-up, back to front for a camera above the wa
 the quad count of each (stream, group) segment; `RebuildColumnMesh` concatenates the
 segments in buffer order and records where each one starts in `StreamRanges`, so any set
 of chunks and directions is a few contiguous quad ranges. `ChunkRenderer::RenderColumns`
-and `RenderWater` submit them with `Sleak::MeshBatch::DrawRanges`, one command per column
-and stream. The renderer walks the dense list `ChunkManager::GetLiveColumns` instead of
-the column map; `AddColumn` and `EraseColumn` keep the two in step.
+and `RenderWater` submit them with `Sleak::MeshBatch::DrawRanges`. The camera draws only
+the chunks whose exact box is in the frustum and, per chunk, the directions with a face
+that can face it (`FacingGroups`, which never drops a front face: the GPU would cull the
+rest anyway). Shadow casters, the visible columns inside the light box plus every column
+within 48 m, get their own shadow-only command with every chunk and direction, or one
+command for both passes when the two match. The renderer walks the dense list
+`ChunkManager::GetLiveColumns` instead of the column map; `AddColumn` and `EraseColumn`
+keep the two in step.
 
 ---
 

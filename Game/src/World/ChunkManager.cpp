@@ -23,6 +23,7 @@ ChunkManager::~ChunkManager() {
 
 ColumnMesh& ChunkManager::AddColumn(const ColumnKey& key) {
     ColumnMesh& col = m_columns[key];
+    col.key = key;
     col.liveIndex = static_cast<uint32_t>(m_liveColumns.size());
     m_liveColumns.push_back(&col);
     return col;

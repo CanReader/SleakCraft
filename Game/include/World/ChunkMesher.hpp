@@ -31,6 +31,63 @@ struct StreamRanges {
     uint32_t start[VOXEL_DIR_GROUPS * COLUMN_CHUNKS + 1] = {};
 };
 
+/// Appends the draw ranges of the (group, slot) segments keep accepts, in
+/// buffer order; touching segments merge and empty ones never split a run.
+template <typename Keep>
+void AppendStreamRanges(const StreamRanges& r, Keep&& keep,
+                        std::vector<Sleak::MeshRange>& out) {
+    bool open = false;
+    uint32_t first = 0;
+    uint32_t end = 0;
+    auto flush = [&] {
+        out.push_back({0, (end - first) * VOXEL_QUAD_INDICES,
+                       static_cast<int32_t>(first * VOXEL_QUAD_CORNERS)});
+    };
+    for (int i = 0; i < VOXEL_DIR_GROUPS * COLUMN_CHUNKS; ++i) {
+        if (r.start[i] == r.start[i + 1]) continue;
+        if (keep(i / COLUMN_CHUNKS, i % COLUMN_CHUNKS)) {
+            if (!open) first = r.start[i];
+            open = true;
+            end = r.start[i + 1];
+        } else if (open) {
+            flush();
+            open = false;
+        }
+    }
+    if (open) flush();
+}
+
+/// How far the camera must be behind the planes of a direction's faces
+/// before the direction is dropped, in blocks.
+inline constexpr float DIR_CULL_EPSILON = 1.0f / 64.0f;
+
+/// Direction groups of the chunk at (x0, y0, z0) that may face a camera at
+/// (cx, cy, cz): a direction drops when the camera is behind all its faces.
+constexpr uint8_t FacingGroups(float cx, float cy, float cz, float x0, float y0,
+                               float z0) {
+    // Positive faces lie 1..16 blocks into the chunk, negative ones 0..15
+    constexpr float nearest = 1.0f - DIR_CULL_EPSILON;
+    constexpr float farthest = Chunk::SIZE - 1 + DIR_CULL_EPSILON;
+    auto bit = [](BlockFace face) {
+        return static_cast<uint8_t>(1u << static_cast<int>(face));
+    };
+    uint8_t groups = 1u << VOXEL_GROUP_ALWAYS;
+    if (cy > y0 + nearest) groups |= bit(BlockFace::Top);
+    if (cy < y0 + farthest) groups |= bit(BlockFace::Bottom);
+    if (cz > z0 + nearest) groups |= bit(BlockFace::North);
+    if (cz < z0 + farthest) groups |= bit(BlockFace::South);
+    if (cx > x0 + nearest) groups |= bit(BlockFace::East);
+    if (cx < x0 + farthest) groups |= bit(BlockFace::West);
+    return groups;
+}
+
+/// Culling data of one chunk of a column.
+struct ChunkVis {
+    float minY = 0.0f;      ///< lowest quad corner in blocks
+    float maxY = 0.0f;      ///< highest quad corner in blocks
+    bool hasQuads = false;  ///< drawn from the column buffer
+};
+
 /// Floor-division: negative cy must map downward (e.g. cy=-1 -> band -1, not 0)
 inline int ChunkYToBand(int cy) {
     return (cy >= 0) ? cy / BAND_SIZE : (cy - BAND_SIZE + 1) / BAND_SIZE;
@@ -54,10 +111,18 @@ struct ColumnKeyHash {
 
 /// GPU mesh, range tables and culling state of one column band.
 struct ColumnMesh {
+    /// Its entry in ChunkManager::GetColumns.
+    ColumnKey key{};
     Sleak::MeshHandle mesh;  ///< every stream, on the shared quad indices
     StreamRanges ranges[VOXEL_STREAM_COUNT];
+    /// Per band chunk, bottom up.
+    ChunkVis chunks[COLUMN_CHUNKS];
+    /// The camera may see it this frame.
     bool visible = true;
-    bool castsShadow = true;  // false for distant columns (skip shadow pass)
+    /// Casts shadows this frame.
+    bool castsShadow = true;
+    /// Band chunks the camera draws this frame, bit per chunk.
+    uint8_t visibleChunks = 0;
     Sleak::Math::AABB bounds;
     std::vector<Sleak::Math::AABB> occluders;
     float distSq = 0.0f;

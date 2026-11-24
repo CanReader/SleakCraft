@@ -47,6 +47,7 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
 
     // Collect ready chunks by band slot so the merged buffer is sized once
     Chunk* ready[COLUMN_CHUNKS] = {};
+    ChunkVis vis[COLUMN_CHUNKS];
     size_t vertexTotal = 0;
     for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
         Chunk* chunk = m_mgr.GetChunk(cx, cy, cz);
@@ -69,6 +70,7 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
         if (md.vertices.GetSize() > 0) {
             if (md.minY < meshMinY) meshMinY = md.minY;
             if (md.maxY > meshMaxY) meshMaxY = md.maxY;
+            vis[cy - bandMinY] = {md.minY, md.maxY, true};
         }
     }
 
@@ -132,6 +134,7 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
                           : m_mgr.AddColumn(key);
     col.mesh = std::move(mesh);
     for (int s = 0; s < VOXEL_STREAM_COUNT; ++s) col.ranges[s] = ranges[s];
+    for (int k = 0; k < COLUMN_CHUNKS; ++k) col.chunks[k] = vis[k];
 
     // Column world AABB (16x16 XZ footprint, exact mesh Y extent).
     float minX = static_cast<float>(cx * Chunk::SIZE);
