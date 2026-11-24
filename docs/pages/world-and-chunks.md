@@ -83,8 +83,9 @@ things, each under its own per-frame budget:
   below) into `m_pendingLoad`. Chunks that fall outside the render distance are queued
   into `m_pendingUnload` and drained gradually, with a safety valve that unloads faster
   than the backlog can grow while the column meshes hold more than
-  `MESH_VRAM_BUDGET_BYTES` (1.5 GiB) of vertices. The render distance goes up to
-  `ChunkManager::MAX_RENDER_DISTANCE` (32 chunks) from the CLI, saves and settings.
+  `MESH_VRAM_BUDGET_BYTES` (1.5 GiB) of vertices. `SetRenderDistance` clamps every
+  request, from the CLI, a save or the settings, to `ChunkManager::MAX_RENDER_DISTANCE`
+  (32 chunks).
 - **Generation dispatch**, budgeted by `m_dispatchPerFrame` (default 64 chunks/frame).
 - **Remesh and upload**, budgeted separately by `m_chunksPerFrame` (32, remesh + unload)
   and `m_uploadsPerFrame` (16, column mesh GPU uploads).

@@ -65,12 +65,16 @@ public:
     /// Synchronously generates, links, and meshes every still-pending chunk;
     /// used for the initial spawn area so the player has ground immediately.
     void FlushPendingChunks();
-    /// Changes the streaming radius; shrinking frees now out-of-range chunks
-    /// and column meshes immediately instead of via the gradual unloader.
+    /// Changes the streaming radius, clamped to the render distance limits;
+    /// shrinking frees now out-of-range chunks and column meshes immediately
+    /// instead of via the gradual unloader.
     void SetRenderDistance(int chunks);
 
     int GetRenderDistance() const { return m_renderDistance; }
-    /// Largest render distance the CLI, saves and settings accept.
+    /// Smallest render distance SetRenderDistance keeps.
+    static constexpr int MIN_RENDER_DISTANCE = 1;
+    /// Largest render distance SetRenderDistance keeps, whatever the CLI,
+    /// a save or the settings ask for.
     static constexpr int MAX_RENDER_DISTANCE = 32;
 
     /// Starts or stops the worker thread pool for background generation/meshing.

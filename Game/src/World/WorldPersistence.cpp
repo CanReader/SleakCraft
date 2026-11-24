@@ -120,8 +120,6 @@ void WorldPersistence::LoadGame() {
         int rd =
             cliRD > 0 ? cliRD : static_cast<int>(meta.player.renderDistance);
         if (rd < 4) rd = 4;
-        if (rd > ChunkManager::MAX_RENDER_DISTANCE)
-            rd = ChunkManager::MAX_RENDER_DISTANCE;
         m_chunkManager.SetRenderDistance(rd);
     }
     m_chunkManager.SetMultithreaded(m_scene.IsMultithreadedLoading());

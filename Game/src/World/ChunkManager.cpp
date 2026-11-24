@@ -142,6 +142,7 @@ void ChunkManager::WorkerThread() {
 }
 
 void ChunkManager::SetRenderDistance(int chunks) {
+    chunks = std::clamp(chunks, MIN_RENDER_DISTANCE, MAX_RENDER_DISTANCE);
     if (chunks == m_renderDistance) return;
     int oldRD = m_renderDistance;
     SLEAK_INFO("Render distance changed: {} -> {}", oldRD, chunks);
