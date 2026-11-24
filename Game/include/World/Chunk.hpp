@@ -14,9 +14,24 @@ namespace Sleak {
     class SceneBase;
 }
 
-/// Quads produced by GenerateMeshData, staged for GPU upload.
+/// Streams of a column vertex buffer, in buffer order.
+enum class VoxelStream : uint8_t { Opaque, Water, Count };
+/// Streams a chunk publishes and a column buffer holds.
+inline constexpr int VOXEL_STREAM_COUNT = static_cast<int>(VoxelStream::Count);
+/// Direction groups of a stream: BlockFace order, then the faces direction
+/// culling must keep.
+inline constexpr int VOXEL_DIR_GROUPS = BLOCK_FACE_COUNT + 1;
+/// Group of the faces never culled by direction: two-sided water, and
+/// alpha-tested leaves, whose back faces OpenGL draws.
+inline constexpr int VOXEL_GROUP_ALWAYS = BLOCK_FACE_COUNT;
+
+/// Quads produced by GenerateMeshData, staged for the column merge: one
+/// vector in (stream, group) order and the quad count of each segment.
 struct ChunkMeshData {
     VoxelVertexBuffer vertices;
+    uint32_t quads[VOXEL_STREAM_COUNT][VOXEL_DIR_GROUPS] = {};
+    float minY = 0.0f;  ///< lowest quad corner in blocks, if any quad
+    float maxY = 0.0f;  ///< highest quad corner in blocks, if any quad
 };
 
 /// One 16x16x16 block of the voxel grid. Owns its block data and produces
@@ -40,9 +55,9 @@ public:
     /// the boundary; pass nullptr to unlink.
     void SetNeighbor(BlockFace face, Chunk* chunk);
 
-    /// Face-culls the block data into m_pendingMesh/m_pendingWaterMesh with
-    /// per-vertex ambient occlusion, and extracts the per-quadrant occluder
-    /// runs. CPU-only; does not touch the GPU or scene.
+    /// Face-culls the block data into m_pendingMesh with per-vertex ambient
+    /// occlusion, and extracts the per-quadrant occluder runs. CPU-only;
+    /// does not touch the GPU or scene.
     void GenerateMeshData();
     void AddToScene(Sleak::SceneBase* scene);
     void RemoveFromScene(Sleak::SceneBase* scene);
@@ -88,9 +103,6 @@ public:
     void SetActiveIndex(int idx) { m_activeIndex = idx; }
 
     ChunkMeshData& GetPendingMeshData() { return m_pendingMesh; }
-    ChunkMeshData& GetPendingWaterMeshData() { return m_pendingWaterMesh; }
-    bool HasPendingWaterMesh() const { return m_hasPendingWaterMesh; }
-    void ClearPendingWaterMesh() { m_hasPendingWaterMesh = false; }
 
     /// All contiguous runs (>= 4 layers) of fully-opaque horizontal
     /// layers per 8x8 XZ quadrant (q = (x>=8) + 2*(z>=8)), ascending,
@@ -127,9 +139,7 @@ private:
     bool m_meshBuilt = false;
     bool m_addedToScene = false;
     ChunkMeshData m_pendingMesh;
-    ChunkMeshData m_pendingWaterMesh;
     bool m_hasPendingMesh = false;
-    bool m_hasPendingWaterMesh = false;
     bool m_inFlight = false;
     bool m_dirty = false;
     bool m_needsRebuild = false;

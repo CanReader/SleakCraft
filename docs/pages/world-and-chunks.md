@@ -13,7 +13,7 @@ narrative; generation is covered in @ref world-generation and disk format in
 | `Chunk` | One 16x16x16 block volume plus its six neighbor pointers and pending mesh data. |
 | `WorldGenerator` | Fills a chunk from noise; also answers column height questions. |
 | `ChunkMesher` | Merges a Y band of chunk meshes into one `ColumnMesh` and uploads it. |
-| `ColumnMesh` | Merged solid and water handles, bounds, occluders, visibility and shadow flags. |
+| `ColumnMesh` | One buffer of solid and water quads, its range table, bounds, occluders, visibility and shadow flags. |
 | `ChunkRenderer` | Per-frame visibility pass and draw submission for columns and water. |
 | `VoxelQueries` | Raycast and collision against block data, bypassing engine colliders. |
 | `HeightmapCache` | Persists the per-column max filled chunk-Y so generation can be skipped. |
@@ -150,15 +150,29 @@ inline int ChunkYToBand(int cy) {
 `BAND_SIZE` currently equals the full 8-chunk world height, so every column merges into
 a single band today; the floor-division form still matters, because it has to map a
 negative `cy` downward (`cy = -1` maps to band `-1`, not `0`) rather than truncating
-toward zero, and must not be simplified. Each `ColumnMesh` holds the merged solid and
-water `Sleak::MeshHandle`s, a visibility flag, a shadow-cast flag (turned off for distant
-columns to skip the shadow pass), an exact-vertex-extent `Sleak::Math::AABB` bounds, and
-the occluder AABBs collected from its chunks. `ColumnMesh::bounds` must stay an exact
-extent: a bounds box that pokes above the real geometry makes every depth test against it
-pass, which defeats occlusion culling while still paying its raster cost. Draw submission
-is `ChunkRenderer::RenderColumns` / `RenderWater`. Meshes upload only vertices: every
+toward zero, and must not be simplified. Each `ColumnMesh` holds one
+`Sleak::MeshHandle` whose buffer carries every stream of the band, a range table per
+stream, a visibility flag, a shadow-cast flag (turned off for distant columns to skip the
+shadow pass), an exact-vertex-extent `Sleak::Math::AABB` bounds, and the occluder AABBs
+collected from its chunks. `ColumnMesh::bounds` must stay an exact extent: a bounds box
+that pokes above the real geometry makes every depth test against it pass, which defeats
+occlusion culling while still paying its raster cost. Meshes upload only vertices: every
 voxel mesh, block effects included, draws through the one quad index buffer
 `QuadIndexBuffer` owns (`Game/include/World/QuadIndexBuffer.hpp`).
+
+The buffer holds the solid stream, then the water stream (`VoxelStream`). Each stream is
+direction-major: seven groups, the six faces in `BlockFace` order and then the faces
+direction culling must keep (all water, which is two-sided, and the alpha-tested leaves,
+whose back faces OpenGL draws through their holes), and inside a group one slot per chunk
+of the band. The six face groups run top-down, so the surface draws before the caves
+under it; the kept group runs bottom-up, back to front for a camera above the water.
+`Chunk::GenerateMeshData` buckets its faces the same way and publishes one vector with
+the quad count of each (stream, group) segment; `RebuildColumnMesh` concatenates the
+segments in buffer order and records where each one starts in `StreamRanges`, so any set
+of chunks and directions is a few contiguous quad ranges. `ChunkRenderer::RenderColumns`
+and `RenderWater` submit them with `Sleak::MeshBatch::DrawRanges`, one command per column
+and stream. The renderer walks the dense list `ChunkManager::GetLiveColumns` instead of
+the column map; `AddColumn` and `EraseColumn` keep the two in step.
 
 ---
 
@@ -235,8 +249,8 @@ dispatch of an already-queued chunk has to be prevented by checking
 `GetBlockAt` reads it from the main thread to treat a mid-generation chunk
 as air rather than reading half-written block data.
 
-`ChunkMesher::RebuildColumnMesh` releases the old mesh handles before
-allocating the new ones, and when both allocations fail it reports the
+`ChunkMesher::RebuildColumnMesh` releases the old mesh handle before
+allocating the new one, and when the allocation fails it reports the
 condition back through `ChunkManager::SetOOMThisFrame`, which puts the
 column key back on the dirty set for a later frame instead of dropping it.
 

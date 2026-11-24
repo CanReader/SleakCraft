@@ -36,6 +36,15 @@ bool OverlapsLightClip(const Sleak::Math::AABB& box, const float* m) {
     return !(left || right || bottom || top || nearOut || farOut);
 }
 
+/// Draw range of every quad of one stream of a column buffer.
+Sleak::MeshRange StreamRange(const ColumnMesh& col, VoxelStream stream) {
+    const StreamRanges& r = col.ranges[static_cast<int>(stream)];
+    const uint32_t first = r.start[0];
+    const uint32_t end = r.start[VOXEL_DIR_GROUPS * COLUMN_CHUNKS];
+    return {0, (end - first) * VOXEL_QUAD_INDICES,
+            static_cast<int32_t>(first * VOXEL_QUAD_CORNERS)};
+}
+
 }  // namespace
 
 void ChunkRenderer::UpdateVisibility() {
@@ -50,8 +59,9 @@ void ChunkRenderer::UpdateVisibility() {
 
     // Pass A: distance cull, shadow flag, occluder submission.
     m_cullCandidates.clear();
-    for (auto& [key, col] : m_mgr.GetColumns()) {
-        if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) {
+    for (ColumnMesh* live : m_mgr.GetLiveColumns()) {
+        ColumnMesh& col = *live;
+        if (!col.mesh.IsValid()) {
             col.visible = false;
             continue;
         }
@@ -113,17 +123,23 @@ void ChunkRenderer::SetCullingEnabled(bool frustum, bool occlusion) {
 void ChunkRenderer::RenderColumns() {
     // Front-to-back draw order for better early-z / less overdraw.
     m_renderScratch.clear();
-    for (auto& [key, col] : m_mgr.GetColumns())
-        if (col.visible && col.mesh.IsValid())
-            m_renderScratch.push_back(&col);
+    for (ColumnMesh* col : m_mgr.GetLiveColumns())
+        if (col->visible && col->mesh.IsValid() &&
+            StreamRange(*col, VoxelStream::Opaque).indexCount > 0)
+            m_renderScratch.push_back(col);
     std::sort(m_renderScratch.begin(), m_renderScratch.end(),
               [](const ColumnMesh* a, const ColumnMesh* b) {
                   return a->distSq < b->distSq;
               });
 
     Sleak::MeshBatch::BeginBatch(m_mgr.GetMaterial().get());
-    for (ColumnMesh* col : m_renderScratch)
-        Sleak::MeshBatch::Draw(col->mesh, col->castsShadow);
+    for (ColumnMesh* col : m_renderScratch) {
+        const Sleak::MeshRange range = StreamRange(*col, VoxelStream::Opaque);
+        Sleak::MeshBatch::DrawRanges(col->mesh, &range, 1,
+                                     col->castsShadow
+                                         ? Sleak::MeshPasses::All
+                                         : Sleak::MeshPasses::Camera);
+    }
     Sleak::MeshBatch::EndBatch();
 }
 
@@ -131,9 +147,10 @@ void ChunkRenderer::RenderWater() {
     if (!m_mgr.GetWaterMaterial()) return;
     // Back-to-front draw order for correct transparency.
     m_waterScratch.clear();
-    for (auto& [key, col] : m_mgr.GetColumns())
-        if (col.visible && col.waterMesh.IsValid())
-            m_waterScratch.push_back(&col);
+    for (ColumnMesh* col : m_mgr.GetLiveColumns())
+        if (col->visible && col->mesh.IsValid() &&
+            StreamRange(*col, VoxelStream::Water).indexCount > 0)
+            m_waterScratch.push_back(col);
     std::sort(m_waterScratch.begin(), m_waterScratch.end(),
               [](const ColumnMesh* a, const ColumnMesh* b) {
                   return a->distSq > b->distSq;
@@ -141,7 +158,10 @@ void ChunkRenderer::RenderWater() {
 
     // Water never casts shadows — keeps ~200 meshes out of the shadow map.
     Sleak::MeshBatch::BeginBatch(m_mgr.GetWaterMaterial().get());
-    for (ColumnMesh* col : m_waterScratch)
-        Sleak::MeshBatch::Draw(col->waterMesh, false);
+    for (ColumnMesh* col : m_waterScratch) {
+        const Sleak::MeshRange range = StreamRange(*col, VoxelStream::Water);
+        Sleak::MeshBatch::DrawRanges(col->mesh, &range, 1,
+                                     Sleak::MeshPasses::Camera);
+    }
     Sleak::MeshBatch::EndBatch();
 }

@@ -137,8 +137,16 @@ public:
     Chunk* GetChunk(int cx, int cy, int cz);
     /// True while any of the six neighbors is owned by a worker thread.
     bool IsNeighborOfInFlight(const ChunkCoord& coord) const;
-    /// Column meshes keyed by band: written by the mesher, read by the renderer.
+    /// Column meshes keyed by band, written by the mesher.
     ColumnMeshMap& GetColumns() { return m_columns; }
+    /// Every column mesh in a dense list, for the renderer's per-frame walks.
+    const std::vector<ColumnMesh*>& GetLiveColumns() const {
+        return m_liveColumns;
+    }
+    /// Adds an empty column mesh for a key that has none.
+    ColumnMesh& AddColumn(const ColumnKey& key);
+    /// Removes the column mesh of a key, if any.
+    void EraseColumn(const ColumnKey& key);
     /// Bands awaiting a rebuild; the mesher re-inserts deferred keys here.
     ColumnKeySet& GetDirtyColumns() { return m_dirtyColumns; }
     /// Worker task queue and its guards, for batch mesh dispatch.
@@ -183,6 +191,12 @@ private:
     static constexpr int MAX_COLUMN_MESHES = 800;
 
     ColumnMeshMap m_columns;
+    std::vector<ColumnMesh*> m_liveColumns;
+    /// Removes a column mesh from the map and the live list; returns the
+    /// next map entry.
+    ColumnMeshMap::iterator EraseColumn(ColumnMeshMap::iterator it);
+    /// Drops every column mesh.
+    void ClearColumns();
     ColumnKeySet m_dirtyColumns;
     std::unordered_set<ChunkCoord, ChunkCoordHash> m_chunksNeedingRemesh;
 

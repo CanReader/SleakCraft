@@ -8,12 +8,28 @@
 #include <unordered_set>
 #include <vector>
 
+#include "World/Chunk.hpp"
 #include "World/VoxelVertex.hpp"
 
 class ChunkManager;
 
 /// Chunks per band: one column mesh merges this many chunks along Y.
 inline constexpr int BAND_SIZE = 8;
+/// Chunk slots of a column buffer, one per chunk of its band.
+inline constexpr int COLUMN_CHUNKS = BAND_SIZE;
+
+/// Band chunk of a slot in a direction group: the face directions run
+/// top-down (surface before caves), the always-kept group bottom-up (back to
+/// front seen from above, the order its two-sided faces always had).
+constexpr int SlotChunk(int group, int slot) {
+    return group == VOXEL_GROUP_ALWAYS ? slot : COLUMN_CHUNKS - 1 - slot;
+}
+
+/// Quad offsets of one stream in its column buffer: the quads of group g in
+/// slot k are [start[g * COLUMN_CHUNKS + k], start[g * COLUMN_CHUNKS + k + 1]).
+struct StreamRanges {
+    uint32_t start[VOXEL_DIR_GROUPS * COLUMN_CHUNKS + 1] = {};
+};
 
 /// Floor-division: negative cy must map downward (e.g. cy=-1 -> band -1, not 0)
 inline int ChunkYToBand(int cy) {
@@ -36,15 +52,16 @@ struct ColumnKeyHash {
     }
 };
 
-/// GPU meshes plus culling state for one column band.
+/// GPU mesh, range tables and culling state of one column band.
 struct ColumnMesh {
-    Sleak::MeshHandle mesh;
-    Sleak::MeshHandle waterMesh;
+    Sleak::MeshHandle mesh;  ///< every stream, on the shared quad indices
+    StreamRanges ranges[VOXEL_STREAM_COUNT];
     bool visible = true;
     bool castsShadow = true;  // false for distant columns (skip shadow pass)
     Sleak::Math::AABB bounds;
     std::vector<Sleak::Math::AABB> occluders;
     float distSq = 0.0f;
+    uint32_t liveIndex = 0;  ///< slot in ChunkManager::GetLiveColumns
 };
 
 using ColumnMeshMap = std::unordered_map<ColumnKey, ColumnMesh, ColumnKeyHash>;
@@ -65,7 +82,6 @@ private:
 
     // Merge scratch, reused across rebuilds
     VoxelVertexBuffer m_mergedVerts;
-    VoxelVertexBuffer m_mergedWaterVerts;
 };
 
 #endif
