@@ -134,6 +134,11 @@ public:
     int GetMinSurface() const { return m_minSurface; }
     /// Records the lowest noise surface height of the chunk's columns.
     void SetMinSurface(int height) { m_minSurface = height; }
+    /// True once a block was set or the chunk was restored from a save: its
+    /// blocks may leave the noise surface. Main thread only, never saved.
+    bool IsEdited() const { return m_edited; }
+    /// Marks the chunk edited for the rest of its life.
+    void SetEdited() { m_edited = true; }
 
     int GetActiveIndex() const { return m_activeIndex; }
     void SetActiveIndex(int idx) { m_activeIndex = idx; }
@@ -185,6 +190,7 @@ private:
     std::atomic<bool> m_needsGeneration{true};
     int m_activeIndex = -1;
     int m_minSurface = NO_SURFACE;
+    bool m_edited = false;
     int8_t m_occRunMinY[4][OCC_MAX_RUNS] = {
         {-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}};
     int8_t m_occRunMaxY[4][OCC_MAX_RUNS] = {

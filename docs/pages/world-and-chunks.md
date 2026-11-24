@@ -182,8 +182,10 @@ one command for both passes when the two match. While the eye is two blocks or m
 the lowest noise surface of its column, casters skip their buried chunks
 (`ColumnMesh::buriedChunks`): those whose top lies two blocks or more under the lowest
 noise surface of the column and its eight neighbors, which `WorldGenerator::Generate`
-records per chunk. A cave floor lit through a cave mouth can lose a few pixels of shadow
-from that rock; underground, every chunk casts. The renderer walks the dense list
+records per chunk. A column holding an edited chunk, or one restored from a save
+(`Chunk::IsEdited`), has no known surface, so it and its neighbors bury nothing. A cave
+floor lit through a cave mouth can lose a few pixels of shadow from that rock;
+underground, every chunk casts. The renderer walks the dense list
 `ChunkManager::GetLiveColumns` instead of the column map; `AddColumn` and `EraseColumn`
 keep the two in step.
 

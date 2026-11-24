@@ -327,6 +327,7 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
 
     chunk->SetBlock(lx, ly, lz, type);
     chunk->SetDirty(true);
+    chunk->SetEdited();
 
     std::unordered_set<ColumnKey, ColumnKeyHash> affectedColumns;
 
@@ -384,6 +385,7 @@ void ChunkManager::FlushPendingEdits() {
         chunk->SetBlock(floorMod(e.x, Chunk::SIZE), floorMod(e.y, Chunk::SIZE),
                         floorMod(e.z, Chunk::SIZE), e.type);
         chunk->SetDirty(true);
+        chunk->SetEdited();
         chunk->SetNeedsMeshRebuild(true);
         m_chunksNeedingRemesh.insert({cx, cy, cz});
     }
@@ -730,6 +732,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             if (savedIt != m_savedBlockData.end()) {
                 std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                             savedIt->second.data(), 4096);
+                chunk->SetEdited();
                 chunk->SetNeedsGeneration(false);
                 if (m_stashedDirty.erase(coord)) chunk->SetDirty(true);
             }
@@ -866,6 +869,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             if (savedIt != m_savedBlockData.end()) {
                 std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                             savedIt->second.data(), 4096);
+                chunk->SetEdited();
                 if (m_stashedDirty.erase(coord)) chunk->SetDirty(true);
             } else {
                 m_generator.Generate(chunk);
@@ -940,6 +944,7 @@ void ChunkManager::FlushPendingChunks() {
         if (savedIt != m_savedBlockData.end()) {
             std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                         savedIt->second.data(), 4096);
+            chunk->SetEdited();
             if (m_stashedDirty.erase(coord)) chunk->SetDirty(true);
         } else {
             m_generator.Generate(chunk);

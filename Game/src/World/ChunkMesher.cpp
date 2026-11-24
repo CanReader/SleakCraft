@@ -159,10 +159,23 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
     m_mgr.CountColumnMesh(col);
     for (int k = 0; k < COLUMN_CHUNKS; ++k) col.chunks[k] = vis[k];
     col.reachableChunks = ALL_COLUMN_CHUNKS;
-    // Every generated chunk of a column holds the same noise surface
-    for (Chunk* chunk : ready)
-        if (chunk && chunk->GetMinSurface() != Chunk::NO_SURFACE)
-            col.minSurface = chunk->GetMinSurface();
+    // Generated chunks share the column's noise surface; an edited chunk
+    // makes it unknown, so the column and its neighbors bury nothing
+    bool edited = false;
+    for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
+        const Chunk* chunk = m_mgr.GetChunk(cx, cy, cz);
+        if (chunk && chunk->IsEdited()) edited = true;
+    }
+    if (edited) {
+        // Neighbors drop their buried casters before the next frame draws
+        if (col.minSurface != Chunk::NO_SURFACE) m_mgr.MarkGraphDirty(true);
+        col.minSurface = Chunk::NO_SURFACE;
+        col.buriedChunks = 0;
+    } else {
+        for (Chunk* chunk : ready)
+            if (chunk && chunk->GetMinSurface() != Chunk::NO_SURFACE)
+                col.minSurface = chunk->GetMinSurface();
+    }
 
     // Column world AABB (16x16 XZ footprint, exact mesh Y extent).
     float minX = static_cast<float>(cx * Chunk::SIZE);
