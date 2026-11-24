@@ -29,6 +29,8 @@ void BlockInteraction::OnMousePressed(
 
     MouseCode button = e.GetMouseButton();
     if (button == MouseCode::ButtonLeft) {
+        // The world floor stays closed: nothing below it has faces
+        if (hit.blockY <= WorldGenerator::MIN_CHUNK_Y * Chunk::SIZE) return;
         BlockType broken = hit.blockType;
         m_chunkManager.SetBlockAt(hit.blockX, hit.blockY, hit.blockZ,
                                   BlockType::Air);
