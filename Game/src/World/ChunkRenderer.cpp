@@ -104,8 +104,7 @@ void ChunkRenderer::UpdateGraph() {
             *cell = {vis.seeThrough, vis.covered, vis.openWater};
         }
     }
-    m_graph.Run(cam.GetX(), cam.GetY(), cam.GetZ(), water,
-                m_mgr.GetDrawDistSq());
+    m_graph.Run(chunk[1], water, m_mgr.GetDrawDistSq());
     for (ColumnMesh* col : m_mgr.GetLiveColumns())
         col->reachableChunks = m_graph.Reached(col->key.x, col->key.z);
 

@@ -1,8 +1,7 @@
 #include "World/ChunkVisibilityGraph.hpp"
 
 #include <algorithm>
-#include <cassert>
-#include <cmath>
+#include <cstdlib>
 
 namespace {
 
@@ -40,9 +39,6 @@ uint8_t CellFaces(int x, int y, int z) {
     if (x == 0) faces |= FaceBit(BlockFace::West);
     return faces;
 }
-
-/// Chunk coordinate holding a world coordinate.
-int ChunkOf(float v) { return static_cast<int>(std::floor(v / SIZE)); }
 
 }  // namespace
 
@@ -181,27 +177,20 @@ uint16_t ChunkVisibilityGraph::MaskAt(int index, bool waterCamera) const {
     return cell.covered;
 }
 
-void ChunkVisibilityGraph::Run(float camX, float camY, float camZ,
-                               bool waterCamera, float reachSq) {
-    assert(ChunkOf(camX) == m_centerX && ChunkOf(camZ) == m_centerZ &&
-           "Reset around the camera's column");
-    const int startY = std::clamp(ChunkOf(camY), 0, LAYERS - 1);
+void ChunkVisibilityGraph::Run(int cameraChunkY, bool waterCamera,
+                               float reachSq) {
+    const int startY = std::clamp(cameraChunkY, 0, LAYERS - 1);
 
-    // Columns whose footprint lies within reach of the camera
+    // Columns within reach of the nearest point of the camera's column: the
+    // gap between the two footprints, a whole number of chunks per axis
     m_inReach.assign(static_cast<size_t>(m_width) * m_width, 0);
     for (int lz = 0; lz < m_width; ++lz) {
         for (int lx = 0; lx < m_width; ++lx) {
-            const float x0 =
-                static_cast<float>((m_centerX - m_radius + lx) * SIZE);
-            const float z0 =
-                static_cast<float>((m_centerZ - m_radius + lz) * SIZE);
-            const float dx = camX < x0          ? x0 - camX
-                             : camX > x0 + SIZE ? camX - (x0 + SIZE)
-                                                : 0.0f;
-            const float dz = camZ < z0          ? z0 - camZ
-                             : camZ > z0 + SIZE ? camZ - (z0 + SIZE)
-                                                : 0.0f;
-            m_inReach[lx + lz * m_width] = dx * dx + dz * dz <= reachSq;
+            const float gx = static_cast<float>(
+                std::max(std::abs(lx - m_radius) - 1, 0) * SIZE);
+            const float gz = static_cast<float>(
+                std::max(std::abs(lz - m_radius) - 1, 0) * SIZE);
+            m_inReach[lx + lz * m_width] = gx * gx + gz * gz <= reachSq;
         }
     }
 

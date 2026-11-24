@@ -71,10 +71,10 @@ class ChunkVisibilityGraph {
     void Reset(int centerX, int centerZ, int radius);
     /// Grid chunk at a chunk coordinate, or nullptr outside the grid.
     Cell* At(int cx, int cy, int cz);
-    /// Walks from the camera's chunk, in Reset's center column, through the
-    /// columns within sqrt(reachSq) of the camera in XZ.
-    void Run(float camX, float camY, float camZ, bool waterCamera,
-             float reachSq);
+    /// Walks from the camera's chunk, layer cameraChunkY of Reset's center
+    /// column, through the columns within sqrt(reachSq) in XZ of some point
+    /// of that chunk, so the result holds wherever the camera is in it.
+    void Run(int cameraChunkY, bool waterCamera, float reachSq);
     /// World chunks of a column the last Run reached, bit per chunk Y.
     uint8_t Reached(int cx, int cz) const;
 

@@ -196,9 +196,11 @@ down from the open sky above the band. Each run of the graph walks from the came
 chunk, never steps back toward it along an axis, and leaves a chunk only through a face
 that one of its entry faces connects to; the camera skips the chunks the walk never
 reaches (shadows ignore the graph). A camera in water uses `seeThrough` everywhere, and
-covered water within one chunk of open water counts as open. The walk re-runs when the
-camera changes chunk or medium, after an edit, and at most every eight frames while
-streaming; a column meshed since the last run draws all its chunks.
+covered water within one chunk of open water counts as open. The walk covers every column
+within the draw distance of some point of the camera's chunk, so its result holds while
+the camera moves inside that chunk. It re-runs when the camera changes chunk or medium,
+after an edit, and at most every eight frames while streaming; a column meshed since the
+last run draws all its chunks.
 
 ---
 
