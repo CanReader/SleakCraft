@@ -300,8 +300,13 @@ void ChunkRenderer::RenderWater() {
     if (!m_mgr.GetWaterMaterial()) return;
     // Back-to-front draw order for correct transparency.
     m_waterScratch.clear();
-    for (ColumnMesh* col : m_mgr.GetLiveColumns())
-        if (col->visibleChunks != 0) m_waterScratch.push_back(col);
+    for (ColumnMesh* col : m_mgr.GetLiveColumns()) {
+        const StreamRanges& water =
+            col->ranges[static_cast<int>(VoxelStream::Water)];
+        if (col->visibleChunks != 0 &&
+            water.start[0] != water.start[VOXEL_DIR_GROUPS * COLUMN_CHUNKS])
+            m_waterScratch.push_back(col);
+    }
     std::sort(m_waterScratch.begin(), m_waterScratch.end(),
               [](const ColumnMesh* a, const ColumnMesh* b) {
                   return a->distSq > b->distSq;

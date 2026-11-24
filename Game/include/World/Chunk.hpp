@@ -33,6 +33,7 @@ inline constexpr uint16_t FULL_FACE_MASK = 0x7FFF;
 /// vector in (stream, group) order and the quad count of each segment.
 struct ChunkMeshData {
     VoxelVertexBuffer vertices;
+    /// Quads of each (stream, group) segment of vertices, in order.
     uint32_t quads[VOXEL_STREAM_COUNT][VOXEL_DIR_GROUPS] = {};
     float minY = 0.0f;  ///< lowest quad corner in blocks, if any quad
     float maxY = 0.0f;  ///< highest quad corner in blocks, if any quad

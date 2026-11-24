@@ -140,6 +140,7 @@ struct ColumnMesh {
     /// Its entry in ChunkManager::GetColumns.
     ColumnKey key{};
     Sleak::MeshHandle mesh;  ///< every stream, on the shared quad indices
+    /// Quad offsets of each stream's (group, slot) segments in mesh.
     StreamRanges ranges[VOXEL_STREAM_COUNT];
     /// Per band chunk, bottom up.
     ChunkVis chunks[COLUMN_CHUNKS];
