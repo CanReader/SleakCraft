@@ -179,6 +179,20 @@ command for both passes when the two match. The renderer walks the dense list
 `ChunkManager::GetLiveColumns` instead of the column map; `AddColumn` and `EraseColumn`
 keep the two in step.
 
+Cave culling is Minecraft's visibility graph (`ChunkVisibilityGraph`,
+`Game/include/World/ChunkVisibilityGraph.hpp`). `GenerateMeshData` flood-fills each
+chunk's open cells and records which pairs of its six faces they connect, in 15 bits:
+`seeThrough` treats water like air, while `coveredOpen` and `coveredClosed` count water
+as open only under a water surface (the first non-water cell above it is air or leaves),
+assuming air or rock above the chunk. `RebuildColumnMesh` resolves the covered mask top
+down from the open sky above the band. Each run of the graph walks from the camera's
+chunk, never steps back toward it along an axis, and leaves a chunk only through a face
+that one of its entry faces connects to; the camera skips the chunks the walk never
+reaches (shadows ignore the graph). A camera in water uses `seeThrough` everywhere, and
+covered water within one chunk of open water counts as open. The walk re-runs when the
+camera changes chunk or medium, after an edit, and at most every eight frames while
+streaming; a column meshed since the last run draws all its chunks.
+
 ---
 
 ## 4. The Heightmap Cache

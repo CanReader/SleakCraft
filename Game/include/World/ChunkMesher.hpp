@@ -17,6 +17,8 @@ class ChunkManager;
 inline constexpr int BAND_SIZE = 8;
 /// Chunk slots of a column buffer, one per chunk of its band.
 inline constexpr int COLUMN_CHUNKS = BAND_SIZE;
+/// Every chunk of a column, bit per band chunk.
+inline constexpr uint8_t ALL_COLUMN_CHUNKS = (1u << COLUMN_CHUNKS) - 1;
 
 /// Band chunk of a slot in a direction group: the face directions run
 /// top-down (surface before caves), the always-kept group bottom-up (back to
@@ -81,11 +83,20 @@ constexpr uint8_t FacingGroups(float cx, float cy, float cz, float x0, float y0,
     return groups;
 }
 
-/// Culling data of one chunk of a column.
+/// Culling data of one chunk of a column; unmeshed chunks read as air.
 struct ChunkVis {
-    float minY = 0.0f;      ///< lowest quad corner in blocks
-    float maxY = 0.0f;      ///< highest quad corner in blocks
-    bool hasQuads = false;  ///< drawn from the column buffer
+    /// Lowest quad corner in blocks.
+    float minY = 0.0f;
+    /// Highest quad corner in blocks.
+    float maxY = 0.0f;
+    /// Face pairs its open cells link, water like air.
+    uint16_t seeThrough = FULL_FACE_MASK;
+    /// Face pairs its open cells link, covered water closed.
+    uint16_t covered = FULL_FACE_MASK;
+    /// Drawn from the column buffer.
+    bool hasQuads = false;
+    /// Holds water under air.
+    bool openWater = false;
 };
 
 /// Floor-division: negative cy must map downward (e.g. cy=-1 -> band -1, not 0)
@@ -123,6 +134,9 @@ struct ColumnMesh {
     bool castsShadow = true;
     /// Band chunks the camera draws this frame, bit per chunk.
     uint8_t visibleChunks = 0;
+    /// Band chunks the last visibility graph run reached; all of them
+    /// until a run follows the rebuild.
+    uint8_t reachableChunks = ALL_COLUMN_CHUNKS;
     Sleak::Math::AABB bounds;
     std::vector<Sleak::Math::AABB> occluders;
     float distSq = 0.0f;

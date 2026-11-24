@@ -1,4 +1,5 @@
 #include "World/Chunk.hpp"
+#include "World/ChunkVisibilityGraph.hpp"
 #include "World/WorldGenerator.hpp"
 #include <Core/GameObject.hpp>
 #include <Core/SceneBase.hpp>
@@ -371,6 +372,7 @@ void Chunk::GenerateMeshData() {
         if (i == 0 || y < md.minY) md.minY = y;
         if (i == 0 || y > md.maxY) md.maxY = y;
     }
+    m_visibility = ComputeChunkVisibility(m_blocks);
     m_hasPendingMesh = true;
 
     // Publish occluder runs alongside the mesh data

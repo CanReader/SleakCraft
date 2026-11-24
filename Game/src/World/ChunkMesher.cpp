@@ -1,5 +1,6 @@
 #include "World/ChunkMesher.hpp"
 #include "World/ChunkManager.hpp"
+#include "World/ChunkVisibilityGraph.hpp"
 #include "World/QuadIndexBuffer.hpp"
 #include <Runtime/Material.hpp>
 #include <Runtime/MeshBatch.hpp>
@@ -70,8 +71,26 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
         if (md.vertices.GetSize() > 0) {
             if (md.minY < meshMinY) meshMinY = md.minY;
             if (md.maxY > meshMaxY) meshMaxY = md.maxY;
-            vis[cy - bandMinY] = {md.minY, md.maxY, true};
+            vis[cy - bandMinY].minY = md.minY;
+            vis[cy - bandMinY].maxY = md.maxY;
+            vis[cy - bandMinY].hasQuads = true;
         }
+    }
+
+    // Covered water, top down from the open sky above the band
+    static_assert(COLUMN_CHUNKS == ChunkVisibilityGraph::WORLD_LAYERS);
+    Chunk::Columns openAbove;
+    openAbove.set();
+    for (int k = COLUMN_CHUNKS - 1; k >= 0; --k) {
+        // Unknown chunks pass open on: a superset of the true links
+        if (!ready[k]) {
+            openAbove.set();
+            continue;
+        }
+        const Chunk::Visibility& chunkVis = ready[k]->GetVisibility();
+        vis[k].seeThrough = chunkVis.seeThrough;
+        vis[k].covered =
+            ResolveCoveredWater(chunkVis, openAbove, vis[k].openWater);
     }
 
     // Where each (stream, group) segment starts in its chunk's vector
@@ -114,6 +133,8 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
         chunk->GetPendingMeshData().vertices.release();
     }
 
+    // Edits re-run the visibility graph next frame, streaming within a few
+    m_mgr.MarkGraphDirty(!allowDefer);
     if (mergedVerts.GetSize() == 0) {
         m_mgr.EraseColumn(key);
         return;
@@ -135,6 +156,7 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
     col.mesh = std::move(mesh);
     for (int s = 0; s < VOXEL_STREAM_COUNT; ++s) col.ranges[s] = ranges[s];
     for (int k = 0; k < COLUMN_CHUNKS; ++k) col.chunks[k] = vis[k];
+    col.reachableChunks = ALL_COLUMN_CHUNKS;
 
     // Column world AABB (16x16 XZ footprint, exact mesh Y extent).
     float minX = static_cast<float>(cx * Chunk::SIZE);

@@ -4,6 +4,7 @@
 #include "Block.hpp"
 #include "VoxelVertex.hpp"
 #include <atomic>
+#include <bitset>
 #include <cstdint>
 #include <cstring>
 #include <Memory/RefPtr.hpp>
@@ -24,6 +25,8 @@ inline constexpr int VOXEL_DIR_GROUPS = BLOCK_FACE_COUNT + 1;
 /// Group of the faces never culled by direction: two-sided water, and
 /// alpha-tested leaves, whose back faces OpenGL draws.
 inline constexpr int VOXEL_GROUP_ALWAYS = BLOCK_FACE_COUNT;
+/// Face-pair mask with every pair of faces connected: a chunk hiding nothing.
+inline constexpr uint16_t FULL_FACE_MASK = 0x7FFF;
 
 /// Quads produced by GenerateMeshData, staged for the column merge: one
 /// vector in (stream, group) order and the quad count of each segment.
@@ -42,6 +45,30 @@ class Chunk {
 public:
     static constexpr int SIZE = 16;
     static constexpr int VOLUME = SIZE * SIZE * SIZE;
+    /// One bit per (x, z) column of the chunk, at x + z * SIZE.
+    using Columns = std::bitset<SIZE * SIZE>;
+
+    /// Face pairs the chunk's open cells connect, and the covered-water
+    /// inputs its column merge resolves. Water counts as open only under a
+    /// water surface (the first non-water cell above it is air or leaves);
+    /// leaves are always open.
+    struct Visibility {
+        /// Water like air.
+        uint16_t seeThrough = FULL_FACE_MASK;
+        /// Covered water closed, water reaching the top layer open.
+        uint16_t coveredOpen = FULL_FACE_MASK;
+        /// Covered water and water reaching the top layer closed.
+        uint16_t coveredClosed = FULL_FACE_MASK;
+        /// Some water lies under air or leaves inside the chunk.
+        bool openWater = false;
+        /// Columns with water in the top layer.
+        Columns waterTop;
+        /// Columns whose lowest non-water cell is air or leaves.
+        Columns downOpen;
+        /// Columns whose lowest non-water cell is opaque; in neither set,
+        /// the column is all water.
+        Columns downClosed;
+    };
 
     /// Constructs an all-air chunk at the given chunk-space coordinate.
     Chunk(int cx, int cy, int cz);
@@ -103,6 +130,8 @@ public:
     void SetActiveIndex(int idx) { m_activeIndex = idx; }
 
     ChunkMeshData& GetPendingMeshData() { return m_pendingMesh; }
+    /// Connectivity published with the mesh data.
+    const Visibility& GetVisibility() const { return m_visibility; }
 
     /// All contiguous runs (>= 4 layers) of fully-opaque horizontal
     /// layers per 8x8 XZ quadrant (q = (x>=8) + 2*(z>=8)), ascending,
@@ -139,6 +168,7 @@ private:
     bool m_meshBuilt = false;
     bool m_addedToScene = false;
     ChunkMeshData m_pendingMesh;
+    Visibility m_visibility;
     bool m_hasPendingMesh = false;
     bool m_inFlight = false;
     bool m_dirty = false;

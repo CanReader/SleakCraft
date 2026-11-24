@@ -5,6 +5,7 @@
 #include <Runtime/Material.hpp>
 #include <Runtime/MeshBatch.hpp>
 #include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -68,9 +69,55 @@ void SubmitRanges(const Sleak::MeshHandle& mesh,
     if (!shadow.empty()) draw(shadow, Sleak::MeshPasses::Shadow);
 }
 
+/// Block coordinate holding a world coordinate.
+int BlockOf(float v) { return static_cast<int>(std::floor(v)); }
+
+/// Chunk coordinate holding a world coordinate.
+int ChunkOf(float v) {
+    return static_cast<int>(std::floor(v / static_cast<float>(Chunk::SIZE)));
+}
+
 }  // namespace
 
+void ChunkRenderer::UpdateGraph() {
+    ++m_frame;
+    const auto& cam = Sleak::Camera::GetMainCameraPosition();
+    const std::array<int, 3> chunk = {ChunkOf(cam.GetX()), ChunkOf(cam.GetY()),
+                                      ChunkOf(cam.GetZ())};
+    // An eye in water sees through all water
+    const bool water = IsBlockWater(m_mgr.GetBlockAt(
+        BlockOf(cam.GetX()), BlockOf(cam.GetY()), BlockOf(cam.GetZ())));
+    const bool due =
+        m_graphDirty && m_frame - m_graphFrame >= GRAPH_REFRESH_FRAMES;
+    if (chunk == m_graphChunk && water == m_graphWater && !m_graphUrgent &&
+        !due)
+        return;
+
+    m_graph.Reset(chunk[0], chunk[2], m_mgr.GetRenderDistance());
+    for (const ColumnMesh* col : m_mgr.GetLiveColumns()) {
+        for (int k = 0; k < COLUMN_CHUNKS; ++k) {
+            ChunkVisibilityGraph::Cell* cell = m_graph.At(
+                col->key.x, col->key.yBand * BAND_SIZE + k, col->key.z);
+            if (!cell) break;
+            const ChunkVis& vis = col->chunks[k];
+            *cell = {vis.seeThrough, vis.covered, vis.openWater};
+        }
+    }
+    m_graph.Run(cam.GetX(), cam.GetY(), cam.GetZ(), water,
+                m_mgr.GetDrawDistSq());
+    for (ColumnMesh* col : m_mgr.GetLiveColumns())
+        col->reachableChunks = m_graph.Reached(col->key.x, col->key.z);
+
+    m_graphChunk = chunk;
+    m_graphWater = water;
+    m_graphFrame = m_frame;
+    m_graphDirty = false;
+    m_graphUrgent = false;
+}
+
 void ChunkRenderer::UpdateVisibility() {
+    UpdateGraph();
+
     const auto& camPos = Sleak::Camera::GetMainCameraPosition();
     float camX = camPos.GetX();
     float camZ = camPos.GetZ();
@@ -80,7 +127,8 @@ void ChunkRenderer::UpdateVisibility() {
     };
     const bool wantOccluders = Sleak::CullingSystem::OccludersWanted();
 
-    // Chunks the camera draws: frustum against each chunk's exact box
+    // Chunks the camera draws: reached by the graph, frustum against each
+    // chunk's exact box
     const Sleak::ViewFrustum& frustum = Sleak::Camera::GetMainViewFrustum();
     const bool frustumOn = Sleak::CullingSystem::IsFrustumCullingEnabled();
     auto markChunks = [&](ColumnMesh& col) {
@@ -88,7 +136,7 @@ void ChunkRenderer::UpdateVisibility() {
         const float z0 = col.bounds.min.GetZ();
         for (int k = 0; k < COLUMN_CHUNKS; ++k) {
             const ChunkVis& chunk = col.chunks[k];
-            if (!chunk.hasQuads) continue;
+            if (!chunk.hasQuads || !(col.reachableChunks >> k & 1)) continue;
             if (frustumOn &&
                 !frustum.IsAABBVisible(
                     Sleak::Math::Vector3D(x0, chunk.minY, z0),

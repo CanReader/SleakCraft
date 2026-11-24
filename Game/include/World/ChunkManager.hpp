@@ -147,6 +147,9 @@ public:
     ColumnMesh& AddColumn(const ColumnKey& key);
     /// Removes the column mesh of a key, if any.
     void EraseColumn(const ColumnKey& key);
+    /// Columns changed: urgent re-runs the visibility graph next frame,
+    /// otherwise it re-runs within a few frames.
+    void MarkGraphDirty(bool urgent) { m_renderer.MarkGraphDirty(urgent); }
     /// Bands awaiting a rebuild; the mesher re-inserts deferred keys here.
     ColumnKeySet& GetDirtyColumns() { return m_dirtyColumns; }
     /// Worker task queue and its guards, for batch mesh dispatch.

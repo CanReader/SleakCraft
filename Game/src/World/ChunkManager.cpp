@@ -35,6 +35,7 @@ void ChunkManager::EraseColumn(const ColumnKey& key) {
 }
 
 ColumnMeshMap::iterator ChunkManager::EraseColumn(ColumnMeshMap::iterator it) {
+    MarkGraphDirty(false);
     // Swap-remove from the live list
     ColumnMesh* last = m_liveColumns.back();
     last->liveIndex = it->second.liveIndex;
@@ -44,6 +45,7 @@ ColumnMeshMap::iterator ChunkManager::EraseColumn(ColumnMeshMap::iterator it) {
 }
 
 void ChunkManager::ClearColumns() {
+    MarkGraphDirty(true);
     m_liveColumns.clear();
     m_columns.clear();
 }
@@ -183,6 +185,7 @@ void ChunkManager::SetRenderDistance(int chunks) {
 
     m_lastCenterX = INT_MAX;
     BuildLoadSpiral();
+    MarkGraphDirty(true);
 }
 
 void ChunkManager::Initialize(Sleak::SceneBase* scene, const Sleak::RefPtr<Sleak::Material>& material) {
