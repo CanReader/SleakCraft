@@ -183,9 +183,9 @@ An empty stem is not a fallback to a default shader; it skips that pass for the 
 entirely, and a stem that fails to compile is logged as an error, not silently
 substituted. `VertexFormatRegistry::Register` returns a `VertexFormatHandle` (a plain
 `uint32_t`; `0` is the engine's built-in default vertex, registered formats start at
-`1`). Shader stems are consumed by the Vulkan backend only: OpenGL binds a registered
-layout's attributes to its own fixed shader programs instead, which is why
-`Game/assets/shaders` has no `_gl` variant of `gbuffer_voxel` or `shadow_depth_voxel`.
+`1`). OpenGL reads a stem only where its `<stem>_gl.vert` variant exists; otherwise
+that pass keeps the engine's own program. SleakCraft ships `_gl` variants of all four
+voxel stems.
 
 SleakCraft is the sole consumer of this API. It owns `VoxelVertex`
 (`Game/include/World/VoxelVertex.hpp`), a packed 16-byte struct: X and Z as fixed-point
