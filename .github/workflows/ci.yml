@@ -306,6 +306,19 @@ jobs:
             --include-dir Game/assets/shaders/include \
             --check CraftFrameData:craft/frame.glsl:CraftFrameUBO
 
+      - name: Voxel vertex layout matches its shader decode
+        working-directory: SleakCraft
+        run: |
+          python3 Engine/scripts/check_ubo_layout.py \
+            --header Game/include/World/VoxelVertex.hpp \
+            --include-dir Engine/assets/shaders/include \
+            --include-dir Game/assets/shaders/include \
+            --constant VOXEL_Y_BITS:craft/voxel_vertex.glsl:CRAFT_VOXEL_Y_BITS \
+            --constant VOXEL_FACE_SHIFT:craft/voxel_vertex.glsl:CRAFT_VOXEL_FACE_SHIFT \
+            --constant VOXEL_CORNER_SHIFT:craft/voxel_vertex.glsl:CRAFT_VOXEL_CORNER_SHIFT \
+            --constant VOXEL_AO_SHIFT:craft/voxel_vertex.glsl:CRAFT_VOXEL_AO_SHIFT \
+            --constant VOXEL_TILE_BITS:craft/voxel_vertex.glsl:CRAFT_VOXEL_TILE_BITS
+
   # Compiling proves nothing about whether the game runs. Runners have no GPU,
   # but Mesa's software Vulkan (lavapipe) plus a virtual display is enough to
   # boot the real binary into a real world and catch startup crashes, missing
