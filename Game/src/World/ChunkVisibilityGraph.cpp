@@ -5,9 +5,9 @@
 
 namespace {
 
-constexpr int SIZE = Chunk::SIZE;
+constexpr int EDGE = Chunk::SIZE;
 // Cells in one horizontal layer of a chunk
-constexpr int LAYER = SIZE * SIZE;
+constexpr int LAYER = EDGE * EDGE;
 
 // Grid layer = chunk Y
 static_assert(WorldGenerator::MIN_CHUNK_Y == 0);
@@ -31,11 +31,11 @@ constexpr uint8_t FaceBit(BlockFace face) {
 /// Faces of the chunk a cell lies on.
 uint8_t CellFaces(int x, int y, int z) {
     uint8_t faces = 0;
-    if (y == SIZE - 1) faces |= FaceBit(BlockFace::Top);
+    if (y == EDGE - 1) faces |= FaceBit(BlockFace::Top);
     if (y == 0) faces |= FaceBit(BlockFace::Bottom);
-    if (z == SIZE - 1) faces |= FaceBit(BlockFace::North);
+    if (z == EDGE - 1) faces |= FaceBit(BlockFace::North);
     if (z == 0) faces |= FaceBit(BlockFace::South);
-    if (x == SIZE - 1) faces |= FaceBit(BlockFace::East);
+    if (x == EDGE - 1) faces |= FaceBit(BlockFace::East);
     if (x == 0) faces |= FaceBit(BlockFace::West);
     return faces;
 }
@@ -51,7 +51,7 @@ uint16_t FaceConnectivity(const ChunkCells& open) {
     for (int seed = 0; seed < Chunk::VOLUME && mask != FULL_FACE_MASK; ++seed) {
         // Only components that touch a face can connect faces
         if (!open[seed] || seen[seed] ||
-            CellFaces(seed % SIZE, seed / LAYER, seed / SIZE % SIZE) == 0)
+            CellFaces(seed % EDGE, seed / LAYER, seed / EDGE % EDGE) == 0)
             continue;
         uint8_t faces = 0;
         int top = 0;
@@ -59,7 +59,7 @@ uint16_t FaceConnectivity(const ChunkCells& open) {
         stack[top++] = static_cast<uint16_t>(seed);
         while (top > 0) {
             const int i = stack[--top];
-            const int x = i % SIZE, z = i / SIZE % SIZE, y = i / LAYER;
+            const int x = i % EDGE, z = i / EDGE % EDGE, y = i / LAYER;
             faces |= CellFaces(x, y, z);
             auto visit = [&](bool inside, int next) {
                 if (!inside || !open[next] || seen[next]) return;
@@ -67,11 +67,11 @@ uint16_t FaceConnectivity(const ChunkCells& open) {
                 stack[top++] = static_cast<uint16_t>(next);
             };
             visit(x > 0, i - 1);
-            visit(x < SIZE - 1, i + 1);
-            visit(z > 0, i - SIZE);
-            visit(z < SIZE - 1, i + SIZE);
+            visit(x < EDGE - 1, i + 1);
+            visit(z > 0, i - EDGE);
+            visit(z < EDGE - 1, i + EDGE);
             visit(y > 0, i - LAYER);
-            visit(y < SIZE - 1, i + LAYER);
+            visit(y < EDGE - 1, i + LAYER);
         }
         for (int a = 0; a < BLOCK_FACE_COUNT; ++a)
             for (int b = a + 1; b < BLOCK_FACE_COUNT; ++b)
@@ -86,12 +86,12 @@ Chunk::Visibility ComputeChunkVisibility(const uint8_t* blocks) {
     ChunkCells seeThrough, coveredOpen, coveredClosed;
     bool coveredWater = false;  // water under an opaque cell
     bool passWater = false;     // water with only water above it
-    for (int z = 0; z < SIZE; ++z) {
-        for (int x = 0; x < SIZE; ++x) {
+    for (int z = 0; z < EDGE; ++z) {
+        for (int x = 0; x < EDGE; ++x) {
             // First non-water cell above each cell, walking down
             enum class Above { Unknown, Open, Closed } above = Above::Unknown;
-            for (int y = SIZE - 1; y >= 0; --y) {
-                const int i = x + z * SIZE + y * LAYER;
+            for (int y = EDGE - 1; y >= 0; --y) {
+                const int i = x + z * EDGE + y * LAYER;
                 const auto type = static_cast<BlockType>(blocks[i]);
                 if (IsBlockWater(type)) {
                     seeThrough.set(i);
@@ -114,9 +114,9 @@ Chunk::Visibility ComputeChunkVisibility(const uint8_t* blocks) {
                     coveredClosed.set(i);
                 }
             }
-            const int column = x + z * SIZE;
+            const int column = x + z * EDGE;
             vis.waterTop[column] = IsBlockWater(
-                static_cast<BlockType>(blocks[column + (SIZE - 1) * LAYER]));
+                static_cast<BlockType>(blocks[column + (EDGE - 1) * LAYER]));
             vis.downOpen[column] = above == Above::Open;
             vis.downClosed[column] = above == Above::Closed;
         }
@@ -187,9 +187,9 @@ void ChunkVisibilityGraph::Run(int cameraChunkY, bool waterCamera,
     for (int lz = 0; lz < m_width; ++lz) {
         for (int lx = 0; lx < m_width; ++lx) {
             const float gx = static_cast<float>(
-                std::max(std::abs(lx - m_radius) - 1, 0) * SIZE);
+                std::max(std::abs(lx - m_radius) - 1, 0) * EDGE);
             const float gz = static_cast<float>(
-                std::max(std::abs(lz - m_radius) - 1, 0) * SIZE);
+                std::max(std::abs(lz - m_radius) - 1, 0) * EDGE);
             m_inReach[lx + lz * m_width] = gx * gx + gz * gz <= reachSq;
         }
     }
