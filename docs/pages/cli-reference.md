@@ -12,7 +12,7 @@ Flags are parsed by `Sleak::CommandLine::Parse` in `Client/src/main.cpp` and rea
 | `--fullscreen` | | Start in fullscreen. |
 | `-world` | `<name>` | Debug builds only (`Game::Begin`, `#ifdef DEBUG`). Loads the named save if one exists, otherwise creates it; skips the main menu. |
 | `-seed` | `<n>` | Seed for a new world; random if omitted. Ignored when `-world` opens an existing save. |
-| `-rd` | `<n>` | Initial render distance in chunks (default 8). |
+| `-rd` | `<n>` | Initial render distance in chunks (default 8, at most 32). |
 | `-msaa` | `1 \| 2 \| 4 \| 8` | MSAA sample count. |
 | `--vsync` | | Enable VSync on launch. |
 | `--no-vsync` | | Disable VSync on launch. |

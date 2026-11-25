@@ -128,7 +128,6 @@ bool MainScene::Initialize() {
             const std::string rdStr = Sleak::CommandLine::GetValue("-rd");
             int cliRD = rdStr.empty() ? 0 : std::stoi(rdStr);
             int rd = cliRD > 0 ? cliRD : 12;
-            if (rd > 16) rd = 16;
             m_chunkManager.SetRenderDistance(rd);
         }
         m_chunkManager.SetMultithreaded(m_multithreadedLoading);

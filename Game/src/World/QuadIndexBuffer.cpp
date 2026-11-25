@@ -7,7 +7,8 @@
 
 namespace {
 
-// Every face of every block of a column band: the most one stream can hold
+// Every face of every block of a column band: the most one column buffer
+// holds, since each block feeds one stream
 constexpr uint32_t MAX_QUADS = Chunk::VOLUME * BAND_SIZE * BLOCK_FACE_COUNT;
 
 Sleak::MeshHandle s_indices;

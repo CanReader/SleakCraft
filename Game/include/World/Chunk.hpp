@@ -4,8 +4,10 @@
 #include "Block.hpp"
 #include "VoxelVertex.hpp"
 #include <atomic>
+#include <bitset>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <Memory/RefPtr.hpp>
 
 namespace Sleak {
@@ -14,9 +16,27 @@ namespace Sleak {
     class SceneBase;
 }
 
-/// Quads produced by GenerateMeshData, staged for GPU upload.
+/// Streams of a column vertex buffer, in buffer order.
+enum class VoxelStream : uint8_t { Opaque, Water, Count };
+/// Streams a chunk publishes and a column buffer holds.
+inline constexpr int VOXEL_STREAM_COUNT = static_cast<int>(VoxelStream::Count);
+/// Direction groups of a stream: BlockFace order, then the faces direction
+/// culling must keep.
+inline constexpr int VOXEL_DIR_GROUPS = BLOCK_FACE_COUNT + 1;
+/// Group of the faces never culled by direction: two-sided water, and
+/// alpha-tested leaves, whose back faces OpenGL draws.
+inline constexpr int VOXEL_GROUP_ALWAYS = BLOCK_FACE_COUNT;
+/// Face-pair mask with every pair of faces connected: a chunk hiding nothing.
+inline constexpr uint16_t FULL_FACE_MASK = 0x7FFF;
+
+/// Quads produced by GenerateMeshData, staged for the column merge: one
+/// vector in (stream, group) order and the quad count of each segment.
 struct ChunkMeshData {
     VoxelVertexBuffer vertices;
+    /// Quads of each (stream, group) segment of vertices, in order.
+    uint32_t quads[VOXEL_STREAM_COUNT][VOXEL_DIR_GROUPS] = {};
+    float minY = 0.0f;  ///< lowest quad corner in blocks, if any quad
+    float maxY = 0.0f;  ///< highest quad corner in blocks, if any quad
 };
 
 /// One 16x16x16 block of the voxel grid. Owns its block data and produces
@@ -27,6 +47,32 @@ class Chunk {
 public:
     static constexpr int SIZE = 16;
     static constexpr int VOLUME = SIZE * SIZE * SIZE;
+    /// GetMinSurface of a chunk WorldGenerator never filled.
+    static constexpr int NO_SURFACE = std::numeric_limits<int>::min();
+    /// One bit per (x, z) column of the chunk, at x + z * SIZE.
+    using Columns = std::bitset<SIZE * SIZE>;
+
+    /// Face pairs the chunk's open cells connect, and the covered-water
+    /// inputs its column merge resolves. Water counts as open only under a
+    /// water surface (the first non-water cell above it is air or leaves);
+    /// leaves are always open.
+    struct Visibility {
+        /// Water like air.
+        uint16_t seeThrough = FULL_FACE_MASK;
+        /// Covered water closed, water reaching the top layer open.
+        uint16_t coveredOpen = FULL_FACE_MASK;
+        /// Covered water and water reaching the top layer closed.
+        uint16_t coveredClosed = FULL_FACE_MASK;
+        /// Some water lies under air or leaves inside the chunk.
+        bool openWater = false;
+        /// Columns with water in the top layer.
+        Columns waterTop;
+        /// Columns whose lowest non-water cell is air or leaves.
+        Columns downOpen;
+        /// Columns whose lowest non-water cell is opaque; in neither set,
+        /// the column is all water.
+        Columns downClosed;
+    };
 
     /// Constructs an all-air chunk at the given chunk-space coordinate.
     Chunk(int cx, int cy, int cz);
@@ -40,9 +86,9 @@ public:
     /// the boundary; pass nullptr to unlink.
     void SetNeighbor(BlockFace face, Chunk* chunk);
 
-    /// Face-culls the block data into m_pendingMesh/m_pendingWaterMesh with
-    /// per-vertex ambient occlusion, and extracts the per-quadrant occluder
-    /// runs. CPU-only; does not touch the GPU or scene.
+    /// Face-culls the block data into m_pendingMesh with per-vertex ambient
+    /// occlusion, and extracts the per-quadrant occluder runs. CPU-only;
+    /// does not touch the GPU or scene.
     void GenerateMeshData();
     void AddToScene(Sleak::SceneBase* scene);
     void RemoveFromScene(Sleak::SceneBase* scene);
@@ -84,13 +130,23 @@ public:
         m_needsGeneration.store(v, std::memory_order_release);
     }
 
+    /// Lowest noise surface height over the chunk's columns, set by
+    /// WorldGenerator::Generate; NO_SURFACE for restored or edit-made chunks.
+    int GetMinSurface() const { return m_minSurface; }
+    /// Records the lowest noise surface height of the chunk's columns.
+    void SetMinSurface(int height) { m_minSurface = height; }
+    /// True once a block was set or the chunk was restored from a save: its
+    /// blocks may leave the noise surface. Main thread only, never saved.
+    bool IsEdited() const { return m_edited; }
+    /// Marks the chunk edited for the rest of its life.
+    void SetEdited() { m_edited = true; }
+
     int GetActiveIndex() const { return m_activeIndex; }
     void SetActiveIndex(int idx) { m_activeIndex = idx; }
 
     ChunkMeshData& GetPendingMeshData() { return m_pendingMesh; }
-    ChunkMeshData& GetPendingWaterMeshData() { return m_pendingWaterMesh; }
-    bool HasPendingWaterMesh() const { return m_hasPendingWaterMesh; }
-    void ClearPendingWaterMesh() { m_hasPendingWaterMesh = false; }
+    /// Connectivity published with the mesh data.
+    const Visibility& GetVisibility() const { return m_visibility; }
 
     /// All contiguous runs (>= 4 layers) of fully-opaque horizontal
     /// layers per 8x8 XZ quadrant (q = (x>=8) + 2*(z>=8)), ascending,
@@ -127,14 +183,15 @@ private:
     bool m_meshBuilt = false;
     bool m_addedToScene = false;
     ChunkMeshData m_pendingMesh;
-    ChunkMeshData m_pendingWaterMesh;
+    Visibility m_visibility;
     bool m_hasPendingMesh = false;
-    bool m_hasPendingWaterMesh = false;
     bool m_inFlight = false;
     bool m_dirty = false;
     bool m_needsRebuild = false;
     std::atomic<bool> m_needsGeneration{true};
     int m_activeIndex = -1;
+    int m_minSurface = NO_SURFACE;
+    bool m_edited = false;
     int8_t m_occRunMinY[4][OCC_MAX_RUNS] = {
         {-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}};
     int8_t m_occRunMaxY[4][OCC_MAX_RUNS] = {

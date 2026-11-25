@@ -10,7 +10,7 @@
 /// @ingroup world
 class QuadIndexBuffer {
    public:
-    /// Uploads indices for the most quads one column stream can hold; false
+    /// Uploads indices for the most quads one column buffer can hold; false
     /// if the upload failed.
     static bool Create();
     /// Drops the buffer; meshes made from it keep it until they are released.

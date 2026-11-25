@@ -1,4 +1,5 @@
 #include "World/Chunk.hpp"
+#include "World/ChunkVisibilityGraph.hpp"
 #include "World/WorldGenerator.hpp"
 #include <Core/GameObject.hpp>
 #include <Core/SceneBase.hpp>
@@ -21,6 +22,9 @@ static_assert(WATER_SURFACE_UNITS == WATER_SURFACE_HEIGHT * VOXEL_POS_UNITS);
 constexpr int32_t WORLD_TOP_UNITS =
     (WorldGenerator::MAX_CHUNK_Y + 1) * Chunk::SIZE * VOXEL_POS_UNITS;
 static_assert(WORLD_TOP_UNITS < 1 << (VOXEL_Y_BITS - 1));
+
+// Face buckets of one GenerateMeshData call, per (stream, group)
+thread_local VoxelVertexBuffer t_buckets[VOXEL_STREAM_COUNT][VOXEL_DIR_GROUPS];
 
 }  // namespace
 
@@ -119,7 +123,11 @@ bool Chunk::IsBlockOpaqueAt(int x, int y, int z) const {
 }
 
 void Chunk::GenerateMeshData() {
-    VoxelVertexBuffer vertices;
+    for (auto& stream : t_buckets)
+        for (VoxelVertexBuffer& bucket : stream) bucket.clear();
+    auto bucket = [](VoxelStream stream, int group) -> VoxelVertexBuffer& {
+        return t_buckets[static_cast<int>(stream)][group];
+    };
 
     bool opaque[18][18][18];
     bool solid[18][18][18];
@@ -266,15 +274,16 @@ void Chunk::GenerateMeshData() {
         // Split along the brighter diagonal
         const bool split02 = VOXEL_AO_LEVELS[ao[0]] + VOXEL_AO_LEVELS[ao[2]] >
                              VOXEL_AO_LEVELS[ao[1]] + VOXEL_AO_LEVELS[ao[3]];
-        vertices.AddFace(face, (x + m_cx * SIZE) * VOXEL_POS_UNITS,
-                         (y + m_cy * SIZE) * VOXEL_POS_UNITS,
-                         (z + m_cz * SIZE) * VOXEL_POS_UNITS, VOXEL_POS_UNITS,
-                         ao, GetBlockTextureTile(type, face),
-                         split02 ? VOXEL_QUAD_START_02 : 0);
+        // Leaves show back faces through their holes on OpenGL
+        const int group =
+            IsBlockOpaque(type) ? static_cast<int>(face) : VOXEL_GROUP_ALWAYS;
+        bucket(VoxelStream::Opaque, group)
+            .AddFace(face, (x + m_cx * SIZE) * VOXEL_POS_UNITS,
+                     (y + m_cy * SIZE) * VOXEL_POS_UNITS,
+                     (z + m_cz * SIZE) * VOXEL_POS_UNITS, VOXEL_POS_UNITS, ao,
+                     GetBlockTextureTile(type, face),
+                     split02 ? VOXEL_QUAD_START_02 : 0);
     };
-
-    // Water mesh gets separate buffers
-    VoxelVertexBuffer waterVertices;
 
     // Helper to check if neighbor is water
     auto isWater = [&](int x, int y, int z) -> bool {
@@ -297,12 +306,13 @@ void Chunk::GenerateMeshData() {
     // Water face emitter: lowered top, unoccluded color (its g is the water
     // shader's sky light, open sky until phase 8)
     auto addWaterFace = [&](BlockFace face, int x, int y, int z) {
-        waterVertices.AddFace(face, (x + m_cx * SIZE) * VOXEL_POS_UNITS,
-                              (y + m_cy * SIZE) * VOXEL_POS_UNITS,
-                              (z + m_cz * SIZE) * VOXEL_POS_UNITS,
-                              WATER_SURFACE_UNITS, VOXEL_AO_UNOCCLUDED,
-                              GetBlockTextureTile(BlockType::Water, face),
-                              VOXEL_QUAD_START_02);
+        bucket(VoxelStream::Water, VOXEL_GROUP_ALWAYS)
+            .AddFace(face, (x + m_cx * SIZE) * VOXEL_POS_UNITS,
+                     (y + m_cy * SIZE) * VOXEL_POS_UNITS,
+                     (z + m_cz * SIZE) * VOXEL_POS_UNITS, WATER_SURFACE_UNITS,
+                     VOXEL_AO_UNOCCLUDED,
+                     GetBlockTextureTile(BlockType::Water, face),
+                     VOXEL_QUAD_START_02);
     };
 
     for (int y = 0; y < SIZE; ++y) {
@@ -338,11 +348,32 @@ void Chunk::GenerateMeshData() {
         }
     }
 
-    m_pendingMesh.vertices = std::move(vertices);
-    m_hasPendingMesh = true;
+    // Publish the buckets as one vector in (stream, group) order
+    ChunkMeshData& md = m_pendingMesh;
+    size_t vertexTotal = 0;
+    for (const auto& stream : t_buckets)
+        for (const VoxelVertexBuffer& b : stream) vertexTotal += b.GetSize();
+    md.vertices.clear();
+    md.vertices.Reserve(vertexTotal);
+    for (int s = 0; s < VOXEL_STREAM_COUNT; ++s) {
+        for (int g = 0; g < VOXEL_DIR_GROUPS; ++g) {
+            const VoxelVertexBuffer& b = t_buckets[s][g];
+            md.quads[s][g] =
+                static_cast<uint32_t>(b.GetSize() / VOXEL_QUAD_CORNERS);
+            md.vertices.Append(b.GetData(), b.GetSize());
+        }
+    }
 
-    m_pendingWaterMesh.vertices = std::move(waterVertices);
-    m_hasPendingWaterMesh = true;
+    // Exact Y extent of the quads, for culling boxes
+    md.minY = md.maxY = 0.0f;
+    const VoxelVertex* verts = md.vertices.GetData();
+    for (size_t i = 0; i < vertexTotal; ++i) {
+        const float y = VoxelVertexY(verts[i]);
+        if (i == 0 || y < md.minY) md.minY = y;
+        if (i == 0 || y > md.maxY) md.maxY = y;
+    }
+    m_visibility = ComputeChunkVisibility(m_blocks);
+    m_hasPendingMesh = true;
 
     // Publish occluder runs alongside the mesh data
     for (int q = 0; q < 4; ++q) {
