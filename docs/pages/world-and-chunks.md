@@ -13,7 +13,7 @@ narrative; generation is covered in @ref world-generation and disk format in
 | `Chunk` | One 16x16x16 block volume plus its six neighbor pointers and pending mesh data. |
 | `WorldGenerator` | Fills a chunk from noise; also answers column height questions. |
 | `ChunkMesher` | Merges a Y band of chunk meshes into one `ColumnMesh` and uploads it. |
-| `ColumnMesh` | Merged solid and water handles, bounds, occluders, visibility and shadow flags. |
+| `ColumnMesh` | One buffer of solid and water quads, its range table, bounds, occluders, visibility and shadow flags. |
 | `ChunkRenderer` | Per-frame visibility pass and draw submission for columns and water. |
 | `VoxelQueries` | Raycast and collision against block data, bypassing engine colliders. |
 | `HeightmapCache` | Persists the per-column max filled chunk-Y so generation can be skipped. |
@@ -81,8 +81,11 @@ things, each under its own per-frame budget:
   chunk and queues any missing chunk up to `GetCachedColumnMaxCy(cx, cz)` (the highest
   chunk-Y with generated content for that column, from the heightmap cache described
   below) into `m_pendingLoad`. Chunks that fall outside the render distance are queued
-  into `m_pendingUnload` and drained gradually, with an over-cap safety valve that
-  unloads faster than the backlog can grow.
+  into `m_pendingUnload` and drained gradually, with a safety valve that unloads faster
+  than the backlog can grow while the column meshes hold more than
+  `MESH_VRAM_BUDGET_BYTES` (1.5 GiB) of vertices. `SetRenderDistance` clamps every
+  request, from the CLI, a save or the settings, to `ChunkManager::MAX_RENDER_DISTANCE`
+  (32 chunks).
 - **Generation dispatch**, budgeted by `m_dispatchPerFrame` (default 64 chunks/frame).
 - **Remesh and upload**, budgeted separately by `m_chunksPerFrame` (32, remesh + unload)
   and `m_uploadsPerFrame` (16, column mesh GPU uploads).
@@ -150,15 +153,57 @@ inline int ChunkYToBand(int cy) {
 `BAND_SIZE` currently equals the full 8-chunk world height, so every column merges into
 a single band today; the floor-division form still matters, because it has to map a
 negative `cy` downward (`cy = -1` maps to band `-1`, not `0`) rather than truncating
-toward zero, and must not be simplified. Each `ColumnMesh` holds the merged solid and
-water `Sleak::MeshHandle`s, a visibility flag, a shadow-cast flag (turned off for distant
-columns to skip the shadow pass), an exact-vertex-extent `Sleak::Math::AABB` bounds, and
-the occluder AABBs collected from its chunks. `ColumnMesh::bounds` must stay an exact
-extent: a bounds box that pokes above the real geometry makes every depth test against it
-pass, which defeats occlusion culling while still paying its raster cost. Draw submission
-is `ChunkRenderer::RenderColumns` / `RenderWater`. Meshes upload only vertices: every
+toward zero, and must not be simplified. Each `ColumnMesh` holds one
+`Sleak::MeshHandle` whose buffer carries every stream of the band, a range table per
+stream, a visibility flag, a shadow-cast flag (turned off for distant columns to skip the
+shadow pass), an exact-vertex-extent `Sleak::Math::AABB` bounds, and the occluder AABBs
+collected from its chunks. `ColumnMesh::bounds` must stay an exact extent: a bounds box
+that pokes above the real geometry makes every depth test against it pass, which defeats
+occlusion culling while still paying its raster cost. Meshes upload only vertices: every
 voxel mesh, block effects included, draws through the one quad index buffer
 `QuadIndexBuffer` owns (`Game/include/World/QuadIndexBuffer.hpp`).
+
+The buffer holds the solid stream, then the water stream (`VoxelStream`). Each stream is
+direction-major: seven groups, the six faces in `BlockFace` order and then the faces
+direction culling must keep (all water, which is two-sided, and the alpha-tested leaves,
+whose back faces OpenGL draws through their holes), and inside a group one slot per chunk
+of the band. The six face groups run top-down, so the surface draws before the caves
+under it; the kept group runs bottom-up, back to front for a camera above the water.
+`Chunk::GenerateMeshData` buckets its faces the same way and publishes one vector with
+the quad count of each (stream, group) segment; `RebuildColumnMesh` concatenates the
+segments in buffer order and records where each one starts in `StreamRanges`, so any set
+of chunks and directions is a few contiguous quad ranges. `ChunkRenderer::RenderColumns`
+and `RenderWater` submit them with `Sleak::MeshBatch::DrawRanges`. The camera draws only
+the chunks whose exact box is in the frustum and, per chunk, the directions with a face
+that can face it (`FacingGroups`, which never drops a front face: the GPU would cull the
+rest anyway). Shadow casters, the visible columns inside the light box plus every column
+within 48 m, get their own shadow-only command with every direction of their chunks, or
+one command for both passes when the two match. While the eye is two blocks or more above
+the lowest noise surface of its column, casters skip their buried chunks
+(`ColumnMesh::buriedChunks`): those whose top lies two blocks or more under the lowest
+noise surface of the column and its eight neighbors, which `WorldGenerator::Generate`
+records per chunk. A column holding an edited chunk, or one restored from a save
+(`Chunk::IsEdited`), has no known surface, so it and its neighbors bury nothing. A cave
+floor lit through a cave mouth can lose a few pixels of shadow from that rock;
+underground, every chunk casts. The renderer walks the dense list
+`ChunkManager::GetLiveColumns` instead of the column map; `AddColumn` and `EraseColumn`
+keep the two in step.
+
+Cave culling is Minecraft's visibility graph (`ChunkVisibilityGraph`,
+`Game/include/World/ChunkVisibilityGraph.hpp`). `GenerateMeshData` flood-fills each
+chunk's open cells and records which pairs of its six faces they connect, in 15 bits:
+`seeThrough` treats water like air, while `coveredOpen` and `coveredClosed` count water
+as open only under a water surface (the first non-water cell above it is air or leaves),
+assuming air or rock above the chunk. `RebuildColumnMesh` resolves the covered mask top
+down from the open sky above the band. Each run of the graph walks from the camera's
+chunk, never steps back toward it along an axis, and leaves a chunk only through a face
+that one of its entry faces connects to; the camera skips the chunks the walk never
+reaches (shadows ignore the graph). A camera in water uses `seeThrough` everywhere, and
+covered water within one chunk of open water counts as open. The walk covers every column
+within the draw distance of some point of the camera's chunk, so its result holds while
+the camera moves inside that chunk. It re-runs when the camera changes chunk or medium,
+after an edit, and at most every eight frames while streaming; a column meshed since the
+last run draws all its chunks.
 
 ---
 
@@ -235,8 +280,8 @@ dispatch of an already-queued chunk has to be prevented by checking
 `GetBlockAt` reads it from the main thread to treat a mid-generation chunk
 as air rather than reading half-written block data.
 
-`ChunkMesher::RebuildColumnMesh` releases the old mesh handles before
-allocating the new ones, and when both allocations fail it reports the
+`ChunkMesher::RebuildColumnMesh` releases the old mesh handle before
+allocating the new one, and when the allocation fails it reports the
 condition back through `ChunkManager::SetOOMThisFrame`, which puts the
 column key back on the dirty set for a later frame instead of dropping it.
 

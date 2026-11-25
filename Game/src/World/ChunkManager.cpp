@@ -13,12 +13,48 @@ ChunkManager::ChunkManager() {}
 ChunkManager::~ChunkManager() {
     StopWorkers();
     // MeshHandle GPU buffers are released automatically via RefPtr
-    m_columns.clear();
+    ClearColumns();
     for (Chunk* chunk : m_activeChunks) {
         if (chunk) delete chunk;
     }
     m_activeChunks.clear();
     m_chunkGrid.clear();
+}
+
+ColumnMesh& ChunkManager::AddColumn(const ColumnKey& key) {
+    ColumnMesh& col = m_columns[key];
+    col.key = key;
+    col.liveIndex = static_cast<uint32_t>(m_liveColumns.size());
+    m_liveColumns.push_back(&col);
+    return col;
+}
+
+void ChunkManager::EraseColumn(const ColumnKey& key) {
+    auto it = m_columns.find(key);
+    if (it != m_columns.end()) EraseColumn(it);
+}
+
+ColumnMeshMap::iterator ChunkManager::EraseColumn(ColumnMeshMap::iterator it) {
+    MarkGraphDirty(false);
+    m_meshBytes -= ColumnMeshBytes(it->second);
+    // Swap-remove from the live list
+    ColumnMesh* last = m_liveColumns.back();
+    last->liveIndex = it->second.liveIndex;
+    m_liveColumns[last->liveIndex] = last;
+    m_liveColumns.pop_back();
+    return m_columns.erase(it);
+}
+
+void ChunkManager::ClearColumns() {
+    MarkGraphDirty(true);
+    m_liveColumns.clear();
+    m_columns.clear();
+    m_meshBytes = 0;
+}
+
+void ChunkManager::ReleaseColumnMesh(ColumnMesh& col) {
+    m_meshBytes -= ColumnMeshBytes(col);
+    col.mesh = {};
 }
 
 void ChunkManager::SetMultithreaded(bool enabled) {
@@ -106,6 +142,7 @@ void ChunkManager::WorkerThread() {
 }
 
 void ChunkManager::SetRenderDistance(int chunks) {
+    chunks = std::clamp(chunks, MIN_RENDER_DISTANCE, MAX_RENDER_DISTANCE);
     if (chunks == m_renderDistance) return;
     int oldRD = m_renderDistance;
     SLEAK_INFO("Render distance changed: {} -> {}", oldRD, chunks);
@@ -126,7 +163,7 @@ void ChunkManager::SetRenderDistance(int chunks) {
             if (std::abs(it->first.x - cx) > m_renderDistance ||
                 std::abs(it->first.z - cz) > m_renderDistance) {
                 m_dirtyColumns.erase(it->first);
-                it = m_columns.erase(it);
+                it = EraseColumn(it);
             } else {
                 ++it;
             }
@@ -156,6 +193,7 @@ void ChunkManager::SetRenderDistance(int chunks) {
 
     m_lastCenterX = INT_MAX;
     BuildLoadSpiral();
+    MarkGraphDirty(true);
 }
 
 void ChunkManager::Initialize(Sleak::SceneBase* scene, const Sleak::RefPtr<Sleak::Material>& material) {
@@ -289,6 +327,7 @@ bool ChunkManager::SetBlockAt(int worldX, int worldY, int worldZ, BlockType type
 
     chunk->SetBlock(lx, ly, lz, type);
     chunk->SetDirty(true);
+    chunk->SetEdited();
 
     std::unordered_set<ColumnKey, ColumnKeyHash> affectedColumns;
 
@@ -346,6 +385,7 @@ void ChunkManager::FlushPendingEdits() {
         chunk->SetBlock(floorMod(e.x, Chunk::SIZE), floorMod(e.y, Chunk::SIZE),
                         floorMod(e.z, Chunk::SIZE), e.type);
         chunk->SetDirty(true);
+        chunk->SetEdited();
         chunk->SetNeedsMeshRebuild(true);
         m_chunksNeedingRemesh.insert({cx, cy, cz});
     }
@@ -531,10 +571,9 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
     // Process pending unloads gradually (rate-limited)
     {
         int unloaded = 0;
-        // Over-cap safety valve: drain the backlog faster than it grows
+        // Over-budget safety valve: drain the backlog faster than it grows
         int unloadBudget = m_chunksPerFrame;
-        if (static_cast<int>(m_columns.size()) > MAX_COLUMN_MESHES)
-            unloadBudget *= 4;
+        if (m_meshBytes > MESH_VRAM_BUDGET_BYTES) unloadBudget *= 4;
         std::unordered_set<ColumnKey, ColumnKeyHash> columnsToCheck;
         std::vector<ChunkCoord> deferredUnloads;
         while (unloaded < unloadBudget && !m_pendingUnload.empty()) {
@@ -580,7 +619,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                 if (GetChunk(colKey.x, cy, colKey.z)) { hasChunks = true; break; }
             }
             if (!hasChunks) {
-                m_columns.erase(colKey);
+                EraseColumn(colKey);
                 m_dirtyColumns.erase(colKey);
             } else {
                 // Column still has chunks but lost some — the existing
@@ -588,10 +627,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
                 // and queue a rebuild so the next pass allocates a
                 // smaller buffer.
                 auto it = m_columns.find(colKey);
-                if (it != m_columns.end()) {
-                    it->second.mesh = {};
-                    it->second.waterMesh = {};
-                }
+                if (it != m_columns.end()) ReleaseColumnMesh(it->second);
                 m_dirtyColumns.insert(colKey);
             }
         }
@@ -696,6 +732,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             if (savedIt != m_savedBlockData.end()) {
                 std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                             savedIt->second.data(), 4096);
+                chunk->SetEdited();
                 chunk->SetNeedsGeneration(false);
                 if (m_stashedDirty.erase(coord)) chunk->SetDirty(true);
             }
@@ -832,6 +869,7 @@ void ChunkManager::Update(float playerX, float playerY, float playerZ) {
             if (savedIt != m_savedBlockData.end()) {
                 std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                             savedIt->second.data(), 4096);
+                chunk->SetEdited();
                 if (m_stashedDirty.erase(coord)) chunk->SetDirty(true);
             } else {
                 m_generator.Generate(chunk);
@@ -906,6 +944,7 @@ void ChunkManager::FlushPendingChunks() {
         if (savedIt != m_savedBlockData.end()) {
             std::memcpy(const_cast<uint8_t*>(chunk->GetBlockData()),
                         savedIt->second.data(), 4096);
+            chunk->SetEdited();
             if (m_stashedDirty.erase(coord)) chunk->SetDirty(true);
         } else {
             m_generator.Generate(chunk);
@@ -969,7 +1008,7 @@ void ChunkManager::ForceReload() {
     bool wasMultithreaded = m_multithreaded;
     if (wasMultithreaded) StopWorkers();
 
-    m_columns.clear();
+    ClearColumns();
     m_dirtyColumns.clear();
     m_chunksNeedingRemesh.clear();
 

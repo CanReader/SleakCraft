@@ -1,6 +1,7 @@
 #include "World/WorldGenerator.hpp"
 #include "World/Chunk.hpp"
 #include <cmath>
+#include <limits>
 
 WorldGenerator::WorldGenerator() {
     InitNoises();
@@ -312,6 +313,7 @@ void WorldGenerator::Generate(Chunk* chunk) const {
     maxH += 16;
     if (chunkBaseY > maxH) return;
 
+    int minSurface = std::numeric_limits<int>::max();
     for (int lx = 0; lx < Chunk::SIZE; ++lx) {
         int worldX = chunkBaseX + lx;
         for (int lz = 0; lz < Chunk::SIZE; ++lz) {
@@ -319,6 +321,7 @@ void WorldGenerator::Generate(Chunk* chunk) const {
 
             // Single noise evaluation for both height and biome
             ColumnInfo col = GetColumnInfo(worldX, worldZ);
+            if (col.surfaceHeight < minSurface) minSurface = col.surfaceHeight;
 
             for (int ly = 0; ly < Chunk::SIZE; ++ly) {
                 int worldY = chunkBaseY + ly;
@@ -409,6 +412,7 @@ void WorldGenerator::Generate(Chunk* chunk) const {
             }
         }
     }
+    chunk->SetMinSurface(minSurface);
 
     PlaceTrees(chunk);
 }

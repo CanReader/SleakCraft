@@ -1,5 +1,6 @@
 #include "World/ChunkMesher.hpp"
 #include "World/ChunkManager.hpp"
+#include "World/ChunkVisibilityGraph.hpp"
 #include "World/QuadIndexBuffer.hpp"
 #include <Runtime/Material.hpp>
 #include <Runtime/MeshBatch.hpp>
@@ -13,9 +14,7 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
     int bandMaxY = bandMinY + BAND_SIZE - 1;
 
     VoxelVertexBuffer& mergedVerts = m_mergedVerts;
-    VoxelVertexBuffer& mergedWaterVerts = m_mergedWaterVerts;
     mergedVerts.clear();
-    mergedWaterVerts.clear();
 
     // Dispatch ALL consumed-mesh siblings in one batch so workers re-mesh
     // the band in parallel; dispatching one per attempt serialized a column
@@ -47,11 +46,10 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
     float meshMinY = 1e30f;
     float meshMaxY = -1e30f;
 
-    // Collect ready chunks first so the merged buffers are sized once
-    Chunk* ready[BAND_SIZE];
-    int readyCount = 0;
+    // Collect ready chunks by band slot so the merged buffer is sized once
+    Chunk* ready[COLUMN_CHUNKS] = {};
+    ChunkVis vis[COLUMN_CHUNKS];
     size_t vertexTotal = 0;
-    size_t waterVertexTotal = 0;
     for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
         Chunk* chunk = m_mgr.GetChunk(cx, cy, cz);
         // Skip chunks not ready (in-flight or not yet generated)
@@ -67,57 +65,116 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
             chunk->GenerateMeshData();
         }
 
-        ready[readyCount++] = chunk;
-        vertexTotal += chunk->GetPendingMeshData().vertices.GetSize();
-        waterVertexTotal += chunk->GetPendingWaterMeshData().vertices.GetSize();
-    }
-
-    mergedVerts.Reserve(vertexTotal);
-    mergedWaterVerts.Reserve(waterVertexTotal);
-
-    auto append = [&](ChunkMeshData& md, VoxelVertexBuffer& verts) {
-        const size_t vertexCount = md.vertices.GetSize();
-        if (vertexCount > 0) {
-            const ::VoxelVertex* vdata = md.vertices.GetData();
-            for (size_t i = 0; i < vertexCount; ++i) {
-                const float y = VoxelVertexY(vdata[i]);
-                if (y < meshMinY) meshMinY = y;
-                if (y > meshMaxY) meshMaxY = y;
-            }
-            verts.Append(vdata, vertexCount);
+        ready[cy - bandMinY] = chunk;
+        const ChunkMeshData& md = chunk->GetPendingMeshData();
+        vertexTotal += md.vertices.GetSize();
+        if (md.vertices.GetSize() > 0) {
+            if (md.minY < meshMinY) meshMinY = md.minY;
+            if (md.maxY > meshMaxY) meshMaxY = md.maxY;
+            vis[cy - bandMinY].minY = md.minY;
+            vis[cy - bandMinY].maxY = md.maxY;
+            vis[cy - bandMinY].hasQuads = true;
         }
-        md.vertices.release();
-    };
-
-    for (int i = 0; i < readyCount; ++i) {
-        Chunk* chunk = ready[i];
-        chunk->ClearPendingMesh();
-        append(chunk->GetPendingMeshData(), mergedVerts);
-        chunk->ClearPendingWaterMesh();
-        append(chunk->GetPendingWaterMeshData(), mergedWaterVerts);
     }
 
-    if (mergedVerts.GetSize() == 0 && mergedWaterVerts.GetSize() == 0) {
-        m_mgr.GetColumns().erase(key);
+    // Covered water, top down from the open sky above the band
+    static_assert(COLUMN_CHUNKS == ChunkVisibilityGraph::WORLD_LAYERS);
+    Chunk::Columns openAbove;
+    openAbove.set();
+    for (int k = COLUMN_CHUNKS - 1; k >= 0; --k) {
+        // Unknown chunks pass open on: a superset of the true links
+        if (!ready[k]) {
+            openAbove.set();
+            continue;
+        }
+        const Chunk::Visibility& chunkVis = ready[k]->GetVisibility();
+        vis[k].seeThrough = chunkVis.seeThrough;
+        vis[k].covered =
+            ResolveCoveredWater(chunkVis, openAbove, vis[k].openWater);
+    }
+
+    // Where each (stream, group) segment starts in its chunk's vector
+    uint32_t segStart[COLUMN_CHUNKS][VOXEL_STREAM_COUNT][VOXEL_DIR_GROUPS];
+    for (int k = 0; k < COLUMN_CHUNKS; ++k) {
+        if (!ready[k]) continue;
+        uint32_t quad = 0;
+        for (int s = 0; s < VOXEL_STREAM_COUNT; ++s) {
+            for (int g = 0; g < VOXEL_DIR_GROUPS; ++g) {
+                segStart[k][s][g] = quad;
+                quad += ready[k]->GetPendingMeshData().quads[s][g];
+            }
+        }
+    }
+
+    // One buffer: streams, then groups, then chunk slots
+    StreamRanges ranges[VOXEL_STREAM_COUNT];
+    mergedVerts.Reserve(vertexTotal);
+    for (int s = 0; s < VOXEL_STREAM_COUNT; ++s) {
+        for (int g = 0; g < VOXEL_DIR_GROUPS; ++g) {
+            for (int slot = 0; slot < COLUMN_CHUNKS; ++slot) {
+                ranges[s].start[g * COLUMN_CHUNKS + slot] =
+                    static_cast<uint32_t>(mergedVerts.GetSize() /
+                                          VOXEL_QUAD_CORNERS);
+                const int k = SlotChunk(g, slot);
+                if (!ready[k]) continue;
+                const ChunkMeshData& md = ready[k]->GetPendingMeshData();
+                mergedVerts.Append(md.vertices.GetData() +
+                                       segStart[k][s][g] * VOXEL_QUAD_CORNERS,
+                                   md.quads[s][g] * VOXEL_QUAD_CORNERS);
+            }
+        }
+        ranges[s].start[VOXEL_DIR_GROUPS * COLUMN_CHUNKS] =
+            static_cast<uint32_t>(mergedVerts.GetSize() / VOXEL_QUAD_CORNERS);
+    }
+
+    for (Chunk* chunk : ready) {
+        if (!chunk) continue;
+        chunk->ClearPendingMesh();
+        chunk->GetPendingMeshData().vertices.release();
+    }
+
+    // Edits re-run the visibility graph next frame, streaming within a few
+    m_mgr.MarkGraphDirty(!allowDefer);
+    if (mergedVerts.GetSize() == 0) {
+        m_mgr.EraseColumn(key);
         return;
     }
 
     // Release old GPU buffers BEFORE allocating new ones to reduce peak VRAM.
     auto existingIt = m_mgr.GetColumns().find(key);
-    if (existingIt != m_mgr.GetColumns().end()) {
-        existingIt->second.mesh = {};
-        existingIt->second.waterMesh = {};
-    }
+    if (existingIt != m_mgr.GetColumns().end())
+        m_mgr.ReleaseColumnMesh(existingIt->second);
 
-    ColumnMesh col;
-    if (mergedVerts.GetSize() > 0)
-        col.mesh = QuadIndexBuffer::CreateMesh(mergedVerts);
-    if (mergedWaterVerts.GetSize() > 0)
-        col.waterMesh = QuadIndexBuffer::CreateMesh(mergedWaterVerts);
-
-    if (!col.mesh.IsValid() && !col.waterMesh.IsValid()) {
+    Sleak::MeshHandle mesh = QuadIndexBuffer::CreateMesh(mergedVerts);
+    if (!mesh.IsValid()) {
         m_mgr.SetOOMThisFrame(true);
         return;
+    }
+
+    ColumnMesh& col = existingIt != m_mgr.GetColumns().end()
+                          ? existingIt->second
+                          : m_mgr.AddColumn(key);
+    col.mesh = std::move(mesh);
+    for (int s = 0; s < VOXEL_STREAM_COUNT; ++s) col.ranges[s] = ranges[s];
+    m_mgr.CountColumnMesh(col);
+    for (int k = 0; k < COLUMN_CHUNKS; ++k) col.chunks[k] = vis[k];
+    col.reachableChunks = ALL_COLUMN_CHUNKS;
+    // Generated chunks share the column's noise surface; an edited chunk
+    // makes it unknown, so the column and its neighbors bury nothing
+    bool edited = false;
+    for (int cy = bandMinY; cy <= bandMaxY; ++cy) {
+        const Chunk* chunk = m_mgr.GetChunk(cx, cy, cz);
+        if (chunk && chunk->IsEdited()) edited = true;
+    }
+    if (edited) {
+        // Neighbors drop their buried casters before the next frame draws
+        if (col.minSurface != Chunk::NO_SURFACE) m_mgr.MarkGraphDirty(true);
+        col.minSurface = Chunk::NO_SURFACE;
+        col.buriedChunks = 0;
+    } else {
+        for (Chunk* chunk : ready)
+            if (chunk && chunk->GetMinSurface() != Chunk::NO_SURFACE)
+                col.minSurface = chunk->GetMinSurface();
     }
 
     // Column world AABB (16x16 XZ footprint, exact mesh Y extent).
@@ -170,5 +227,4 @@ void ChunkMesher::RebuildColumnMesh(int cx, int yBand, int cz, bool allowDefer) 
     }
 
     col.visible = true;
-    m_mgr.GetColumns()[key] = std::move(col);
 }
